@@ -1,0 +1,40 @@
+# --- Python / Django (Backend) ---
+# Entorno virtual
+backend/venv/
+backend/env/
+backend/.env
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Base de datos (No querrás subir tu BD de pruebas local)
+backend/*.sqlite3
+
+# Archivos de medios y estáticos locales
+backend/media/
+backend/staticfiles/
+
+
+# --- Node / Frontend ---
+# Dependencias
+frontend/node_modules/
+frontend/.pnp
+.pnp.js
+
+# Construcción (Build)
+frontend/dist/
+frontend/build/
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+
+# --- Varios / Sistema ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
