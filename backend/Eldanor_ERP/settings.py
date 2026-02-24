@@ -33,9 +33,9 @@ INSTALLED_APPS = [
     "axes",
 
     # Local Apps
-    'core.apps.CoreConfig',
-    'presupuestos.apps.PresupuestosConfig',
-    'productos.apps.ProductosConfig',
+    'apps.core.apps.CoreConfig',
+    'apps.presupuestos.apps.PresupuestosConfig',
+    'apps.productos.apps.ProductosConfig',
 ]
 
 # =========================================================
@@ -49,6 +49,7 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "apps.core.middleware.EmpresaMiddleware",
     "axes.middleware.AxesMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
@@ -109,9 +110,14 @@ AUTH_USER_MODEL = "core.User"
 # DJANGO AXES (ANTI BRUTE FORCE)
 # =========================================================
 
+AUTHENTICATION_BACKENDS = [
+    "axes.backends.AxesStandaloneBackend",
+    "django.contrib.auth.backends.ModelBackend",
+]
+
 AXES_FAILURE_LIMIT = 5
 AXES_COOLOFF_TIME = 1  # horas
-AXES_LOCK_OUT_BY_COMBINATION_USER_AND_IP = True
+
 
 # =========================================================
 # DRF CONFIG
