@@ -2,12 +2,31 @@ import uuid
 from django.db import models
 
 
+class PoliticaPrecio(models.TextChoices):
+        FIJO = "fijo", "Precio fijo"
+        EDITABLE = "editable", "Precio editable"
+
+
 class Empresa(models.Model):
+
+    
 
     id = models.UUIDField(
         primary_key=True,
         default=uuid.uuid4,
         editable=False
+    )
+
+    politica_precio = models.CharField(
+        max_length=20,
+        choices=PoliticaPrecio.choices,
+        default=PoliticaPrecio.FIJO
+    )
+
+    margen_minimo = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=0
     )
 
     nombre = models.CharField(max_length=150)

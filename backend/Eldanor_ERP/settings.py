@@ -34,6 +34,7 @@ INSTALLED_APPS = [
 
     # Local Apps
     'apps.core.apps.CoreConfig',
+    'apps.contactos.apps.ContactosConfig',
     'apps.presupuestos.apps.PresupuestosConfig',
     'apps.productos.apps.ProductosConfig',
 ]

@@ -66,5 +66,10 @@ class BaseModel(models.Model):
                 original_empresa_id = self.__class__.all_objects.filter(pk=self.pk).values_list('empresa_id', flat=True).first()
                 if original_empresa_id and str(original_empresa_id) != str(self.empresa_id):
                     raise ValueError("La empresa propietaria no puede ser modificada.")
+                
+        skip_clean = kwargs.pop('skip_clean', False)
+    
+        if not skip_clean:
+            self.full_clean()
 
         super().save(*args, **kwargs)

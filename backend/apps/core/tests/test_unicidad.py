@@ -1,8 +1,8 @@
 import pytest
 from django.test import RequestFactory
-from apps.core.middleware import EmpresaMiddleware
-from apps.core.tenant import get_current_empresa, set_current_empresa, set_current_user
-from apps.core.models import Empresa, ModelPrueba
+from apps.core.tenant import set_current_empresa
+from apps.core.models import Empresa
+from django.core.exceptions import ValidationError
 
 # --- FIXTURES ---
 
@@ -78,7 +78,7 @@ def test_unicidad_cruzada_rut_cliente(db):
     assert cliente_b.pk is not None # Se guardó correctamente
 
     # 3. Intentar duplicar RUT en la MISMA Empresa B (Debe fallar)
-    with pytest.raises(IntegrityError):
+    with pytest.raises(ValidationError):
         Cliente.objects.create(nombre="Cliente B Duplicado", rut="12345-K", empresa=emp_b)
 
 
