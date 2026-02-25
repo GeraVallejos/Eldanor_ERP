@@ -53,3 +53,9 @@ class Contacto(BaseModel):
         if self.rut:
             self.rut = formatear_rut(self.rut)
             validar_rut(self.rut)
+
+    def __str__(self):
+        # Si el RUT existe, lo mostramos, si no, solo el nombre
+        if self.rut:
+            return f"{self.nombre} ({self.rut})"
+        return self.nombre

@@ -41,3 +41,9 @@ class CuentaBancaria(models.Model):
         if self.rut_titular:
             self.rut_titular = formatear_rut(self.rut_titular)
             validar_rut(self.rut_titular)
+
+    def save(self, *args, **kwargs):
+        if self.rut_titular:
+            from apps.core.validators import formatear_rut
+            self.rut_titular = formatear_rut(self.rut_titular)
+        super().save(*args, **kwargs)
