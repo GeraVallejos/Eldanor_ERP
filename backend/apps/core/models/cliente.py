@@ -1,5 +1,5 @@
 from django.db import models
-from core.models import BaseModel
+from apps.core.models import BaseModel
 
 class Cliente(BaseModel):
     # DATOS BÁSICOS
@@ -10,7 +10,7 @@ class Cliente(BaseModel):
         choices=(('persona', 'Persona'), ('empresa', 'Empresa')),
         default='persona'
     )
-    rut = models.CharField(max_length=12, blank=True, null=True, help_text="RUT/DNI")
+    rut = models.CharField(max_length=12, blank=False, null=False, help_text="RUT/DNI")
     
     # CONTACTO
     email = models.EmailField(blank=True, null=True)
