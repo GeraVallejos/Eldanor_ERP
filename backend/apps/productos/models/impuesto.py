@@ -1,6 +1,7 @@
 from django.db import models
 from apps.core.models import BaseModel
 from apps.productos.services.impuesto_validation import clean_impuesto
+from apps.core.validators import normalizar_texto
 
 
 class Impuesto(BaseModel):
@@ -16,8 +17,18 @@ class Impuesto(BaseModel):
     activo = models.BooleanField(default=True)
 
     class Meta:
-        unique_together = ("empresa", "nombre")
-        unique_together = ("empresa", "porcentaje")
+        constraints = [
+            # Regla 1: No repetir nombre en la misma empresa
+            models.UniqueConstraint(
+                fields=['empresa', 'nombre'], 
+                name='unique_nombre_impuesto_por_empresa'
+            ),
+            # Regla 2: No repetir porcentaje en la misma empresa
+            models.UniqueConstraint(
+                fields=['empresa', 'porcentaje'], 
+                name='unique_porcentaje_impuesto_por_empresa'
+            )
+        ]
         indexes = [
             models.Index(fields=["empresa", "nombre"]),
         ]
@@ -26,9 +37,7 @@ class Impuesto(BaseModel):
         clean_impuesto(self)
 
     def save(self, *args, **kwargs):
-        # Normalizamos el nombre: "electrónica" -> "Electrónica"
-        if self.nombre:
-            self.nombre = self.nombre.strip().capitalize()
+        self.nombre = normalizar_texto(self.nombre)
         super().save(*args, **kwargs)
 
     def __str__(self):

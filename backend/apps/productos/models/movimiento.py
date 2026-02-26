@@ -2,8 +2,8 @@ from django.db import models
 from apps.core.models import BaseModel
 
 class TipoMovimiento(models.TextChoices):
-    ENTRADA = "entrada", "Entrada (Compra/Ajuste/Carga Inicial)"
-    SALIDA = "salida", "Salida (Venta/Ajuste/Merma)"
+    ENTRADA = "ENTRADA", "Entrada"
+    SALIDA = "SALIDA", "Salida"
     
 
 class MovimientoInventario(BaseModel):
@@ -40,6 +40,7 @@ class MovimientoInventario(BaseModel):
         verbose_name = "Movimiento de Inventario"
         verbose_name_plural = "Movimientos de Inventario"
         ordering = ["-creado_en"]
+
 
     def __str__(self):
         return f"{self.tipo.upper()} - {self.producto.nombre} ({self.cantidad})"

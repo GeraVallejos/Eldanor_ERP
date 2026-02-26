@@ -1,15 +1,14 @@
 import uuid
 from django.db import models
+from apps.core.validators import formatear_rut, normalizar_texto, validar_rut
 
 
 class PoliticaPrecio(models.TextChoices):
-        FIJO = "fijo", "Precio fijo"
-        EDITABLE = "editable", "Precio editable"
+        FIJO = "FIJO", "Precio Fijo"
+        EDITABLE = "EDITABLE", "Precio Editable"
 
 
 class Empresa(models.Model):
-
-    
 
     id = models.UUIDField(
         primary_key=True,
@@ -40,9 +39,9 @@ class Empresa(models.Model):
     pais = models.CharField(max_length=100, default="Chile")
 
     PLAN_CHOICES = [
-        ("free", "Free"),
-        ("basic", "Basic"),
-        ("pro", "Pro"),
+        ("free", "FREE"),
+        ("basic", "BASIC"),
+        ("pro", "PRO"),
     ]
 
     plan = models.CharField(
@@ -58,6 +57,26 @@ class Empresa(models.Model):
 
     creado_en = models.DateTimeField(auto_now_add=True)
     actualizado_en = models.DateTimeField(auto_now=True)
+
+    def save(self, *args, **kwargs):
+
+        self.nombre = normalizar_texto(self.nombre)
+        self.nombre_legal = normalizar_texto(self.nombre_legal)
+        self.email = normalizar_texto(self.email, es_email=True)
+        self.direccion = normalizar_texto(self.direccion)
+        self.ciudad = normalizar_texto(self.ciudad)
+        self.pais = normalizar_texto(self.pais)
+
+        if self.rut:
+            self.rut = formatear_rut(self.rut)
+        super().save(*args, **kwargs)
+
+    def clean(self):
+        super().clean() 
+
+        if self.rut:
+            self.rut = formatear_rut(self.rut)
+            validar_rut(self.rut)
 
     def __str__(self):
         return self.nombre

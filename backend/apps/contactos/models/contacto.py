@@ -1,11 +1,11 @@
 from django.db import models
 from apps.core.models import BaseModel
-from apps.core.validators import formatear_rut, validar_rut
+from apps.core.validators import formatear_rut, normalizar_texto, validar_rut
 
 
 class Tipo(models.TextChoices):
-        PERSONA = "persona", "Persona"
-        EMPRESA = "empresa", "Empresa"
+        PERSONA = "PERSONA", "Persona Natural"
+        EMPRESA = "EMPRESA", "Empresa"
 
 class Contacto(BaseModel):
 
@@ -43,6 +43,9 @@ class Contacto(BaseModel):
         ordering = ["nombre"]
 
     def save(self, *args, **kwargs):
+        self.nombre = normalizar_texto(self.nombre)
+        self.razon_social = normalizar_texto(self.razon_social)
+        self.email = normalizar_texto(self.email, es_email=True)
         if self.rut:
             self.rut = formatear_rut(self.rut)
         super().save(*args, **kwargs)

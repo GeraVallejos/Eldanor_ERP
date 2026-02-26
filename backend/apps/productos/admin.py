@@ -1,11 +1,12 @@
 from django.contrib import admin
 from django.utils.html import format_html
+from  apps.core.admin import TenantAdminMixin
 from .models.producto import Producto
 from .models.categoria import Categoria
 from .models.impuesto import Impuesto
 from .models.movimiento import MovimientoInventario, TipoMovimiento
 
-class MovimientoInventarioInline(admin.TabularInline):
+class MovimientoInventarioInline(TenantAdminMixin, admin.TabularInline):
     model = MovimientoInventario
     extra = 0
     readonly_fields = ('tipo', 'cantidad', 'stock_anterior', 'stock_nuevo', 'referencia', 'creado_en')
@@ -15,10 +16,11 @@ class MovimientoInventarioInline(admin.TabularInline):
         return False # Los movimientos se crean por Service, no a mano en el inline
 
 @admin.register(Producto)
-class ProductoAdmin(admin.ModelAdmin):
-    list_display = ('nombre', 'sku', 'tipo', 'categoria', 'color_stock', 'activo')
+class ProductoAdmin(TenantAdminMixin, admin.ModelAdmin):
+    list_display = ('nombre', 'sku', 'tipo', 'categoria', 'color_stock', 'activo', 'empresa', 'creado_por')
     list_filter = ('tipo', 'categoria', 'activo')
     search_fields = ('nombre', 'sku')
+    readonly_fields = ('empresa', 'creado_por')
     inlines = [MovimientoInventarioInline]
     
     fieldsets = (
@@ -47,15 +49,18 @@ class ProductoAdmin(admin.ModelAdmin):
     color_stock.short_description = "Stock Actual"
 
 @admin.register(Categoria)
-class CategoriaAdmin(admin.ModelAdmin):
-    list_display = ('nombre', 'empresa')
+class CategoriaAdmin(TenantAdminMixin,admin.ModelAdmin):
+    list_display = ('nombre', 'descripcion', 'activa')
+    readonly_fields = ('empresa', 'creado_por')
 
 @admin.register(Impuesto)
 class ImpuestoAdmin(admin.ModelAdmin):
     list_display = ('nombre', 'porcentaje')
+    readonly_fields = ('empresa', 'creado_por')
 
 @admin.register(MovimientoInventario)
-class MovimientoInventarioAdmin(admin.ModelAdmin):
+class MovimientoInventarioAdmin(TenantAdminMixin,admin.ModelAdmin):
     list_display = ('creado_en', 'producto', 'tipo', 'cantidad', 'stock_nuevo', 'referencia')
     list_filter = ('tipo', 'creado_en')
     search_fields = ('producto__nombre', 'referencia')
+    readonly_fields = ('empresa', 'creado_por')

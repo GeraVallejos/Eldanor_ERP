@@ -1,13 +1,16 @@
+import uuid
 from django.db import models
+from apps.core.validators import normalizar_texto
 
 
 class TipoDireccion(models.TextChoices):
-        FACTURACION = "facturacion", "Facturación"
-        DESPACHO = "despacho", "Despacho"
-        COMERCIAL = "comercial", "Comercial"
+        FACTURACION = "FACTURACION", "Facturación"
+        DESPACHO = "DESPACHO", "Despacho"
+        COMERCIAL = "COMERCIAL", "Comercial"
 
 class Direccion(models.Model):
 
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     contacto = models.ForeignKey(
         "contactos.Contacto",
         on_delete=models.CASCADE,
@@ -20,7 +23,7 @@ class Direccion(models.Model):
     comuna = models.CharField(max_length=100)
     ciudad = models.CharField(max_length=100)
     region = models.CharField(max_length=100, blank=True, null=True)
-    pais = models.CharField(max_length=100, default="Chile")
+    pais = models.CharField(max_length=100, default="CHILE")
 
     class Meta:
         indexes = [
@@ -32,3 +35,10 @@ class Direccion(models.Model):
             name="unique_tipo_direccion_por_contacto"
         )
     ]
+        
+    def save(self, *args, **kwargs):
+        self.direccion = normalizar_texto(self.direccion)
+        self.comuna = normalizar_texto(self.comuna)
+        self.ciudad = normalizar_texto(self.ciudad)
+        self.pais = normalizar_texto(self.pais)
+        super().save(*args, **kwargs)

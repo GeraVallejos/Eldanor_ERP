@@ -11,9 +11,9 @@ def clean_producto(instance):
     Recibe la instancia completa.
     """
 
-    validate_same_empresa(instance.categoria, instance, "categoria")
-    validate_same_empresa(instance.impuesto, instance, "impuesto")
-
+    if instance.empresa_id:
+        validate_same_empresa(instance.categoria, instance, "categoria")
+        validate_same_empresa(instance.impuesto, instance, "impuesto")
     # Validaciones numéricas
     validate_non_negative(instance.precio_costo, "precio costo")
     validate_non_negative(instance.precio_referencia, "precio referencia")

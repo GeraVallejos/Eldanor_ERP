@@ -1,5 +1,6 @@
 from django.db import models
 from apps.core.models import BaseModel
+from apps.core.validators import normalizar_texto
 
 
 class Categoria(BaseModel):
@@ -16,9 +17,8 @@ class Categoria(BaseModel):
         ]
 
     def save(self, *args, **kwargs):
-        # Normalizamos el nombre: "electrónica" -> "Electrónica"
-        if self.nombre:
-            self.nombre = self.nombre.strip().title()
+        self.nombre = normalizar_texto(self.nombre)
+        self.descripcion = normalizar_texto(self.descripcion)
         super().save(*args, **kwargs)
 
     def __str__(self):

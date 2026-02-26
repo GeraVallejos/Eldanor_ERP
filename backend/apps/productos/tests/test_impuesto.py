@@ -19,7 +19,7 @@ class TestImpuesto:
             nombre="IVA",
             porcentaje=Decimal("19.00")
         )
-        assert iva.nombre == "Iva" # Por el capitalize() que pusimos en el save
+        assert iva.nombre == "IVA" # Por el capitalize() que pusimos en el save
         assert iva.porcentaje == Decimal("19.00")
 
     def test_impuesto_no_negativo(self, empresa):
@@ -37,9 +37,25 @@ class TestImpuesto:
             imp.full_clean()
 
     def test_unicidad_impuesto_por_empresa(self, empresa):
-        """No se pueden repetir nombres de impuestos en la misma empresa"""
+        """No se pueden repetir nombres de impuestos en la misma empresa (Case Insensitive por normalización)"""
         set_current_empresa(empresa)
+        
+        # 1. Creamos el primer impuesto
         Impuesto.objects.create(nombre="IVA", porcentaje=19)
         
+        # 2. Intentamos crear un duplicado. 
+        # Usamos full_clean() porque es donde vive la lógica de validación de Django
         with pytest.raises(ValidationError):
-            Impuesto.objects.create(nombre="iva", porcentaje=10)
+            impuesto_duplicado = Impuesto(nombre="iva", porcentaje=10) # En minúsculas para probar normalización
+            impuesto_duplicado.full_clean() 
+            impuesto_duplicado.save()
+
+    def test_unicidad_impuesto_db_level(self, empresa):
+        """Prueba que el sistema no permita nombres duplicados"""
+        set_current_empresa(empresa)
+        Impuesto.objects.create(nombre="RETENCION", porcentaje=10)
+        
+        # Como Django detecta el UniqueConstraint en el momento del .create(),
+        # lanza ValidationError antes de llegar a la base de datos.
+        with pytest.raises(ValidationError):
+            Impuesto.objects.create(nombre="RETENCION", porcentaje=15)

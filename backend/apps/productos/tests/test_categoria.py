@@ -16,10 +16,10 @@ def empresa_b(db):
 class TestCategoria:
 
     def test_normalizacion_nombre(self, empresa_a):
-        """Verifica que '  electrónica  ' se guarde como 'Electrónica'"""
+        """Verifica que '  electrónica  ' se guarde como 'ELECTRÓNICA'"""
         set_current_empresa(empresa_a)
         cat = Categoria.objects.create(nombre="  electrónica  ")
-        assert cat.nombre == "Electrónica"
+        assert cat.nombre == "ELECTRÓNICA"
 
     def test_unicidad_por_empresa(self, empresa_a, empresa_b):
         """Dos empresas pueden tener la misma categoría, pero una no puede repetirla"""

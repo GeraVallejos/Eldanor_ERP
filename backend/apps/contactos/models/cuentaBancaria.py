@@ -1,14 +1,16 @@
+import uuid
 from django.db import models
-from apps.core.validators import formatear_rut, validar_rut
+from apps.core.validators import formatear_rut, normalizar_texto, validar_rut
 
 
 class TipoCuenta(models.TextChoices):
-        CORRIENTE = "corriente", "Cuenta Corriente"
-        VISTA = "vista", "Cuenta Vista"
-        AHORRO = "ahorro", "Cuenta de Ahorro"
+        CORRIENTE = "CORRIENTE", "Cuenta Corriente"
+        VISTA = "VISTA", "Cuenta Vista"
+        AHORRO = "AHORRO", "Cuenta de Ahorro"
 
 class CuentaBancaria(models.Model):
 
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     contacto = models.ForeignKey(
         "contactos.Contacto",
         on_delete=models.CASCADE,
@@ -43,6 +45,12 @@ class CuentaBancaria(models.Model):
             validar_rut(self.rut_titular)
 
     def save(self, *args, **kwargs):
+
+        self.banco = normalizar_texto(self.banco)
+        self.titular = normalizar_texto(self.titular)
+        # El número de cuenta no se pasa a mayúsculas (por si tiene letras), 
+        # pero sí se limpia de espacios
+        self.numero_cuenta = self.numero_cuenta.strip() if self.numero_cuenta else None
         if self.rut_titular:
             from apps.core.validators import formatear_rut
             self.rut_titular = formatear_rut(self.rut_titular)

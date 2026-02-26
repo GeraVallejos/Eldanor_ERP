@@ -42,3 +42,15 @@ def validar_rut_unico_por_modelo(modelo, empresa, rut, instance_id=None):
         if qs.exists():
             nombre_modelo = modelo._meta.verbose_name.capitalize()
             raise ValidationError(f"Este RUT ya está registrado como {nombre_modelo} en esta empresa.")
+        
+def normalizar_texto(valor, es_email=False):
+    if not valor or not isinstance(valor, str):
+        return valor
+    
+    # Limpiar espacios extra: "  juan   perez  " -> "juan perez"
+    limpio = " ".join(valor.split())
+    
+    if es_email:
+        return limpio.lower()
+    
+    return limpio.upper()

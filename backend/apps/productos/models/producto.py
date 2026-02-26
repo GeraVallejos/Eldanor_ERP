@@ -2,11 +2,12 @@ from django.db import models
 from apps.core.models import BaseModel
 from apps.productos.services.producto_validation import clean_producto
 from apps.productos.validators import normalize_sku
+from apps.core.validators import normalizar_texto
 
 
 class TipoProducto(models.TextChoices):
-    PRODUCTO = "producto", "Producto físico"
-    SERVICIO = "servicio", "Servicio"
+    PRODUCTO = "PRODUCTO", "Producto"
+    SERVICIO = "SERVICIO", "Servicio"
 
 
 class Producto(BaseModel):
@@ -76,14 +77,11 @@ class Producto(BaseModel):
         clean_producto(self)
 
     def save(self, *args, **kwargs):
-
-        # 1. Normalizacion de SKU
-        # Se ejecuta justo antes de guardar en la DB.
+        self.nombre = normalizar_texto(self.nombre)
+        self.descripcion = normalizar_texto(self.descripcion)
+        # Normalizacion de SKU
         if self.sku:
             self.sku = normalize_sku(self.sku)
-            
-        if self.nombre:
-            self.nombre = self.nombre.strip()
 
         # Regla estructural antes de validar
         if self.tipo == TipoProducto.SERVICIO:

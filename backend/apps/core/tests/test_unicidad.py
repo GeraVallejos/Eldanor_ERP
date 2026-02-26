@@ -2,6 +2,7 @@ import pytest
 from django.test import RequestFactory
 from apps.core.tenant import set_current_empresa
 from apps.core.models import Empresa
+from apps.contactos.models import Contacto, Cliente
 from django.core.exceptions import ValidationError
 
 # --- FIXTURES ---
@@ -56,30 +57,45 @@ def test_context_leak_entre_peticiones(user_con_empresa, db):
 
 
 @pytest.mark.django_db
-def test_unicidad_cruzada_rut_cliente(db):
+def test_unicidad_cruzada_rut_cliente():
     """
-    Verifica que dos empresas puedan tener un cliente con el mismo RUT,
-    pero una misma empresa no pueda duplicarlo.
+    Verifica que el RUT sea único por empresa a nivel de Contacto,
+    lo que protege indirectamente a los Clientes.
     """
-    from apps.core.models import Empresa, Cliente
-    from apps.core.tenant import set_current_empresa
-    from django.db import IntegrityError
-
-    # 1. Crear Empresa A y su Cliente
-    emp_a = Empresa.objects.create(nombre="Empresa A", rut="1-1", email="a@test.com")
-    set_current_empresa(emp_a)
-    Cliente.objects.create(nombre="Cliente A", rut="12345-K", empresa=emp_a)
-
-    # 2. Crear Empresa B e intentar usar el MISMO RUT (Debe permitirlo)
-    emp_b = Empresa.objects.create(nombre="Empresa B", rut="2-2", email="b@test.com")
-    set_current_empresa(emp_b)
-    cliente_b = Cliente.objects.create(nombre="Cliente B", rut="12345-K", empresa=emp_b)
     
-    assert cliente_b.pk is not None # Se guardó correctamente
+    # 1. Crear Empresa A y su Contacto/Cliente
+    emp_a = Empresa.objects.create(nombre="EMPRESA A", rut="11.111.111-1")
+    set_current_empresa(emp_a)
+    
+    contacto_a = Contacto.objects.create(
+        nombre="CLIENTE A", 
+        rut="12.345.678-K", 
+        empresa=emp_a
+    )
+    Cliente.objects.create(contacto=contacto_a)
 
-    # 3. Intentar duplicar RUT en la MISMA Empresa B (Debe fallar)
+    # 2. Crear Empresa B e intentar usar el MISMO RUT (Debe permitirlo en otra empresa)
+    emp_b = Empresa.objects.create(nombre="EMPRESA B", rut="22.222.222-2")
+    set_current_empresa(emp_b)
+    
+    contacto_b = Contacto.objects.create(
+        nombre="CLIENTE B", 
+        rut="12.345.678-K", 
+        empresa=emp_b
+    )
+    cliente_b = Cliente.objects.create(contacto=contacto_b)
+    
+    assert cliente_b.pk is not None  # Se guardó correctamente en empresa B
+
+    # 3. Intentar duplicar RUT en la MISMA Empresa B (Debe fallar en el Contacto)
     with pytest.raises(ValidationError):
-        Cliente.objects.create(nombre="Cliente B Duplicado", rut="12345-K", empresa=emp_b)
+        # El clean() del modelo Contacto detectará el duplicado antes de llegar a Cliente
+        nuevo_contacto = Contacto(
+            nombre="CLIENTE B DUPLICADO", 
+            rut="12.345.678-K", 
+            empresa=emp_b
+        )
+        nuevo_contacto.full_clean() # Gatilla la validación de unicidad
 
 
 @pytest.mark.django_db
