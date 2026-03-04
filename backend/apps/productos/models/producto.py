@@ -67,7 +67,18 @@ class Producto(BaseModel):
     activo = models.BooleanField(default=True)
 
     class Meta:
-        unique_together = ("empresa", "sku")
+        constraints = [
+            # Regla 1: No repetir nombre en la misma empresa  
+            models.UniqueConstraint(
+                fields=['empresa', 'nombre'], 
+                name='unique_nombre_producto_por_empresa'
+            ),
+            # Regla 2: No repetir SKU en la misma empresa
+            models.UniqueConstraint(
+                fields=['empresa', 'sku'], 
+                name='unique_sku_producto_por_empresa'
+            )
+        ]
         indexes = [
             models.Index(fields=["empresa", "nombre"]),
             models.Index(fields=["empresa", "sku"]),

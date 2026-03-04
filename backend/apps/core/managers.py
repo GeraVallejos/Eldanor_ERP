@@ -17,15 +17,11 @@ class EmpresaQuerySet(models.QuerySet):
         if empresa:
             return self.filter(empresa=empresa)
         
-        # 3. Salvavidas (Contexto manual)
+        # 3. Si el usuario está en el contextvar y tiene empresa asignada, filtramos por esa empresa
         if user and hasattr(user, 'empresa') and user.empresa:
             return self.filter(empresa=user.empresa)
 
-        # 4. CAMBIO CLAVE: 
-        # Si no hay usuario ni empresa en el contexto (CASO DJANGO ADMIN),
-        # devolvemos el queryset completo SIN filtrar.
-        # De esta forma, el TenantAdminMixin puede aplicar su propio filtro:
-        # .filter(empresa=request.user.empresa) sin que el Manager lo bloquee.
+        # 4. Sin empresa ni usuario válido, devolvemos un queryset vacío para evitar fugas de datos
         return self.none()
 
 

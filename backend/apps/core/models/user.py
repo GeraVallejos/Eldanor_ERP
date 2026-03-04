@@ -5,12 +5,6 @@ from apps.core.validators import normalizar_texto
 
 
 
-class RolUsuario(models.TextChoices):
-    OWNER = "OWNER", "Propietario"
-    ADMIN = "ADMIN", "Administrador"
-    VENDEDOR = "VENDEDOR", "Vendedor"
-    CONTADOR = "CONTADOR", "Contador"
-
 class User(AbstractUser):
 
     id = models.UUIDField(
@@ -19,22 +13,13 @@ class User(AbstractUser):
         editable=False
     )
 
-
     email = models.EmailField(unique=True)
 
-    empresa = models.ForeignKey(
+    empresa_activa = models.ForeignKey(
         "core.Empresa",
-        on_delete=models.CASCADE,
-        related_name="usuarios",
         null=True,
-        blank=True
-    )
-
-
-    rol = models.CharField(
-        max_length=20,
-        choices=RolUsuario.choices,
-        default=RolUsuario.VENDEDOR
+        blank=True,
+        on_delete=models.SET_NULL
     )
 
     telefono = models.CharField(max_length=20, blank=True)

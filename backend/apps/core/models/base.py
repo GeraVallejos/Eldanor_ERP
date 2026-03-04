@@ -1,7 +1,6 @@
 import uuid
 from django.db import models
 from django.conf import settings
-
 from ..tenant import get_current_empresa, get_current_user
 from ..managers import EmpresaManager, AllObjectsManager
 

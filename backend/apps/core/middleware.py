@@ -22,11 +22,19 @@ class EmpresaMiddleware:
 
         # 3. Establecer el contexto global
         if user and user.is_authenticated:
-            set_current_user(user)
-            set_current_empresa(getattr(user, 'empresa', None))
-        else:
-            set_current_user(None)
-            set_current_empresa(None)
+    
+            empresa_activa = user.empresa_activa
+
+            if empresa_activa and user.empresas_rel.filter(
+                empresa=empresa_activa,
+                activo=True
+            ).exists():
+                
+                set_current_user(user)
+                set_current_empresa(empresa_activa)
+            else:
+                set_current_user(user)
+                set_current_empresa(None)
 
         # 4. Procesar la petición
         try:
