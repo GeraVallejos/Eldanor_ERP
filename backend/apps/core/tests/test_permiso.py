@@ -2,7 +2,7 @@ import pytest
 from django.contrib.auth import get_user_model
 from apps.core.models import Empresa, UserEmpresa
 from apps.core.roles import RolUsuario
-from apps.core.constantes_permisos import Modulos, Acciones
+from apps.core.permisos.constantes_permisos import Modulos, Acciones
 from apps.presupuestos.services.presupuesto_service import PresupuestoService
 from apps.presupuestos.models.presupuesto import EstadoPresupuesto, Presupuesto
 from apps.productos.models import Producto

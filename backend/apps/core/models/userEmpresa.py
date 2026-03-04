@@ -1,6 +1,6 @@
 from django.conf import settings
 from django.db import models
-from apps.core.models.permisoModulo import PermisoModulo
+from apps.core.permisos.permisoModulo import PermisoModulo
 from django.db import models
 from apps.core.roles import RolUsuario
 

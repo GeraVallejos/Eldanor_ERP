@@ -6,7 +6,7 @@ from apps.productos.models import MovimientoInventario, TipoMovimiento
 from apps.core.services.secuencia_service import SecuenciaService
 from apps.presupuestos.models import Presupuesto, PresupuestoItem, PresupuestoHistorial
 from apps.productos.services.inventario_service import InventarioService
-from apps.core.constantes_permisos import Acciones, Modulos
+from apps.core.permisos.constantes_permisos import Acciones, Modulos
 
 
 class PresupuestoService:

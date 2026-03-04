@@ -1,52 +1,54 @@
 from apps.core.tenant import set_current_empresa, set_current_user
-import json
-from django.core.serializers.json import DjangoJSONEncoder
+from django.core.exceptions import ImproperlyConfigured
 
 class TenantViewSetMixin:
     """
-    Mixin integral para ViewSets que:
-    1. Filtra los datos por la empresa del usuario (Multi-tenancy).
-    2. Setea el contexto global para los Managers de Django.
-    3. Asigna automáticamente Empresa y Creador al guardar.
+    Mixin multi-tenant profesional:
+    - Setea contexto global
+    - Filtra queryset por empresa activa
+    - Autoasigna empresa al crear
     """
-    
+
+    def get_empresa(self):
+        if hasattr(self.request, "_empresa_cache"):
+            return self.request._empresa_cache
+
+        user = self.request.user
+
+        empresa = getattr(user, "empresa_activa", None)
+
+        self.request._empresa_cache = empresa
+        return empresa
+
     def get_queryset(self):
         user = self.request.user
-        # Aseguramos que el contexto esté seteado incluso si el middleware se salta
-        if user.is_authenticated:
-            set_current_user(user)
-            set_current_empresa(getattr(user, 'empresa', None))
 
-        # Es mejor usar self.get_model() o acceder vía queryset original para ser más robusto
-        model = getattr(self, 'model', None) or self.queryset.model
-        
+        if not user.is_authenticated:
+            return self.queryset.none()
+
+        empresa = self.get_empresa()
+
+        # Seteamos contexto global
+        set_current_user(user)
+        set_current_empresa(empresa)
+
+        model = getattr(self, 'model', None)
+        if not model:
+            if not hasattr(self, "queryset"):
+                raise ImproperlyConfigured(
+                    "Debes definir 'queryset' o 'model' en el ViewSet."
+                )
+            model = self.queryset.model
+
+        # Superuser puede ver todo
         if user.is_superuser:
             return model.all_objects.all()
-        
-        return model.objects.all()
 
-    def perform_create(self, serializer):
-        """
-        Al crear un nuevo registro (POST), inyectamos la empresa 
-        y el usuario creador automáticamente.
-        """
-        # Obtenemos los datos del request actual
-        user = self.request.user
-        empresa = getattr(user, 'empresa', None)
+        # 🔥 Aquí está la clave del multi-tenant
+        if not empresa:
+            return model.objects.none()
 
-        # Guardamos el objeto pasando los campos automáticos.
-        # Esto sobrescribe cualquier valor enviado maliciosamente desde el front.
-        serializer.save(
-            empresa=empresa,
-            creado_por=user
-        )
-
-    def perform_update(self, serializer):
-        """
-        Opcional: Aseguramos que durante un PUT/PATCH no se cambie 
-        la empresa accidentalmente.
-        """
-        serializer.save(empresa=getattr(self.request.user, 'empresa', None))
+        return model.objects.filter(empresa=empresa)
 
     
 class AuditDiffMixin:

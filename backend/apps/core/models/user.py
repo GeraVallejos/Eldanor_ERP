@@ -2,7 +2,7 @@ import uuid
 from django.contrib.auth.models import AbstractUser
 from django.db import models
 from apps.core.validators import normalizar_texto
-from apps.core.constantes_permisos import PERMISOS_POR_ROL, ALL
+from apps.core.permisos.constantes_permisos import PERMISOS_POR_ROL, ALL
 
 
 class User(AbstractUser):
