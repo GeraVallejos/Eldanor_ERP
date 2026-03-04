@@ -94,7 +94,7 @@ class TenantAdminMixin:
 @admin.register(User)
 class CustomUserAdmin(TenantAdminMixin, UserAdmin):
     
-    list_display = ("username", "email", "empresa", "is_staff", "is_active")
+    list_display = ("username", "email", "empresa_activa", "is_staff", "is_active")
     
     fieldsets = UserAdmin.fieldsets + (
         ("Información de ERP", {"fields": ("empresa", "rol", "telefono")}),
@@ -129,8 +129,8 @@ class CustomUserAdmin(TenantAdminMixin, UserAdmin):
                 fields = list(content.get('fields', []))
                 
                 # REGLA A: Cambiar 'empresa' por nuestro texto sin link
-                if 'empresa' in fields:
-                    fields[fields.index('empresa')] = 'show_empresa_text'
+                if 'empresa_activa' in fields:
+                    fields[fields.index('empresa_activa')] = 'show_empresa_text'
                 
                 # REGLA B: Eliminar permisos críticos para no-superusers
                 # Quitamos is_superuser, user_permissions y groups

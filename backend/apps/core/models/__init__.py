@@ -1,5 +1,8 @@
 from .empresa import Empresa
-from .user import User, RolUsuario
+from .user import User
 from .base import BaseModel
 from .testModel import ModelPrueba
 from .secuencia import SecuenciaDocumento, TipoDocumento
+from .permisoModulo import PermisoModulo
+from .userEmpresa import UserEmpresa
+from ..roles import RolUsuario

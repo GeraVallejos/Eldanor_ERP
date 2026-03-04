@@ -22,7 +22,7 @@ def user_con_empresa(db, empresa_activa):
         username="testuser", 
         email="test@test.com", 
         password="pass", 
-        empresa=empresa_activa
+        empresa_activa=empresa_activa
     )
 
 # --- TESTS ---

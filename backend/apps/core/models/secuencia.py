@@ -13,7 +13,12 @@ class SecuenciaDocumento(BaseModel):
     ultimo_numero = models.PositiveIntegerField(default=0)
 
     class Meta:
-        unique_together = ("empresa", "tipo_documento")
+        constraints = [
+            models.UniqueConstraint(
+                fields=["empresa", "tipo_documento"],
+                name="secuencia_unica_por_empresa_y_tipo"
+            )
+        ]
 
     def __str__(self):
         return f"{self.empresa} - {self.tipo_documento}"

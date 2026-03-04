@@ -3,6 +3,7 @@ from django.test import RequestFactory
 from apps.core.middleware import EmpresaMiddleware
 from apps.core.tenant import get_current_empresa, set_current_empresa, set_current_user
 from apps.core.models import Empresa, ModelPrueba
+from apps.core.models.userEmpresa import UserEmpresa
 
 # --- FIXTURES ---
 
@@ -16,13 +17,24 @@ def empresa_activa(db):
 @pytest.fixture
 def user_con_empresa(db, empresa_activa):
     from django.contrib.auth import get_user_model
+    from apps.core.models import UserEmpresa
     User = get_user_model()
-    return User.objects.create_user(
-        username="testuser", 
-        email="test@test.com", 
-        password="pass", 
-        empresa=empresa_activa
+
+    user = User.objects.create_user(
+        username="testuser",
+        email="test@test.com",
+        password="pass",
+        empresa_activa=empresa_activa
     )
+
+    UserEmpresa.objects.create(
+        user=user,
+        empresa=empresa_activa,
+        rol="OWNER",
+        activo=True
+    )
+
+    return user
 
 # --- TESTS ---
 
@@ -43,7 +55,7 @@ def test_middleware_setea_empresa_correctamente(user_con_empresa):
     middleware = EmpresaMiddleware(get_response)
     middleware(request)
 
-    assert contexto['empresa'] == user_con_empresa.empresa
+    assert contexto['empresa'] == user_con_empresa.empresa_activa
 
 @pytest.mark.django_db
 def test_prohibir_cambio_de_empresa(empresa_activa):

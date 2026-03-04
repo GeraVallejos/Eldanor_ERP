@@ -18,7 +18,7 @@ def crear_secuencias_empresa(sender, instance, created, **kwargs):
     ]
 
     for tipo in tipos_documento:
-        SecuenciaDocumento.objects.create(
+        SecuenciaDocumento.all_objects.create(
             empresa=instance,
             tipo_documento=tipo,
             ultimo_numero=0

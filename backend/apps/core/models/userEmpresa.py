@@ -2,12 +2,7 @@ from django.conf import settings
 from django.db import models
 from apps.core.models.permisoModulo import PermisoModulo
 from django.db import models
-
-class RolUsuario(models.TextChoices):
-    OWNER = "OWNER", "Propietario"
-    ADMIN = "ADMIN", "Administrador"
-    VENDEDOR = "VENDEDOR", "Vendedor"
-    CONTADOR = "CONTADOR", "Contador"
+from apps.core.roles import RolUsuario
 
 class UserEmpresa(models.Model):
 

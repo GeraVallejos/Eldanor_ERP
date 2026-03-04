@@ -2,7 +2,7 @@ import uuid
 from django.contrib.auth.models import AbstractUser
 from django.db import models
 from apps.core.validators import normalizar_texto
-
+from apps.core.constantes_permisos import PERMISOS_POR_ROL, ALL
 
 
 class User(AbstractUser):
@@ -45,6 +45,37 @@ class User(AbstractUser):
             self.last_name = normalizar_texto(self.last_name)
 
         super().save(*args, **kwargs)
+
+    def get_rol_en_empresa(self, empresa):
+        relacion = self.empresas_rel.filter(
+            empresa=empresa,
+            activo=True
+        ).first()
+
+        if not relacion:
+            return None
+
+        return relacion.rol
+    
+    def tiene_permiso(self, modulo, accion, empresa):
+
+        rol = self.get_rol_en_empresa(empresa)
+
+        if not rol:
+            return False
+
+        permisos = PERMISOS_POR_ROL.get(rol)
+
+        # OWNER absoluto
+        if permisos is ALL:
+            return True
+
+        if not permisos:
+            return False
+
+        acciones_permitidas = permisos.get(modulo, [])
+
+        return accion in acciones_permitidas
 
     def __str__(self):
         # Una representación más amigable para el Admin

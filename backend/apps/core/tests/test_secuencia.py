@@ -9,7 +9,7 @@ def test_creacion_empresa_crea_secuencia():
 
     empresa = Empresa.objects.create(nombre="Empresa Test")
 
-    secuencia = SecuenciaDocumento.objects.filter(
+    secuencia = SecuenciaDocumento.all_objects.filter(
         empresa=empresa,
         tipo_documento="PRESUPUESTO"
     ).first()

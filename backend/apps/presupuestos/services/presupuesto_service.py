@@ -1,24 +1,15 @@
 from django.db import transaction
 from django.db.models import Max
 from rest_framework.exceptions import ValidationError
-from apps.core.models import RolUsuario
 from apps.presupuestos.models import EstadoPresupuesto
 from apps.productos.models import MovimientoInventario, TipoMovimiento
 from apps.core.services.secuencia_service import SecuenciaService
 from apps.presupuestos.models import Presupuesto, PresupuestoItem, PresupuestoHistorial
 from apps.productos.services.inventario_service import InventarioService
+from apps.core.constantes_permisos import Acciones, Modulos
 
 
 class PresupuestoService:
-
-    ROLES_PERMITIDOS_ELIMINAR = [
-        RolUsuario.ADMIN,
-        RolUsuario.OWNER,
-    ]
-
-    # ===============================
-    # Helpers
-    # ===============================
 
     @staticmethod
     def _es_ultimo_folio(presupuesto):
@@ -68,6 +59,9 @@ class PresupuestoService:
     @transaction.atomic
     def crear_presupuesto(data, empresa, usuario):
 
+        if not usuario.tiene_permiso(Modulos.PRESUPUESTOS, Acciones.CREAR, empresa):
+            raise ValidationError("No tiene permisos para crear presupuestos.")
+
         numero = SecuenciaService.obtener_siguiente_numero(
             empresa=empresa,
             tipo_documento="PRESUPUESTO"
@@ -94,6 +88,9 @@ class PresupuestoService:
         
         if presupuesto.estado != EstadoPresupuesto.BORRADOR:
             raise ValidationError(f"Solo se pueden aprobar presupuestos en estado Borrador.")
+        
+        if not usuario.tiene_permiso(Modulos.PRESUPUESTOS, Acciones.APROBAR, empresa):
+            raise ValidationError("No tiene permisos para aprobar presupuestos.")
 
         # 3. Capturar cambios para el historial usando el Mixin
         # Seteamos el nuevo estado temporalmente en la instancia para que el Mixin vea la diferencia
@@ -133,8 +130,9 @@ class PresupuestoService:
             .get(pk=presupuesto_id, empresa=empresa)
         )
 
-        if usuario.rol not in PresupuestoService.ROLES_PERMITIDOS_ELIMINAR:
-            raise ValidationError("No tienes permisos para anular presupuestos.")
+        # Seguridad: Solo ciertos roles pueden anular
+        if not usuario.tiene_permiso(Modulos.PRESUPUESTOS, Acciones.ANULAR, empresa):
+            raise ValidationError("No tiene permisos para anular presupuestos")
 
         # Regla de negocio: Solo se anulan los que ya están firmados/aprobados
         # Si es un borrador, se debería eliminar, no anular.
@@ -153,8 +151,9 @@ class PresupuestoService:
         # Usamos all_objects por si ya estaba marcado como borrado
         presupuesto = Presupuesto.all_objects.select_for_update().get(pk=presupuesto_id, empresa=empresa)
 
-        if usuario.rol not in PresupuestoService.ROLES_PERMITIDOS_ELIMINAR:
-            raise ValidationError("No tienes permisos.")
+        # Seguridad: Solo ciertos roles pueden eliminar (soft delete)
+        if not usuario.tiene_permiso(Modulos.PRESUPUESTOS, Acciones.BORRAR, empresa):
+            raise ValidationError("No tiene permisos para eliminar presupuestos")
 
         # SEGURIDAD DE INVENTARIO
         if presupuesto.estado == EstadoPresupuesto.APROBADO:
@@ -185,6 +184,9 @@ class PresupuestoService:
         if not original.items.exists():
             raise ValidationError("No se puede clonar un presupuesto sin ítems.")
         
+        if not usuario.tiene_permiso(Modulos.PRESUPUESTOS, Acciones.CREAR, empresa):
+            raise ValidationError("No tiene permisos para crear presupuestos.")
+        
         # 1. Obtener nuevo número
         nuevo_numero = SecuenciaService.obtener_siguiente_numero(
             empresa=empresa, tipo_documento="PRESUPUESTO"
@@ -212,7 +214,6 @@ class PresupuestoService:
                 precio_unitario=item.precio_unitario,
                 descuento=item.descuento,
                 impuesto=item.impuesto,
-                empresa=empresa # Importante para multi-tenancy
             )
             
         return nuevo_presupuesto
