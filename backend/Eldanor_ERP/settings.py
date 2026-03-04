@@ -31,6 +31,7 @@ INSTALLED_APPS = [
     "rest_framework",
     "corsheaders",
     "axes",
+    'storages',
 
     # Local Apps
     'apps.core.apps.CoreConfig',
@@ -178,6 +179,7 @@ TIME_ZONE = "America/Santiago"
 USE_I18N = True
 USE_TZ = True
 
+DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # =========================================================
 # STATIC FILES
 # =========================================================
@@ -185,4 +187,15 @@ USE_TZ = True
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
-DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+
+# Configuración Cloudflare R2
+AWS_ACCESS_KEY_ID = config("AWS_ACCESS_KEY_ID")
+AWS_SECRET_ACCESS_KEY = config("AWS_SECRET_ACCESS_KEY")
+AWS_STORAGE_BUCKET_NAME = config("AWS_STORAGE_BUCKET_NAME")
+AWS_S3_ENDPOINT_URL = config("AWS_S3_ENDPOINT_URL")
+AWS_S3_REGION_NAME = config("AWS_S3_REGION_NAME")
+AWS_S3_CUSTOM_DOMAIN = config("AWS_S3_CUSTOM_DOMAIN")
+
+# Indicar a Django que use R2 para archivos media
+DEFAULT_FILE_STORAGE = config("DEFAULT_FILE_STORAGE", default="storages.backends.s3boto3.S3Boto3Storage")

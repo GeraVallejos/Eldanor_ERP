@@ -1,6 +1,7 @@
 import uuid
 from django.db import models
 from apps.core.validators import formatear_rut, normalizar_texto, validar_rut
+from apps.core.utils import logo_upload_path
 
 
 class PoliticaPrecio(models.TextChoices):
@@ -38,6 +39,12 @@ class Empresa(models.Model):
         max_digits=5,
         decimal_places=2,
         default=0
+    )
+
+    logo = models.ImageField(
+        upload_path=logo_upload_path,
+        null=True, 
+        blank=True
     )
 
     nombre = models.CharField(max_length=150)
