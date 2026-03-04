@@ -1,17 +1,16 @@
-import uuid
+
 from django.db import models
 from apps.core.validators import normalizar_texto
+from apps.core.models.base import BaseModel
 
 
-class Cliente(models.Model):
-   
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+class Cliente(BaseModel):
+
     contacto = models.OneToOneField(
-            "contactos.Contacto",
-            on_delete=models.CASCADE,
-            related_name="cliente"
-        )
-
+        "contactos.Contacto",
+        on_delete=models.CASCADE,
+        related_name="cliente"
+    )
     limite_credito = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     dias_credito = models.PositiveIntegerField(default=0)
 
@@ -20,6 +19,7 @@ class Cliente(models.Model):
 
     class Meta:
         ordering = ['contacto__nombre']
+
 
     def save(self, *args, **kwargs):
         self.categoria_cliente = normalizar_texto(self.categoria_cliente)

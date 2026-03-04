@@ -1,6 +1,6 @@
-import uuid
 from django.db import models
 from apps.core.validators import formatear_rut, normalizar_texto, validar_rut
+from apps.core.models.base import BaseModel
 
 
 class TipoCuenta(models.TextChoices):
@@ -8,9 +8,8 @@ class TipoCuenta(models.TextChoices):
         VISTA = "VISTA", "Cuenta Vista"
         AHORRO = "AHORRO", "Cuenta de Ahorro"
 
-class CuentaBancaria(models.Model):
+class CuentaBancaria(BaseModel):
 
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     contacto = models.ForeignKey(
         "contactos.Contacto",
         on_delete=models.CASCADE,

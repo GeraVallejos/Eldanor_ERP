@@ -1,4 +1,3 @@
-# apps/core/tests/test_empresa.py
 import pytest
 from apps.core.models import Empresa, ModelPrueba
 from apps.core.tenant import set_current_empresa, get_current_empresa

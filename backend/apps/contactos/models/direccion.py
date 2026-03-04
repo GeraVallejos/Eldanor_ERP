@@ -1,16 +1,16 @@
-import uuid
 from django.db import models
 from apps.core.validators import normalizar_texto
+from apps.core.models.base import BaseModel
 
 
 class TipoDireccion(models.TextChoices):
         FACTURACION = "FACTURACION", "Facturación"
         DESPACHO = "DESPACHO", "Despacho"
         COMERCIAL = "COMERCIAL", "Comercial"
+        PERSONAL = "PERSONAL", "Personal"
 
-class Direccion(models.Model):
+class Direccion(BaseModel):
 
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     contacto = models.ForeignKey(
         "contactos.Contacto",
         on_delete=models.CASCADE,
@@ -40,5 +40,6 @@ class Direccion(models.Model):
         self.direccion = normalizar_texto(self.direccion)
         self.comuna = normalizar_texto(self.comuna)
         self.ciudad = normalizar_texto(self.ciudad)
+        self.region = normalizar_texto(self.region)
         self.pais = normalizar_texto(self.pais)
         super().save(*args, **kwargs)

@@ -4,6 +4,13 @@ from django.db import models
 from apps.core.validators import normalizar_texto
 
 
+
+class RolUsuario(models.TextChoices):
+    OWNER = "OWNER", "Propietario"
+    ADMIN = "ADMIN", "Administrador"
+    VENDEDOR = "VENDEDOR", "Vendedor"
+    CONTADOR = "CONTADOR", "Contador"
+
 class User(AbstractUser):
 
     id = models.UUIDField(
@@ -23,17 +30,11 @@ class User(AbstractUser):
         blank=True
     )
 
-    ROLE_CHOICES = [
-        ("OWNER", "Propietario"),
-        ("ADMIN", "Administrador"),
-        ("VENDEDOR", "Vendedor"),
-        ("CONTADOR", "Contador"),
-    ]
 
     rol = models.CharField(
         max_length=20,
-        choices=ROLE_CHOICES,
-        default="VENDEDOR"
+        choices=RolUsuario.choices,
+        default=RolUsuario.VENDEDOR
     )
 
     telefono = models.CharField(max_length=20, blank=True)

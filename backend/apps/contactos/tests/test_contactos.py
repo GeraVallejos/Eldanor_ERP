@@ -45,12 +45,11 @@ class TestModuloContactos:
     def test_direccion_unica_por_tipo(self, empresa):
         set_current_empresa(empresa)
         contacto = Contacto.objects.create(empresa=empresa, nombre="Test", rut="11.111.111-K")
-        Direccion.objects.create(contacto=contacto, tipo="despacho", direccion="Calle 1", comuna="Stgo", ciudad="Stgo")
+        Direccion.objects.create(contacto=contacto, tipo="DESPACHO", direccion="Calle 1", comuna="Stgo", ciudad="Stgo")
         
         # Aquí sí suele saltar IntegrityError porque es un Constraint de Meta
-        from django.db import IntegrityError
-        with pytest.raises(IntegrityError):
-            Direccion.objects.create(contacto=contacto, tipo="despacho", direccion="Calle 2", comuna="Stgo", ciudad="Stgo")
+        with pytest.raises(ValidationError):
+            Direccion.objects.create(contacto=contacto, tipo="DESPACHO", direccion="Calle 2", comuna="Stgo", ciudad="Stgo")
 
     def test_rut_titular_cuenta_bancaria_normaliza(self, empresa):
         set_current_empresa(empresa)
@@ -59,7 +58,7 @@ class TestModuloContactos:
         cuenta = CuentaBancaria.objects.create(
             contacto=contacto,
             banco="Banco Estado",
-            tipo_cuenta="corriente",
+            tipo_cuenta="CORRIENTE",
             numero_cuenta="123456",
             titular="Pedro",
             rut_titular="15555444k" 

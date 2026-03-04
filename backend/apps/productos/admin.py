@@ -20,7 +20,6 @@ class ProductoAdmin(TenantAdminMixin, admin.ModelAdmin):
     list_display = ('nombre', 'sku', 'tipo', 'categoria', 'color_stock', 'activo', 'empresa', 'creado_por')
     list_filter = ('tipo', 'categoria', 'activo')
     search_fields = ('nombre', 'sku')
-    readonly_fields = ('empresa', 'creado_por')
     inlines = [MovimientoInventarioInline]
     
     fieldsets = (
@@ -51,12 +50,12 @@ class ProductoAdmin(TenantAdminMixin, admin.ModelAdmin):
 @admin.register(Categoria)
 class CategoriaAdmin(TenantAdminMixin,admin.ModelAdmin):
     list_display = ('nombre', 'descripcion', 'activa')
-    readonly_fields = ('empresa', 'creado_por')
+
 
 @admin.register(Impuesto)
-class ImpuestoAdmin(admin.ModelAdmin):
+class ImpuestoAdmin(TenantAdminMixin, admin.ModelAdmin):
     list_display = ('nombre', 'porcentaje')
-    readonly_fields = ('empresa', 'creado_por')
+   
 
 @admin.register(MovimientoInventario)
 class MovimientoInventarioAdmin(TenantAdminMixin,admin.ModelAdmin):

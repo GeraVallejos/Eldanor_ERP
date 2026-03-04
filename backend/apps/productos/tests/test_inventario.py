@@ -37,7 +37,7 @@ class TestInventarioService:
         cantidad_entrada = Decimal("10.50")
         
         mov = InventarioService.registrar_movimiento(
-            producto=producto_fisico,
+            producto_id=producto_fisico.id,
             tipo=TipoMovimiento.ENTRADA,
             cantidad=cantidad_entrada,
             referencia="Compra factura #45",
@@ -62,7 +62,7 @@ class TestInventarioService:
         producto_fisico.save()
 
         InventarioService.registrar_movimiento(
-            producto=producto_fisico,
+            producto_id=producto_fisico.id,
             tipo=TipoMovimiento.SALIDA,
             cantidad=Decimal("30.00"),
             referencia="Venta nota de pedido #1",
@@ -81,7 +81,7 @@ class TestInventarioService:
 
         with pytest.raises(ValidationError) as excinfo:
             InventarioService.registrar_movimiento(
-                producto=producto_fisico,
+                producto_id=producto_fisico.id,
                 tipo=TipoMovimiento.SALIDA,
                 cantidad=Decimal("10.00"),
                 referencia="Intento de venta sin stock",
@@ -104,7 +104,7 @@ class TestInventarioService:
 
         with pytest.raises(ValidationError) as excinfo:
             InventarioService.registrar_movimiento(
-                producto=servicio,
+                producto_id=servicio.id,
                 tipo=TipoMovimiento.ENTRADA,
                 cantidad=Decimal("1.00"),
                 referencia="Error",

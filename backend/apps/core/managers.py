@@ -26,7 +26,7 @@ class EmpresaQuerySet(models.QuerySet):
         # devolvemos el queryset completo SIN filtrar.
         # De esta forma, el TenantAdminMixin puede aplicar su propio filtro:
         # .filter(empresa=request.user.empresa) sin que el Manager lo bloquee.
-        return self
+        return self.none()
 
 
 class EmpresaManager(models.Manager):
@@ -36,7 +36,6 @@ class EmpresaManager(models.Manager):
 
 
 class AllObjectsManager(models.Manager):
-    """
-    Manager sin filtro (solo para admin o procesos internos)
-    """
-    pass
+    def get_queryset(self):
+        # Usamos models.QuerySet directamente para saltarnos EmpresaQuerySet
+        return models.QuerySet(self.model, using=self._db)

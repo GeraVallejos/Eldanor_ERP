@@ -22,6 +22,44 @@ class TenantAdminMixin:
             return qs.filter(contacto__empresa=request.user.empresa)
         
         return qs
+    
+    def get_readonly_fields(self, request, obj=None):
+        readonly = list(super().get_readonly_fields(request, obj))
+        if not request.user.is_superuser:
+            # En lugar de agregar 'empresa', agregamos el nombre del método que crearemos abajo
+            if hasattr(self.model, 'empresa'):
+                if 'empresa' in readonly: readonly.remove('empresa') # Quitamos el original
+                readonly.append('show_empresa_text')
+            
+            if hasattr(self.model, 'creado_por'):
+                if 'creado_por' in readonly: readonly.remove('creado_por')
+                readonly.append('show_creado_por_text')
+        return readonly
+
+    def get_fields(self, request, obj=None):
+        fields = super().get_fields(request, obj)
+        if not request.user.is_superuser:
+            # Creamos una lista limpia
+            clean_fields = []
+            for f in fields:
+                # Si es el campo real, lo ignoramos (porque ya usaremos el 'show_..._text')
+                if f in ['empresa', 'creado_por']:
+                    continue
+                # Si es una de nuestras funciones 'get_...' manuales antiguas, las quitamos
+                if str(f).startswith('get_empresa') or str(f).startswith('get_creado'):
+                    continue
+                clean_fields.append(f)
+            return clean_fields
+        return fields
+
+    # Métodos para mostrar solo TEXTO sin LINK
+    def show_empresa_text(self, obj):
+        return obj.empresa.nombre if obj and obj.empresa else "-"
+    show_empresa_text.short_description = "Empresa"
+
+    def show_creado_por_text(self, obj):
+        return obj.creado_por.username if obj and obj.creado_por else "-"
+    show_creado_por_text.short_description = "Creado por"
 
     def save_model(self, request, obj, form, change):
         if not request.user.is_superuser:
@@ -54,7 +92,8 @@ class TenantAdminMixin:
 
 
 @admin.register(User)
-class CustomUserAdmin(TenantAdminMixin, UserAdmin): # <-- Agregamos el Mixin
+class CustomUserAdmin(TenantAdminMixin, UserAdmin):
+    
     list_display = ("username", "email", "empresa", "is_staff", "is_active")
     
     fieldsets = UserAdmin.fieldsets + (
@@ -79,11 +118,40 @@ class CustomUserAdmin(TenantAdminMixin, UserAdmin): # <-- Agregamos el Mixin
         }),
     )
 
-    def get_readonly_fields(self, request, obj=None):
-        # Si no es superusuario, no puede editar a qué empresa pertenece nadie
+    def get_fieldsets(self, request, obj=None):
+        # 1. Obtenemos los fieldsets base (que ya traen is_superuser, etc.)
+        fieldsets = list(super().get_fieldsets(request, obj))
+        
         if not request.user.is_superuser:
-            return ("empresa",)
-        return super().get_readonly_fields(request, obj)
+            # 2. Convertimos a una estructura editable (listas de listas)
+            new_fieldsets = []
+            for name, content in fieldsets:
+                fields = list(content.get('fields', []))
+                
+                # REGLA A: Cambiar 'empresa' por nuestro texto sin link
+                if 'empresa' in fields:
+                    fields[fields.index('empresa')] = 'show_empresa_text'
+                
+                # REGLA B: Eliminar permisos críticos para no-superusers
+                # Quitamos is_superuser, user_permissions y groups
+                fields = [f for f in fields if f not in ('is_superuser', 'user_permissions', 'groups')]
+                
+                new_fieldsets.append((name, {'fields': tuple(fields)}))
+            return tuple(new_fieldsets)
+            
+        return fieldsets
+
+    def get_readonly_fields(self, request, obj=None):
+        # Usamos la lógica del Mixin pero aseguramos 'show_empresa_text'
+        readonly = super().get_readonly_fields(request, obj)
+        if not request.user.is_superuser:
+            # Forzamos que estos campos sean siempre texto plano
+            if 'show_empresa_text' not in readonly:
+                readonly.append('show_empresa_text')
+            # Si el usuario intenta editar su propio staff status, lo bloqueamos
+            if 'is_staff' not in readonly:
+                readonly.append('is_staff')
+        return readonly
 
 @admin.register(Empresa)
 class EmpresaAdmin(TenantAdminMixin, admin.ModelAdmin):

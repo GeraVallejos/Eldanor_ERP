@@ -3,7 +3,7 @@ from apps.core.models import BaseModel
 from apps.core.validators import formatear_rut, normalizar_texto, validar_rut
 
 
-class Tipo(models.TextChoices):
+class TipoContacto(models.TextChoices):
         PERSONA = "PERSONA", "Persona Natural"
         EMPRESA = "EMPRESA", "Empresa"
 
@@ -19,7 +19,7 @@ class Contacto(BaseModel):
         null=True
     )
 
-    tipo = models.CharField(max_length=20, choices=Tipo.choices, default=Tipo.PERSONA)
+    tipo = models.CharField(max_length=20, choices=TipoContacto.choices, default=TipoContacto.PERSONA)
 
     # contacto
     email = models.EmailField(blank=True, null=True)

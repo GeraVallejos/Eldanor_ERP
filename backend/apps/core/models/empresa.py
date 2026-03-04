@@ -8,6 +8,18 @@ class PoliticaPrecio(models.TextChoices):
         EDITABLE = "EDITABLE", "Precio Editable"
 
 
+class Plan(models.TextChoices):
+    FREE = "FREE", "Free"
+    BASIC = "BASIC", "Basic"
+    PRO = "PRO", "Pro"
+
+
+class TipoEmpresa(models.TextChoices):
+    CONSTRUCTORA = "CONSTRUCTORA", "Constructora"
+    VETERINARIA = "VETERINARIA", "Veterinaria"
+    GENERAL = "GENERAL", "General"
+
+
 class Empresa(models.Model):
 
     id = models.UUIDField(
@@ -38,16 +50,17 @@ class Empresa(models.Model):
     ciudad = models.CharField(max_length=100, blank=True)
     pais = models.CharField(max_length=100, default="Chile")
 
-    PLAN_CHOICES = [
-        ("free", "FREE"),
-        ("basic", "BASIC"),
-        ("pro", "PRO"),
-    ]
 
     plan = models.CharField(
         max_length=20,
-        choices=PLAN_CHOICES,
-        default="free"
+        choices=Plan.choices,
+        default=Plan.FREE
+    )
+
+    tipo_empresa = models.CharField(
+        max_length=20,
+        choices=TipoEmpresa.choices,
+        default=TipoEmpresa.GENERAL
     )
 
     activa = models.BooleanField(default=True)

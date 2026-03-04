@@ -1,11 +1,10 @@
-import uuid
 from django.db import models
 from apps.core.validators import normalizar_texto
+from apps.core.models.base import BaseModel
 
 
-class Proveedor(models.Model):
+class Proveedor(BaseModel):
     
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     contacto = models.OneToOneField(
         "contactos.Contacto",
         on_delete=models.CASCADE,

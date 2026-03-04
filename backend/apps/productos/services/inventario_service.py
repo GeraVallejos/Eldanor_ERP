@@ -1,36 +1,60 @@
 from django.db import transaction
 from django.core.exceptions import ValidationError
 from apps.productos.models.producto import Producto
-from ..models.movimiento import MovimientoInventario, TipoMovimiento
+from apps.productos.models.movimiento import MovimientoInventario, TipoMovimiento
+
 
 class InventarioService:
+
     @staticmethod
     @transaction.atomic
-    def registrar_movimiento(producto, tipo, cantidad, referencia, empresa, usuario):
+    def registrar_movimiento(
+        *,
+        producto_id,
+        tipo,
+        cantidad,
+        referencia,
+        empresa,
+        usuario
+    ):
         """
         Registra un movimiento en el Kardex y actualiza el stock del producto.
         """
-        producto = Producto.objects.select_for_update().get(pk=producto.pk, empresa=empresa)
-        
-        if not producto.maneja_inventario:
-            raise ValidationError(f"El producto {producto.nombre} no maneja inventario.")
 
         if cantidad <= 0:
-            raise ValidationError("La cantidad del movimiento debe ser mayor a cero.")
+            raise ValidationError("La cantidad debe ser mayor a cero.")
 
-        # 1. Guardar estado anterior
+        if tipo not in TipoMovimiento.values:
+            raise ValidationError("Tipo de movimiento inválido.")
+
+        # Bloqueo seguro multiempresa
+        producto = (
+            Producto.objects
+            .select_for_update()
+            .get(pk=producto_id, empresa=empresa)
+        )
+
+        if not producto.maneja_inventario:
+            raise ValidationError(
+                f"El producto {producto.nombre} no maneja inventario."
+            )
+
         stock_anterior = producto.stock_actual
 
-        # 2. Calcular nuevo stock
+        # Calcular nuevo stock
         if tipo == TipoMovimiento.ENTRADA:
             nuevo_stock = stock_anterior + cantidad
-        else:
-            nuevo_stock = stock_anterior - cantidad
-            # Validar si permitimos stock negativo
-            if nuevo_stock < 0:
-                raise ValidationError(f"Stock insuficiente para {producto.nombre}.")
 
-        # 3. Crear el registro en el Kardex
+        elif tipo == TipoMovimiento.SALIDA:
+            nuevo_stock = stock_anterior - cantidad
+
+            if nuevo_stock < 0:
+                raise ValidationError(
+                    f"Stock insuficiente para {producto.nombre}. "
+                    f"Disponible: {stock_anterior}"
+                )
+
+        # 📝 Crear movimiento
         movimiento = MovimientoInventario.objects.create(
             producto=producto,
             tipo=tipo,
@@ -42,8 +66,8 @@ class InventarioService:
             creado_por=usuario
         )
 
-        # 4. Actualizar el producto
+        # 💾 Actualizar producto
         producto.stock_actual = nuevo_stock
-        producto.save(skip_clean=True) # Saltamos validación pesada si ya validamos aquí
+        producto.save(skip_clean=True, update_fields=["stock_actual"])
 
         return movimiento
