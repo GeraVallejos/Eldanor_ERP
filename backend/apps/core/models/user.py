@@ -50,7 +50,7 @@ class User(AbstractUser):
         relacion = self.empresas_rel.filter(
             empresa=empresa,
             activo=True
-        ).first()
+        ).prefetch_related("permisos").first()
 
         if not relacion:
             return None
@@ -58,11 +58,31 @@ class User(AbstractUser):
         return relacion.rol
     
     def tiene_permiso(self, modulo, accion, empresa):
+        relacion = self.empresas_rel.filter(
+            empresa=empresa,
+            activo=True,
+        ).prefetch_related("permisos").first()
 
-        rol = self.get_rol_en_empresa(empresa)
-
-        if not rol:
+        if not relacion:
             return False
+
+        modulo = str(modulo).upper()
+        accion = str(accion).upper()
+
+        # 1) Permisos granulares por relación usuario-empresa (si existen) tienen prioridad.
+        permisos_personalizados = {
+            (p.codigo or "").strip().upper()
+            for p in relacion.permisos.all()
+            if p.codigo
+        }
+        if permisos_personalizados:
+            return (
+                "*" in permisos_personalizados
+                or f"{modulo}.*" in permisos_personalizados
+                or f"{modulo}.{accion}" in permisos_personalizados
+            )
+
+        rol = relacion.rol
 
         permisos = PERMISOS_POR_ROL.get(rol)
 

@@ -27,7 +27,7 @@ class PresupuestoService:
 
         referencia = f"PRESUPUESTO-{presupuesto.numero}"
 
-        movimientos = MovimientoInventario.objects.filter(
+        movimientos = MovimientoInventario.all_objects.filter(
             empresa=presupuesto.empresa,
             referencia=referencia
         )
@@ -54,6 +54,14 @@ class PresupuestoService:
     # ===============================
     # Públicos
     # ===============================
+
+    @staticmethod
+    def _items_queryset(presupuesto):
+        # Evita dependencia del manager filtrado por ContextVar en servicios async.
+        return PresupuestoItem.all_objects.filter(
+            presupuesto=presupuesto,
+            empresa=presupuesto.empresa,
+        )
 
     @staticmethod
     @transaction.atomic
@@ -87,7 +95,7 @@ class PresupuestoService:
         presupuesto = Presupuesto.all_objects.select_for_update().get(id=presupuesto_id, empresa=empresa)
 
         # 2. Validaciones de negocio
-        if not presupuesto.items.exists():
+        if not PresupuestoService._items_queryset(presupuesto).exists():
             raise ValidationError("No se puede aprobar un presupuesto sin ítems.")
         
         if presupuesto.estado != EstadoPresupuesto.BORRADOR:
@@ -103,7 +111,7 @@ class PresupuestoService:
         cambios = presupuesto.get_dirty_fields() 
 
         # 4. Procesar inventario
-        for item in presupuesto.items.all():
+        for item in PresupuestoService._items_queryset(presupuesto):
             if item.producto and item.producto.maneja_inventario:
                 InventarioService.registrar_movimiento(
                     producto_id=item.producto.id,
@@ -185,7 +193,7 @@ class PresupuestoService:
         """
         original = Presupuesto.all_objects.get(id=presupuesto_id, empresa=empresa)
 
-        if not original.items.exists():
+        if not PresupuestoService._items_queryset(original).exists():
             raise ValidationError("No se puede clonar un presupuesto sin ítems.")
         
         if not usuario.tiene_permiso(Modulos.PRESUPUESTOS, Acciones.CREAR, empresa):
@@ -209,7 +217,7 @@ class PresupuestoService:
         )
         
         # 3. Clonar los ítems
-        for item in original.items.all():
+        for item in PresupuestoService._items_queryset(original):
             PresupuestoItem.objects.create(
                 presupuesto=nuevo_presupuesto,
                 producto=item.producto,

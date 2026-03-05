@@ -28,8 +28,9 @@ class InventarioService:
             raise ValidationError("Tipo de movimiento inválido.")
 
         # Bloqueo seguro multiempresa
+        # Evitamos depender del contexto tenant implícito: el servicio ya recibe empresa.
         producto = (
-            Producto.objects
+            Producto.all_objects
             .select_for_update()
             .get(pk=producto_id, empresa=empresa)
         )
@@ -55,7 +56,7 @@ class InventarioService:
                 )
 
         # 📝 Crear movimiento
-        movimiento = MovimientoInventario.objects.create(
+        movimiento = MovimientoInventario.all_objects.create(
             producto=producto,
             tipo=tipo,
             cantidad=cantidad,

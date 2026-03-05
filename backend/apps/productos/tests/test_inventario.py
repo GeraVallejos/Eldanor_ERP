@@ -97,3 +97,19 @@ class TestInventarioService:
             )
 
         assert "no maneja inventario" in str(excinfo.value)
+
+    def test_movimiento_funciona_sin_contexto_tenant(self, empresa, producto_fisico, usuario):
+        set_current_empresa(None)
+
+        mov = InventarioService.registrar_movimiento(
+            producto_id=producto_fisico.id,
+            tipo=TipoMovimiento.ENTRADA,
+            cantidad=Decimal("5.00"),
+            referencia="Carga asyncrona",
+            empresa=empresa,
+            usuario=usuario,
+        )
+
+        assert mov.stock_nuevo == Decimal("5.00")
+        producto_fisico.refresh_from_db()
+        assert producto_fisico.stock_actual == Decimal("5.00")

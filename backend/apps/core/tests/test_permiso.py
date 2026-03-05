@@ -1,6 +1,6 @@
 import pytest
 from django.contrib.auth import get_user_model
-from apps.core.models import Empresa, UserEmpresa
+from apps.core.models import Empresa, UserEmpresa, PermisoModulo
 from apps.core.roles import RolUsuario
 from apps.core.permisos.constantes_permisos import Modulos, Acciones
 from apps.presupuestos.services.presupuesto_service import PresupuestoService
@@ -391,3 +391,25 @@ class TestPermisos:
                 empresa_b,
                 usuario
             )
+
+    def test_permiso_personalizado_habilita_accion_especifica(self, usuario, empresa):
+        relacion = crear_relacion(usuario, empresa, RolUsuario.VENDEDOR)
+        permiso = PermisoModulo.objects.create(
+            nombre="Aprobar presupuesto",
+            codigo="PRESUPUESTOS.APROBAR",
+        )
+        relacion.permisos.add(permiso)
+
+        assert usuario.tiene_permiso(Modulos.PRESUPUESTOS, Acciones.APROBAR, empresa)
+        assert not usuario.tiene_permiso(Modulos.PRESUPUESTOS, Acciones.BORRAR, empresa)
+
+    def test_permiso_personalizado_por_modulo_wildcard(self, usuario, empresa):
+        relacion = crear_relacion(usuario, empresa, RolUsuario.VENDEDOR)
+        permiso = PermisoModulo.objects.create(
+            nombre="Todos productos",
+            codigo="PRODUCTOS.*",
+        )
+        relacion.permisos.add(permiso)
+
+        assert usuario.tiene_permiso(Modulos.PRODUCTOS, Acciones.VER, empresa)
+        assert usuario.tiene_permiso(Modulos.PRODUCTOS, Acciones.BORRAR, empresa)

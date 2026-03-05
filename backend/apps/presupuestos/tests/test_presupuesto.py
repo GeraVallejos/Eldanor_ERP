@@ -218,3 +218,41 @@ class TestPresupuestoService:
 
         with pytest.raises(DjangoValidationError):
             item.save()
+
+    def test_aprobar_presupuesto_funciona_sin_contexto_tenant(self, usuario_admin, empresa, cliente):
+        set_current_empresa(empresa)
+        set_current_user(usuario_admin)
+
+        producto = Producto.objects.create(
+            nombre="Producto Async",
+            sku="ASYNC-001",
+            stock_actual=Decimal("10.00"),
+            maneja_inventario=True,
+        )
+
+        presupuesto = PresupuestoService.crear_presupuesto(
+            data={"cliente": cliente, "fecha": "2026-01-01"},
+            empresa=empresa,
+            usuario=usuario_admin,
+        )
+
+        PresupuestoItem.objects.create(
+            presupuesto=presupuesto,
+            producto=producto,
+            descripcion="Item async",
+            cantidad=Decimal("2.00"),
+            precio_unitario=Decimal("100.00"),
+        )
+
+        # Simulamos ejecución fuera del request (ej. Celery): sin ContextVar tenant.
+        set_current_empresa(None)
+        set_current_user(None)
+
+        PresupuestoService.aprobar_presupuesto(
+            presupuesto.id,
+            empresa,
+            usuario_admin,
+        )
+
+        producto.refresh_from_db()
+        assert producto.stock_actual == Decimal("8.00")

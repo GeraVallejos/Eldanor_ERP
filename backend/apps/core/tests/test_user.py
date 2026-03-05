@@ -57,6 +57,37 @@ def test_middleware_setea_empresa_correctamente(user_con_empresa):
 
     assert contexto['empresa'] == user_con_empresa.empresa_activa
 
+
+@pytest.mark.django_db
+def test_middleware_no_setea_empresa_con_relacion_inactiva(db):
+    """Si la relación user-empresa está inactiva, el contexto tenant debe quedar vacío."""
+    from django.contrib.auth import get_user_model
+    User = get_user_model()
+
+    empresa = Empresa.objects.create(nombre="Empresa Inactiva", rut="333-3", email="inactiva@test.com")
+    user = User.objects.create_user(
+        username="inactivo",
+        email="inactivo@test.com",
+        password="pass",
+        empresa_activa=empresa,
+    )
+    UserEmpresa.objects.create(user=user, empresa=empresa, rol="OWNER", activo=False)
+
+    factory = RequestFactory()
+    request = factory.get('/')
+    request.user = user
+
+    contexto = {}
+
+    def get_response(req):
+        contexto['empresa'] = get_current_empresa()
+        return None
+
+    middleware = EmpresaMiddleware(get_response)
+    middleware(request)
+
+    assert contexto['empresa'] is None
+
 @pytest.mark.django_db
 def test_prohibir_cambio_de_empresa(empresa_activa):
     """Verifica seguridad del BaseModel"""
