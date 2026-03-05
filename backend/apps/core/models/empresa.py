@@ -42,7 +42,7 @@ class Empresa(models.Model):
     )
 
     logo = models.ImageField(
-        upload_path=logo_upload_path,
+        upload_to=logo_upload_path,
         null=True, 
         blank=True
     )

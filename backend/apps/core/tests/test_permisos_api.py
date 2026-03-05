@@ -1,9 +1,8 @@
 import pytest
-from rest_framework.test import APIClient
 from rest_framework import status
 from django.urls import reverse
 from rest_framework_simplejwt.tokens import RefreshToken
-from apps.core.models import User, Empresa, UserEmpresa
+from apps.core.models import UserEmpresa
 from apps.contactos.models import Contacto, Cliente
 from apps.presupuestos.models import Presupuesto, EstadoPresupuesto
 from datetime import date
@@ -12,36 +11,6 @@ from datetime import date
 # =========================================================
 # FIXTURES BASE
 # =========================================================
-
-@pytest.fixture
-def api_client():
-    return APIClient()
-
-
-@pytest.fixture
-def empresa(db):
-    return Empresa.objects.create(
-        nombre="Empresa A",
-        rut="11111111-1"
-    )
-
-
-@pytest.fixture
-def empresa_b(db):
-    return Empresa.objects.create(
-        nombre="Empresa B",
-        rut="22222222-2"
-    )
-
-
-@pytest.fixture
-def usuario(db):
-    return User.objects.create_user(
-        username="usuario_test",
-        password="123456",
-        email="test@test.com"
-    )
-
 
 @pytest.fixture
 def relacion_activa(usuario, empresa):

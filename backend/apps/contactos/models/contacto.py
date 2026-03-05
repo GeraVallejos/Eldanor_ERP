@@ -1,6 +1,7 @@
 from django.db import models
 from apps.core.models import BaseModel
 from apps.core.validators import formatear_rut, normalizar_texto, validar_rut
+from django.core.exceptions import ValidationError
 
 
 class TipoContacto(models.TextChoices):

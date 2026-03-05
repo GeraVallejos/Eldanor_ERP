@@ -3,6 +3,7 @@ from apps.core.models import BaseModel
 from apps.productos.services.producto_validation import clean_producto
 from apps.productos.validators import normalize_sku
 from apps.core.validators import normalizar_texto
+from apps.core.mixins import TenantRelationValidationMixin
 
 
 class TipoProducto(models.TextChoices):
@@ -10,7 +11,9 @@ class TipoProducto(models.TextChoices):
     SERVICIO = "SERVICIO", "Servicio"
 
 
-class Producto(BaseModel):
+class Producto(TenantRelationValidationMixin, BaseModel):
+
+    tenant_fk_fields = ["categoria", "impuesto"]
 
     nombre = models.CharField(max_length=255)
 
@@ -84,8 +87,10 @@ class Producto(BaseModel):
             models.Index(fields=["empresa", "sku"]),
         ]
 
+
     def clean(self):
-        clean_producto(self)
+        super().clean() 
+        clean_producto(self)  
 
     def save(self, *args, **kwargs):
         self.nombre = normalizar_texto(self.nombre)

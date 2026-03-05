@@ -1,9 +1,12 @@
 from django.db import models
 from apps.core.validators import normalizar_texto
 from apps.core.models.base import BaseModel
+from apps.core.mixins import TenantRelationValidationMixin
 
 
-class Proveedor(BaseModel):
+class Proveedor(TenantRelationValidationMixin, BaseModel):
+
+    tenant_fk_fields = ["contacto"]
     
     contacto = models.OneToOneField(
         "contactos.Contacto",
@@ -18,6 +21,7 @@ class Proveedor(BaseModel):
 
     class Meta:
         ordering = ['contacto__nombre']
+
 
     def save(self, *args, **kwargs):
         self.giro = normalizar_texto(self.giro)

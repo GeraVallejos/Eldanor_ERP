@@ -70,9 +70,13 @@ class PresupuestoService:
         return Presupuesto.objects.create(
             numero=numero,
             empresa=empresa,
-            cliente=data["cliente"],
-            fecha=data["fecha"],
             creado_por=usuario,
+            cliente=data["cliente"],
+            estado=EstadoPresupuesto.BORRADOR,
+            fecha=data["fecha"],
+            descuento=data.get("descuento", 0),
+            observaciones=data.get("observaciones", ""),
+            fecha_vencimiento=data.get("fecha_vencimiento"),
         )
 
 
@@ -148,10 +152,10 @@ class PresupuestoService:
     @staticmethod
     @transaction.atomic
     def eliminar_presupuesto(presupuesto_id, empresa, usuario):
-        # Usamos all_objects por si ya estaba marcado como borrado
+        # Eliminacion fisica (hard delete) controlada por reglas de negocio
         presupuesto = Presupuesto.all_objects.select_for_update().get(pk=presupuesto_id, empresa=empresa)
 
-        # Seguridad: Solo ciertos roles pueden eliminar (soft delete)
+        # Seguridad: Solo ciertos roles pueden eliminar
         if not usuario.tiene_permiso(Modulos.PRESUPUESTOS, Acciones.BORRAR, empresa):
             raise ValidationError("No tiene permisos para eliminar presupuestos")
 
@@ -170,7 +174,7 @@ class PresupuestoService:
             cambios={"sistema": "Registro marcado como eliminado"}
         )
 
-        presupuesto.delete() # Aquí se ejecuta el Soft Delete del manager
+        presupuesto.delete()  # Hard delete
 
     @staticmethod
     @transaction.atomic

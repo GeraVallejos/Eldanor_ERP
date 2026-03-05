@@ -1,6 +1,7 @@
 from django.db import models
 from apps.core.validators import formatear_rut, normalizar_texto, validar_rut
 from apps.core.models.base import BaseModel
+from apps.core.mixins import TenantRelationValidationMixin
 
 
 class TipoCuenta(models.TextChoices):
@@ -8,7 +9,9 @@ class TipoCuenta(models.TextChoices):
         VISTA = "VISTA", "Cuenta Vista"
         AHORRO = "AHORRO", "Cuenta de Ahorro"
 
-class CuentaBancaria(BaseModel):
+class CuentaBancaria(TenantRelationValidationMixin, BaseModel):
+
+    tenant_fk_fields = ["contacto"]
 
     contacto = models.ForeignKey(
         "contactos.Contacto",
@@ -39,6 +42,8 @@ class CuentaBancaria(BaseModel):
         ]
 
     def clean(self):
+        super().clean()
+
         if self.rut_titular:
             self.rut_titular = formatear_rut(self.rut_titular)
             validar_rut(self.rut_titular)

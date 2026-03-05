@@ -10,25 +10,30 @@ class ContactoSerializer(serializers.ModelSerializer):
     class Meta:
         model = Contacto
         fields = "__all__"
+        read_only_fields = ["empresa", "creado_por"]
 
 
 class ClienteSerializer(serializers.ModelSerializer):
     class Meta:
         model = Cliente
         fields = "__all__"
+        read_only_fields = ["empresa", "creado_por"]
 
 class ProveedorSerializer(serializers.ModelSerializer):
     class Meta:
         model = Proveedor
         fields = "__all__"
+        read_only_fields = ["empresa", "creado_por"]
 
 
 class CuentaBancariaSerializer(serializers.ModelSerializer):
     class Meta:
         model = CuentaBancaria
         fields = "__all__"
+        read_only_fields = ["empresa", "creado_por"]
 
 class DireccionSerializer(serializers.ModelSerializer):
     class Meta:
         model = Direccion
         fields = "__all__"
+        read_only_fields = ["empresa", "creado_por"]

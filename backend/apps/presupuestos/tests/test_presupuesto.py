@@ -6,7 +6,7 @@ from django.test import RequestFactory
 from apps.presupuestos.services.presupuesto_service import PresupuestoService
 from apps.productos.models import Producto
 from apps.presupuestos.models import PresupuestoItem, EstadoPresupuesto
-from apps.core.models import Empresa, UserEmpresa
+from apps.core.models import UserEmpresa
 from apps.contactos.models.cliente import Cliente
 from apps.contactos.models.contacto import Contacto
 from apps.core.tenant import set_current_empresa, set_current_user
@@ -15,14 +15,6 @@ from apps.core.tenant import set_current_empresa, set_current_user
 # =========================================================
 # FIXTURES
 # =========================================================
-
-@pytest.fixture
-def empresa(db):
-    return Empresa.objects.create(
-        nombre="Empresa Test",
-        rut="12345678-9"
-    )
-
 
 @pytest.fixture
 def usuario_admin(db, empresa):
@@ -70,9 +62,6 @@ def cliente(db, empresa):
 @pytest.mark.django_db
 class TestPresupuestoService:
 
-    def setup_method(self):
-        set_current_empresa(None)
-        set_current_user(None)
 
     # ------------------------------------------------------
 

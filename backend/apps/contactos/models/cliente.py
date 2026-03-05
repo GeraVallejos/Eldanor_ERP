@@ -1,10 +1,13 @@
-
 from django.db import models
 from apps.core.validators import normalizar_texto
 from apps.core.models.base import BaseModel
+from django.core.exceptions import ValidationError
+from apps.core.mixins import TenantRelationValidationMixin
 
 
-class Cliente(BaseModel):
+class Cliente(TenantRelationValidationMixin, BaseModel):
+
+    tenant_fk_fields = ["contacto"]
 
     contacto = models.OneToOneField(
         "contactos.Contacto",
@@ -19,7 +22,6 @@ class Cliente(BaseModel):
 
     class Meta:
         ordering = ['contacto__nombre']
-
 
     def save(self, *args, **kwargs):
         self.categoria_cliente = normalizar_texto(self.categoria_cliente)

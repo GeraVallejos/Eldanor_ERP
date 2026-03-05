@@ -1,16 +1,7 @@
 import pytest
 from django.core.exceptions import ValidationError
-from apps.core.models import Empresa
 from apps.productos.models import Categoria, Producto
 from apps.core.tenant import set_current_empresa
-
-@pytest.fixture
-def empresa_a(db):
-    return Empresa.objects.create(nombre="Empresa A", rut="1-1")
-
-@pytest.fixture
-def empresa_b(db):
-    return Empresa.objects.create(nombre="Empresa B", rut="2-2")
 
 @pytest.mark.django_db
 class TestCategoria:

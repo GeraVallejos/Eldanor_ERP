@@ -18,8 +18,8 @@ class EmpresaQuerySet(models.QuerySet):
             return self.filter(empresa=empresa)
         
         # 3. Si el usuario está en el contextvar y tiene empresa asignada, filtramos por esa empresa
-        if user and hasattr(user, 'empresa') and user.empresa:
-            return self.filter(empresa=user.empresa)
+        if user and hasattr(user, 'empresa_activa') and user.empresa_activa:
+            return self.filter(empresa=user.empresa_activa)
 
         # 4. Sin empresa ni usuario válido, devolvemos un queryset vacío para evitar fugas de datos
         return self.none()

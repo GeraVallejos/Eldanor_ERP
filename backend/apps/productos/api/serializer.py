@@ -6,7 +6,7 @@ class ProductoSerializer(serializers.ModelSerializer):
     class Meta:
         model = Producto
         fields = "__all__"
-        read_only_fields = ("creado_por", "creado_en", "actualizado_en")
+        read_only_fields = ("empresa","creado_por", "creado_en", "actualizado_en")
 
     
 class CategoriaSerializer(serializers.ModelSerializer):

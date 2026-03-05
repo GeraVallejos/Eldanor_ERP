@@ -12,6 +12,7 @@ class Modulos:
 class Acciones:
     VER = "VER"
     CREAR = "CREAR"
+    EDITAR = "EDITAR"
     APROBAR = "APROBAR"
     ANULAR = "ANULAR"
     BORRAR = "BORRAR"

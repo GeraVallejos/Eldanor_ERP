@@ -39,35 +39,29 @@ class BaseModel(models.Model):
 
     
     def save(self, *args, **kwargs):
-    # 1. Usamos _state.adding para detectar si es CREACIÓN
         if self._state.adding:
-            # Asignar Empresa
             if not self.empresa_id:
                 curr_empresa = get_current_empresa()
-                if curr_empresa:
-                    self.empresa = curr_empresa
-                else:
-                    # Si no hay empresa en el contexto Y no se pasó manualmente, error
-                    if not getattr(self, 'empresa', None):
-                        raise ValueError("No hay empresa activa en el contexto.")
+                if not curr_empresa:
+                    raise ValueError("No hay empresa activa en el contexto.")
+                self.empresa = curr_empresa
 
-            # Asignar Creador automáticamente
             if not self.creado_por_id:
                 curr_user = get_current_user()
                 if curr_user:
                     self.creado_por = curr_user
 
-        # 2. Lógica para EDICIÓN (el objeto ya existe en la base de datos)
         else:
-            # Verificamos si empresa_id cambió comparando con la DB
-            # Solo hacemos la consulta si empresa_id está presente en la instancia actual
-            if self.empresa_id:
-                original_empresa_id = self.__class__.all_objects.filter(pk=self.pk).values_list('empresa_id', flat=True).first()
-                if original_empresa_id and str(original_empresa_id) != str(self.empresa_id):
-                    raise ValueError("La empresa propietaria no puede ser modificada.")
-                
-        skip_clean = kwargs.pop('skip_clean', False)
-    
+            original_empresa_id = (
+                self.__class__.all_objects
+                .filter(pk=self.pk)
+                .values_list("empresa_id", flat=True)
+                .first()
+            )
+            if original_empresa_id and str(original_empresa_id) != str(self.empresa_id):
+                raise ValueError("La empresa propietaria no puede ser modificada.")
+
+        skip_clean = kwargs.pop("skip_clean", False)
         if not skip_clean:
             self.full_clean()
 

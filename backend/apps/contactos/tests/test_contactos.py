@@ -1,12 +1,7 @@
 import pytest
 from django.core.exceptions import ValidationError
-from apps.core.models import Empresa
 from apps.contactos.models import Contacto, Cliente, Proveedor, Direccion, CuentaBancaria
 from apps.core.tenant import set_current_empresa
-
-@pytest.fixture
-def empresa(db):
-    return Empresa.objects.create(nombre="Constructora Maipo", rut="77.888.999-0")
 
 @pytest.mark.django_db
 class TestModuloContactos:

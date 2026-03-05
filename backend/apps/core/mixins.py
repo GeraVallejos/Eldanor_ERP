@@ -1,5 +1,5 @@
 from apps.core.tenant import set_current_empresa, set_current_user
-from django.core.exceptions import ImproperlyConfigured
+from django.core.exceptions import ImproperlyConfigured, ValidationError
 
 class TenantViewSetMixin:
     """
@@ -81,3 +81,19 @@ class AuditDiffMixin:
                     'despues': str(current_value)
                 }
         return dirty
+    
+
+class TenantRelationValidationMixin:
+
+    tenant_fk_fields = []
+
+    def clean(self):
+        super().clean()
+
+        for field in self.tenant_fk_fields:
+            related_obj = getattr(self, field, None)
+
+            if related_obj and related_obj.empresa_id != self.empresa_id:
+                raise ValidationError(
+                    {field: f"El registro seleccionado de {field} no pertenece a su empresa."}
+                )

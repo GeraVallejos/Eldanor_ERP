@@ -17,7 +17,7 @@ def validate_stock(tipo, maneja_inventario, stock_actual):
     """
     Reglas de coherencia entre tipo de producto y stock.
     """
-    if tipo == "servicio" and stock_actual != 0:
+    if str(tipo).upper() == "SERVICIO" and stock_actual != 0:
         raise ValidationError("Un servicio no puede tener stock.")
 
     if maneja_inventario and stock_actual < 0:

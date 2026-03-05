@@ -9,6 +9,7 @@ class EmpresaUsuarioSerializer(serializers.ModelSerializer):
     class Meta:
         model = Empresa
         fields = ["id", "nombre", "rut", "es_activa"]
+        read_only_fields = ["empresa", "creado_por"]
 
     def get_es_activa(self, obj):
         user = self.context["request"].user

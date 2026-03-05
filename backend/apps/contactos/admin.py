@@ -36,23 +36,6 @@ class ContactoAdmin(TenantAdminMixin, admin.ModelAdmin):
     readonly_fields = ('empresa', 'creado_por')
     inlines = [DireccionInline, CuentaBancariaInline]
 
-    def get_queryset(self, request):
-        # 1. Llamamos al queryset original (que ahora gracias al Manager corregido trae todo)
-        qs = super().get_queryset(request)
-        
-        # 2. Si es superusuario, permitimos ver todo el universo de datos
-        if request.user.is_superuser:
-            return qs
-            
-        # 3. Filtramos estrictamente por la empresa del usuario identificado
-        if hasattr(request.user, 'empresa') and request.user.empresa:
-            return qs.filter(empresa=request.user.empresa)
-        
-        # 4. Si por alguna razón el usuario no tiene empresa asignada,
-        # devolvemos vacío por seguridad para evitar fugas de datos.
-        return qs.none()
-    
-   
 
 @admin.register(Cliente)
 class ClienteAdmin(TenantAdminMixin, admin.ModelAdmin):

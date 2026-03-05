@@ -1,6 +1,8 @@
 from django.db import models
 from apps.core.validators import normalizar_texto
 from apps.core.models.base import BaseModel
+from django.core.exceptions import ValidationError
+from apps.core.mixins import TenantRelationValidationMixin
 
 
 class TipoDireccion(models.TextChoices):
@@ -9,7 +11,9 @@ class TipoDireccion(models.TextChoices):
         COMERCIAL = "COMERCIAL", "Comercial"
         PERSONAL = "PERSONAL", "Personal"
 
-class Direccion(BaseModel):
+class Direccion(TenantRelationValidationMixin, BaseModel):
+
+    tenant_fk_fields = ["contacto"]
 
     contacto = models.ForeignKey(
         "contactos.Contacto",

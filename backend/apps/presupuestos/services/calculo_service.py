@@ -38,16 +38,17 @@ class CalculoService:
         items = presupuesto.items.all()
         nuevo_subtotal = Decimal("0.00")
         nuevo_impuesto = Decimal("0.00")
-        nuevo_descuento = Decimal("0.00")
+        descuento_global = Decimal(presupuesto.descuento or 0)
 
         for item in items:
             nuevo_subtotal += item.subtotal
             # El impuesto aquí lo derivamos o lo puedes guardar en el item
             nuevo_impuesto += (item.total - item.subtotal)
-            nuevo_descuento += item.descuento
 
         presupuesto.subtotal = cls.redondear(nuevo_subtotal)
         presupuesto.impuesto_total = cls.redondear(nuevo_impuesto)
-        presupuesto.total = cls.redondear(nuevo_subtotal + nuevo_impuesto)
+        total_bruto = cls.redondear(nuevo_subtotal + nuevo_impuesto)
+        # Descuento de cabecera aplicado al total del documento.
+        presupuesto.total = cls.redondear(max(Decimal("0.00"), total_bruto - descuento_global))
         
         presupuesto.save(update_fields=['subtotal', 'impuesto_total', 'total'])

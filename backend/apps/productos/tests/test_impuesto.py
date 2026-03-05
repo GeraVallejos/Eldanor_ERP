@@ -1,13 +1,8 @@
 import pytest
 from decimal import Decimal
 from django.core.exceptions import ValidationError
-from apps.core.models import Empresa
 from apps.productos.models import Impuesto
 from apps.core.tenant import set_current_empresa
-
-@pytest.fixture
-def empresa(db):
-    return Empresa.objects.create(nombre="Empresa Tax Test", rut="555-5")
 
 @pytest.mark.django_db
 class TestImpuesto:

@@ -1,18 +1,8 @@
 import pytest
 from decimal import Decimal
 from django.core.exceptions import ValidationError
-from apps.core.models import Empresa
 from apps.productos.models import Producto, Categoria, TipoProducto
 from apps.core.tenant import set_current_empresa
-
-@pytest.fixture
-def empresa(db):
-    return Empresa.objects.create(nombre="Empresa Test", rut="123-4")
-
-@pytest.fixture
-def categoria(db, empresa):
-    set_current_empresa(empresa)
-    return Categoria.objects.create(nombre="General")
 
 @pytest.mark.django_db
 class TestProducto:
@@ -48,6 +38,7 @@ class TestProducto:
         prod = Producto(
             nombre="Error",
             sku="ERR",
+            empresa=empresa,
             precio_costo=Decimal("-100"),
             precio_referencia=Decimal("100")
         )
@@ -70,6 +61,7 @@ class TestProducto:
         prod = Producto(
             nombre="Producto Fallido",
             sku="FAIL",
+            empresa=empresa,
             stock_actual=Decimal("-5"),
             maneja_inventario=True,
             precio_referencia=10

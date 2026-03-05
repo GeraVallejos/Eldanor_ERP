@@ -15,11 +15,11 @@ class TenantAdminMixin:
 
         # Filtrar Contacto, Producto, Categoria, etc.
         if hasattr(self.model, 'empresa'):
-            return qs.filter(empresa=request.user.empresa)
+            return qs.filter(empresa=request.user.empresa_activa)
         
         # Filtrar Cliente, Proveedor
         if hasattr(self.model, 'contacto'):
-            return qs.filter(contacto__empresa=request.user.empresa)
+            return qs.filter(contacto__empresa=request.user.empresa_activa)
         
         return qs
     
@@ -64,7 +64,7 @@ class TenantAdminMixin:
     def save_model(self, request, obj, form, change):
         if not request.user.is_superuser:
             if hasattr(obj, 'empresa'):
-                obj.empresa = request.user.empresa
+                obj.empresa = request.user.empresa_activa
             
             if not change and hasattr(obj, 'creado_por'):
                 obj.creado_por = request.user
@@ -85,7 +85,7 @@ class TenantAdminMixin:
                     base_qs = related_model.objects.all()
                 
                 # Aplicamos el filtro de empresa manualmente
-                kwargs["queryset"] = base_qs.filter(empresa=request.user.empresa)
+                kwargs["queryset"] = base_qs.filter(empresa=request.user.empresa_activa)
                 
         return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
@@ -97,7 +97,7 @@ class CustomUserAdmin(TenantAdminMixin, UserAdmin):
     list_display = ("username", "email", "empresa_activa", "is_staff", "is_active")
     
     fieldsets = UserAdmin.fieldsets + (
-        ("Información de ERP", {"fields": ("empresa", "rol", "telefono")}),
+        ("Información de ERP", {"fields": ("empresa_activa", "telefono")}),
     )
 
     add_fieldsets = (
@@ -110,8 +110,7 @@ class CustomUserAdmin(TenantAdminMixin, UserAdmin):
                 "last_name",
                 "password1",
                 "password2",
-                "empresa",
-                "rol",
+                "empresa_activa",
                 "is_staff",
                 "is_active",
             ),

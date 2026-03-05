@@ -34,6 +34,7 @@ class Impuesto(BaseModel):
         ]
 
     def clean(self):
+        super().clean()
         clean_impuesto(self)
 
     def save(self, *args, **kwargs):
