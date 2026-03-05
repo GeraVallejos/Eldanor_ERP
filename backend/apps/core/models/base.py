@@ -42,6 +42,27 @@ class BaseModel(models.Model):
         if self._state.adding:
             if not self.empresa_id:
                 curr_empresa = get_current_empresa()
+
+                if not curr_empresa:
+                    curr_user = get_current_user() or getattr(self, 'creado_por', None)
+
+                    if curr_user:
+                        curr_empresa = getattr(curr_user, 'empresa_activa', None)
+
+                        if not curr_empresa and hasattr(curr_user, 'empresas_rel'):
+                            relacion = (
+                                curr_user.empresas_rel.filter(activo=True)
+                                .select_related('empresa')
+                                .first()
+                            )
+
+                            if relacion:
+                                curr_empresa = relacion.empresa
+
+                                if hasattr(curr_user, 'empresa_activa') and not curr_user.empresa_activa:
+                                    curr_user.empresa_activa = curr_empresa
+                                    curr_user.save(update_fields=['empresa_activa'])
+
                 if not curr_empresa:
                     raise ValueError("No hay empresa activa en el contexto.")
                 self.empresa = curr_empresa

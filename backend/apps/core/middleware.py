@@ -17,14 +17,27 @@ class EmpresaMiddleware:
             # Solo seteamos empresa si la relación está activa para este usuario.
             if user.is_superuser:
                 set_current_empresa(empresa_activa)
-            elif empresa_activa and UserEmpresa.objects.filter(
-                user=user,
-                empresa=empresa_activa,
-                activo=True,
-            ).exists():
-                set_current_empresa(empresa_activa)
             else:
-                set_current_empresa(None)
+                relacion_activa = None
+
+                if empresa_activa:
+                    relacion_activa = UserEmpresa.objects.filter(
+                        user=user,
+                        empresa=empresa_activa,
+                        activo=True,
+                    ).select_related('empresa').first()
+
+                if not relacion_activa:
+                    relacion_activa = UserEmpresa.objects.filter(
+                        user=user,
+                        activo=True,
+                    ).select_related('empresa').first()
+
+                    if relacion_activa and user.empresa_activa_id != relacion_activa.empresa_id:
+                        user.empresa_activa = relacion_activa.empresa
+                        user.save(update_fields=['empresa_activa'])
+
+                set_current_empresa(relacion_activa.empresa if relacion_activa else None)
         else:
             set_current_user(None)
             set_current_empresa(None)

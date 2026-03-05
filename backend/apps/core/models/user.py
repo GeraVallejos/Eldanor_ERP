@@ -3,6 +3,7 @@ from django.contrib.auth.models import AbstractUser
 from django.db import models
 from apps.core.validators import normalizar_texto
 from apps.core.permisos.constantes_permisos import PERMISOS_POR_ROL, ALL
+from apps.core.roles import RolUsuario
 
 
 class User(AbstractUser):
@@ -68,6 +69,11 @@ class User(AbstractUser):
 
         modulo = str(modulo).upper()
         accion = str(accion).upper()
+        rol = relacion.rol
+
+        # OWNER y ADMIN tienen acceso total por rol.
+        if rol in (RolUsuario.OWNER, RolUsuario.ADMIN):
+            return True
 
         # 1) Permisos granulares por relación usuario-empresa (si existen) tienen prioridad.
         permisos_personalizados = {
@@ -81,8 +87,6 @@ class User(AbstractUser):
                 or f"{modulo}.*" in permisos_personalizados
                 or f"{modulo}.{accion}" in permisos_personalizados
             )
-
-        rol = relacion.rol
 
         permisos = PERMISOS_POR_ROL.get(rol)
 

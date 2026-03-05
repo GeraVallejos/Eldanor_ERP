@@ -20,6 +20,12 @@ class TenantViewSetMixin:
         self.request._empresa_cache = empresa
         return empresa
 
+    def _set_tenant_context(self):
+        user = self.request.user
+        empresa = self.get_empresa() if user and user.is_authenticated else None
+        set_current_user(user if user and user.is_authenticated else None)
+        set_current_empresa(empresa)
+
     def get_queryset(self):
         user = self.request.user
 
@@ -29,8 +35,7 @@ class TenantViewSetMixin:
         empresa = self.get_empresa()
 
         # Seteamos contexto global
-        set_current_user(user)
-        set_current_empresa(empresa)
+        self._set_tenant_context()
 
         model = getattr(self, 'model', None)
         if not model:
@@ -49,6 +54,18 @@ class TenantViewSetMixin:
             return model.objects.none()
 
         return model.objects.filter(empresa=empresa)
+
+    def perform_create(self, serializer):
+        self._set_tenant_context()
+        serializer.save()
+
+    def perform_update(self, serializer):
+        self._set_tenant_context()
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        self._set_tenant_context()
+        instance.delete()
 
     
 class AuditDiffMixin:

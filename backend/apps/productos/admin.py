@@ -24,7 +24,7 @@ class ProductoAdmin(TenantAdminMixin, admin.ModelAdmin):
     
     fieldsets = (
         ('Información Básica', {
-            'fields': ('nombre', 'sku', 'tipo', 'categoria', 'activo')
+            'fields': ('empresa', 'nombre', 'sku', 'tipo', 'categoria', 'activo')
         }),
         ('Precios e Impuestos', {
             'fields': ('precio_referencia', 'precio_costo', 'impuesto')
@@ -33,6 +33,22 @@ class ProductoAdmin(TenantAdminMixin, admin.ModelAdmin):
             'fields': ('maneja_inventario', 'stock_actual')
         }),
     )
+
+    def get_fieldsets(self, request, obj=None):
+        fieldsets = super().get_fieldsets(request, obj)
+
+        if request.user.is_superuser:
+            return fieldsets
+
+        filtered = []
+        for section_name, options in fieldsets:
+            fields = tuple(
+                field for field in options.get('fields', ())
+                if field not in ('empresa', 'creado_por')
+            )
+            filtered.append((section_name, {**options, 'fields': fields}))
+
+        return tuple(filtered)
 
     def color_stock(self, obj):
         """Le da color al stock en la lista para identificar faltantes rápido"""

@@ -12,9 +12,17 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
         relaciones = UserEmpresa.objects.filter(
             user=user,
             activo=True
+        ).select_related('empresa')
+
+        if not relaciones.exists():
+            return data
+
+        empresa_actual_valida = (
+            user.empresa_activa
+            and relaciones.filter(empresa=user.empresa_activa).exists()
         )
 
-        if relaciones.count() == 1 and not user.empresa_activa:
+        if not empresa_actual_valida:
             user.empresa_activa = relaciones.first().empresa
             user.save(update_fields=["empresa_activa"])
 

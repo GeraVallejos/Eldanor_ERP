@@ -118,7 +118,11 @@ AUTHENTICATION_BACKENDS = [
 ]
 
 AXES_FAILURE_LIMIT = 5
-AXES_COOLOFF_TIME = 1  # horas
+AXES_COOLOFF_TIME = timedelta(hours=1)
+AXES_USERNAME_FORM_FIELD = "email"
+AXES_RESET_ON_SUCCESS = True
+# En local evita bloqueos por pruebas repetidas; en produccion (DEBUG=False) sigue activo.
+AXES_ENABLED = not DEBUG
 
 
 # =========================================================

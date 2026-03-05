@@ -35,3 +35,6 @@ class UserEmpresa(models.Model):
                 name="unique_user_empresa"
             )
         ]
+
+    def __str__(self):
+        return f"{self.user.email} - {self.empresa.nombre} ({self.rol})"
