@@ -1,7 +1,8 @@
 import uuid
 from django.db import models
 from apps.core.validators import formatear_rut, normalizar_texto, validar_rut
-from apps.core.utils import logo_upload_path
+from apps.core.storage.public_storage import PublicMediaStorage
+from apps.core.utils.optimizador_imagen import optimize_image
 
 
 class PoliticaPrecio(models.TextChoices):
@@ -42,7 +43,7 @@ class Empresa(models.Model):
     )
 
     logo = models.ImageField(
-        upload_to=logo_upload_path,
+        storage=PublicMediaStorage(),
         null=True, 
         blank=True
     )
@@ -86,6 +87,25 @@ class Empresa(models.Model):
         self.direccion = normalizar_texto(self.direccion)
         self.ciudad = normalizar_texto(self.ciudad)
         self.pais = normalizar_texto(self.pais)
+
+        should_process_logo = False
+        if self.logo:
+            if not self.pk:
+                should_process_logo = True
+            else:
+                previous_logo = (
+                    self.__class__.objects
+                    .filter(pk=self.pk)
+                    .values_list('logo', flat=True)
+                    .first()
+                )
+                current_logo = getattr(self.logo, 'name', '')
+                should_process_logo = previous_logo != current_logo
+
+        if should_process_logo:
+            optimized = optimize_image(self.logo)
+            # Keep one deterministic public logo per company to avoid cross-tenant overwrites.
+            self.logo.save(f"empresas/{self.id}/logo.webp", optimized, save=False)
 
         if self.rut:
             self.rut = formatear_rut(self.rut)

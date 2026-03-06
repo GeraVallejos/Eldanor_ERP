@@ -1,69 +1,79 @@
+import { useEffect, useMemo, useState } from 'react'
 import { useDispatch, useSelector } from 'react-redux'
-import { NavLink, Outlet } from 'react-router-dom'
-import { logout, selectCurrentUser } from '@/modules/auth/authSlice'
-import { clearStoredSession } from '@/modules/auth/utils/tokenStorage'
-
-const links = [
-  { to: '/productos', label: 'Productos' },
-  { to: '/productos/nuevo', label: 'Nuevo producto' },
-  { to: '/contactos', label: 'Contactos' },
-  { to: '/presupuestos', label: 'Presupuestos' },
-]
+import { Outlet } from 'react-router-dom'
+import Sidebar from '@/components/layout/Sidebar'
+import Topbar from '@/components/layout/Topbar'
+import { resolveNavigation } from '@/config/navigation'
+import {
+  changeEmpresaActiva,
+  fetchEmpresasUsuario,
+  logoutUser,
+  selectChangingEmpresaId,
+  selectCurrentUser,
+  selectEmpresasStatus,
+  selectEmpresasUsuario,
+} from '@/modules/auth/authSlice'
 
 function ERPLayout() {
   const dispatch = useDispatch()
   const user = useSelector(selectCurrentUser)
+  const empresas = useSelector(selectEmpresasUsuario)
+  const empresasStatus = useSelector(selectEmpresasStatus)
+  const changingEmpresaId = useSelector(selectChangingEmpresaId)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
+
+  const modules = useMemo(() => resolveNavigation(user), [user])
+
+  useEffect(() => {
+    if (!user) {
+      return
+    }
+
+    dispatch(fetchEmpresasUsuario())
+  }, [dispatch, user])
 
   const handleLogout = () => {
-    clearStoredSession()
-    dispatch(logout())
+    dispatch(logoutUser())
   }
+
+  const handleChangeEmpresa = (empresaId) => {
+    if (!empresaId) {
+      return
+    }
+
+    dispatch(changeEmpresaActiva(empresaId))
+  }
+
+  const contentPaddingClass = sidebarCollapsed ? 'lg:pl-[84px]' : 'lg:pl-[260px]'
 
   return (
     <div className="min-h-screen bg-background text-foreground">
-      <header className="border-b border-border bg-card">
-        <div className="mx-auto flex w-full max-w-6xl items-center justify-between px-4 py-3">
-          <div>
-            <h1 className="text-lg font-semibold">Eldanor ERP</h1>
-            <p className="text-xs text-muted-foreground">
-              Usuario: {user?.username || 'sin identificar'}
-            </p>
-          </div>
+      <Topbar
+        user={user}
+        empresas={empresas}
+        empresasStatus={empresasStatus}
+        changingEmpresaId={changingEmpresaId}
+        onOpenMobileMenu={() => setMobileSidebarOpen(true)}
+        onChangeEmpresa={handleChangeEmpresa}
+        onLogout={handleLogout}
+      />
 
-          <div className="flex items-center gap-2">
-            <nav className="flex items-center gap-2">
-              {links.map((link) => (
-                <NavLink
-                  key={link.to}
-                  to={link.to}
-                  className={({ isActive }) =>
-                    [
-                      'rounded-md px-3 py-1.5 text-sm transition-colors',
-                      isActive
-                        ? 'bg-primary text-primary-foreground'
-                        : 'hover:bg-muted',
-                    ].join(' ')
-                  }
-                >
-                  {link.label}
-                </NavLink>
-              ))}
-            </nav>
+      <Sidebar
+        modules={modules}
+        collapsed={sidebarCollapsed}
+        mobileOpen={mobileSidebarOpen}
+        onCloseMobile={() => setMobileSidebarOpen(false)}
+        onToggleCollapsed={() => setSidebarCollapsed((prev) => !prev)}
+      />
 
-            <button
-              type="button"
-              onClick={handleLogout}
-              className="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-muted"
-            >
-              Salir
-            </button>
-          </div>
-        </div>
-      </header>
-
-      <main className="mx-auto w-full max-w-6xl px-4 py-6">
-        <Outlet />
-      </main>
+      <div className={`${contentPaddingClass} pt-16`}>
+        <main className="px-4 py-6 sm:px-6 lg:px-8">
+          <section className="rounded-2xl border border-border bg-card p-4 text-card-foreground shadow-sm sm:p-6">
+            <Outlet />
+          </section>
+        </main>
+      </div>
     </div>
   )
 }

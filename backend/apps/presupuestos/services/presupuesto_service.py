@@ -11,6 +11,22 @@ from apps.core.permisos.constantes_permisos import Acciones, Modulos
 
 class PresupuestoService:
 
+    ESTADOS_TRANSICION_VALIDA = {
+        EstadoPresupuesto.BORRADOR: {
+            EstadoPresupuesto.ENVIADO,
+            EstadoPresupuesto.APROBADO,
+            EstadoPresupuesto.ANULADO,
+        },
+        EstadoPresupuesto.ENVIADO: {
+            EstadoPresupuesto.BORRADOR,
+            EstadoPresupuesto.APROBADO,
+            EstadoPresupuesto.RECHAZADO,
+        },
+        EstadoPresupuesto.RECHAZADO: {EstadoPresupuesto.BORRADOR, EstadoPresupuesto.ENVIADO},
+        EstadoPresupuesto.APROBADO: {EstadoPresupuesto.ANULADO},
+        EstadoPresupuesto.ANULADO: set(),
+    }
+
     @staticmethod
     def _es_ultimo_folio(presupuesto):
 
@@ -98,8 +114,8 @@ class PresupuestoService:
         if not PresupuestoService._items_queryset(presupuesto).exists():
             raise ValidationError("No se puede aprobar un presupuesto sin ítems.")
         
-        if presupuesto.estado != EstadoPresupuesto.BORRADOR:
-            raise ValidationError(f"Solo se pueden aprobar presupuestos en estado Borrador.")
+        if presupuesto.estado not in (EstadoPresupuesto.BORRADOR, EstadoPresupuesto.ENVIADO):
+            raise ValidationError("Solo se pueden aprobar presupuestos en estado Borrador o Enviado.")
         
         if not usuario.tiene_permiso(Modulos.PRESUPUESTOS, Acciones.APROBAR, empresa):
             raise ValidationError("No tiene permisos para aprobar presupuestos.")
@@ -134,6 +150,60 @@ class PresupuestoService:
 
     @staticmethod
     @transaction.atomic
+    def cambiar_estado_presupuesto(presupuesto_id, nuevo_estado, empresa, usuario):
+        presupuesto = Presupuesto.all_objects.select_for_update().get(id=presupuesto_id, empresa=empresa)
+
+        estado_actual = presupuesto.estado
+        nuevo_estado = str(nuevo_estado or "").strip().upper()
+
+        estados_validos = {valor for valor, _ in EstadoPresupuesto.choices}
+        if nuevo_estado not in estados_validos:
+            raise ValidationError("Estado de presupuesto invalido.")
+
+        if nuevo_estado == estado_actual:
+            return presupuesto
+
+        permitidos = PresupuestoService.ESTADOS_TRANSICION_VALIDA.get(estado_actual, set())
+        if nuevo_estado not in permitidos:
+            raise ValidationError(
+                f"No se puede cambiar de {estado_actual} a {nuevo_estado} con las reglas actuales."
+            )
+
+        if nuevo_estado == EstadoPresupuesto.APROBADO:
+            return PresupuestoService.aprobar_presupuesto(
+                presupuesto_id=presupuesto_id,
+                empresa=empresa,
+                usuario=usuario,
+            )
+
+        if nuevo_estado == EstadoPresupuesto.ANULADO:
+            PresupuestoService.anular_presupuesto(
+                presupuesto_id=presupuesto_id,
+                empresa=empresa,
+                usuario=usuario,
+            )
+            return Presupuesto.all_objects.get(id=presupuesto_id, empresa=empresa)
+
+        if not usuario.tiene_permiso(Modulos.PRESUPUESTOS, Acciones.EDITAR, empresa):
+            raise ValidationError("No tiene permisos para cambiar el estado del presupuesto.")
+
+        estado_anterior = presupuesto.estado
+        presupuesto.estado = nuevo_estado
+        cambios = presupuesto.get_dirty_fields()
+        presupuesto.save(update_fields=["estado"])
+
+        PresupuestoService.registrar_historial(
+            presupuesto,
+            usuario,
+            estado_anterior,
+            nuevo_estado,
+            cambios,
+        )
+
+        return presupuesto
+
+    @staticmethod
+    @transaction.atomic
     def anular_presupuesto(presupuesto_id, empresa, usuario):
 
         presupuesto = (
@@ -146,16 +216,31 @@ class PresupuestoService:
         if not usuario.tiene_permiso(Modulos.PRESUPUESTOS, Acciones.ANULAR, empresa):
             raise ValidationError("No tiene permisos para anular presupuestos")
 
-        # Regla de negocio: Solo se anulan los que ya están firmados/aprobados
-        # Si es un borrador, se debería eliminar, no anular.
-        if presupuesto.estado != EstadoPresupuesto.APROBADO:
-            raise ValidationError(f"Solo se pueden anular presupuestos aprobados. Estado actual: {presupuesto.estado}")
+        # Regla de negocio: se permite anular desde borrador/enviado/aprobado.
+        if presupuesto.estado not in (
+            EstadoPresupuesto.BORRADOR,
+            EstadoPresupuesto.ENVIADO,
+            EstadoPresupuesto.APROBADO,
+        ):
+            raise ValidationError(
+                f"Solo se pueden anular presupuestos en estado borrador, enviado o aprobado. Estado actual: {presupuesto.estado}"
+            )
 
-        # Revertimos stock
-        PresupuestoService._revertir_inventario(presupuesto, usuario)
+        # Si estaba aprobado pudo impactar inventario.
+        if presupuesto.estado == EstadoPresupuesto.APROBADO:
+            PresupuestoService._revertir_inventario(presupuesto, usuario)
 
+        estado_anterior = presupuesto.estado
         presupuesto.estado = EstadoPresupuesto.ANULADO
         presupuesto.save(update_fields=["estado"])
+
+        PresupuestoService.registrar_historial(
+            presupuesto,
+            usuario,
+            estado_anterior,
+            EstadoPresupuesto.ANULADO,
+            cambios={"estado": [estado_anterior, EstadoPresupuesto.ANULADO]},
+        )
 
     @staticmethod
     @transaction.atomic

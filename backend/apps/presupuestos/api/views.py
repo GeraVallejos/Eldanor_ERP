@@ -10,6 +10,7 @@ from apps.core.permisos.permissions import TieneRelacionActiva, TienePermisoModu
 from apps.core.permisos.constantes_permisos import Modulos, Acciones
 from apps.presupuestos.api.serializer import PresupuestoItemSerializer
 from rest_framework.permissions import IsAuthenticated
+from apps.presupuestos.models.presupuesto import EstadoPresupuesto
 
 
 class PresupuestoViewSet(TenantViewSetMixin, ModelViewSet):
@@ -26,6 +27,8 @@ class PresupuestoViewSet(TenantViewSetMixin, ModelViewSet):
         "destroy": Acciones.BORRAR,
         "aprobar": Acciones.APROBAR,
         "anular": Acciones.ANULAR,
+        "cambiar_estado": Acciones.VER,
+        "catalogo_estados": Acciones.VER,
     }
 
     def create(self, request, *args, **kwargs):
@@ -73,6 +76,41 @@ class PresupuestoViewSet(TenantViewSetMixin, ModelViewSet):
             usuario=request.user
         )
         return Response({"status": "Presupuesto aprobado"})
+
+    @action(detail=True, methods=["post"])
+    def cambiar_estado(self, request, pk=None):
+        presupuesto = self.get_object()
+        nuevo_estado = request.data.get("estado")
+
+        presupuesto = PresupuestoService.cambiar_estado_presupuesto(
+            presupuesto_id=presupuesto.id,
+            nuevo_estado=nuevo_estado,
+            empresa=request.user.empresa_activa,
+            usuario=request.user,
+        )
+
+        serializer = self.get_serializer(presupuesto)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=["get"], url_path="catalogo-estados")
+    def catalogo_estados(self, request):
+        estados = [
+            {"value": value, "label": label}
+            for value, label in EstadoPresupuesto.choices
+        ]
+
+        transiciones = {
+            estado: sorted(list(destinos))
+            for estado, destinos in PresupuestoService.ESTADOS_TRANSICION_VALIDA.items()
+        }
+
+        return Response(
+            {
+                "estados": estados,
+                "transiciones": transiciones,
+            },
+            status=status.HTTP_200_OK,
+        )
     
 
 class PresupuestoItemViewSet(TenantViewSetMixin, ModelViewSet):

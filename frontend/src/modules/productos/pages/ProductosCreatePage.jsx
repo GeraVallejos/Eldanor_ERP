@@ -3,7 +3,11 @@ import { useEffect } from 'react'
 import { useForm, useWatch } from 'react-hook-form'
 import { useDispatch, useSelector } from 'react-redux'
 import { Link } from 'react-router-dom'
+import { toast } from 'sonner'
 import { z } from 'zod'
+import Button from '@/components/ui/Button'
+import { buttonVariants } from '@/components/ui/buttonVariants'
+import { cn } from '@/lib/utils'
 import {
   createProducto,
   fetchCatalogosProducto,
@@ -12,7 +16,6 @@ import {
   selectCatalogError,
   selectCatalogStatus,
   selectCategorias,
-  selectCreateProductoError,
   selectCreateProductoStatus,
   selectImpuestos,
 } from '@/modules/productos/productosSlice'
@@ -60,7 +63,6 @@ function ProductosCreatePage() {
   const catalogStatus = useSelector(selectCatalogStatus)
   const catalogError = useSelector(selectCatalogError)
   const createStatus = useSelector(selectCreateProductoStatus)
-  const createError = useSelector(selectCreateProductoError)
 
   const {
     register,
@@ -102,16 +104,10 @@ function ProductosCreatePage() {
   }, [setValue, tipoSeleccionado])
 
   useEffect(() => {
-    if (createStatus !== 'succeeded') {
-      return
+    if (catalogStatus === 'failed' && catalogError) {
+      toast.error(catalogError)
     }
-
-    const timeoutId = setTimeout(() => {
-      dispatch(resetCreateProductoState())
-    }, 2500)
-
-    return () => clearTimeout(timeoutId)
-  }, [createStatus, dispatch])
+  }, [catalogError, catalogStatus])
 
   useEffect(() => {
     return () => {
@@ -133,6 +129,7 @@ function ProductosCreatePage() {
 
     try {
       await dispatch(createProducto(payload)).unwrap()
+      toast.success('Producto creado correctamente.')
       reset({
         nombre: '',
         descripcion: '',
@@ -147,8 +144,10 @@ function ProductosCreatePage() {
         activo: true,
       })
       dispatch(fetchProductos())
-    } catch {
-      // Error handled by redux state
+      dispatch(resetCreateProductoState())
+    } catch (error) {
+      toast.error(typeof error === 'string' ? error : 'No se pudo crear el producto.')
+      dispatch(resetCreateProductoState())
     }
   }
 
@@ -161,20 +160,14 @@ function ProductosCreatePage() {
         </div>
         <Link
           to="/productos"
-          className="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-muted"
+          className={cn(buttonVariants({ variant: 'outline', size: 'md' }))}
         >
           Volver al listado
         </Link>
       </div>
 
       <form className="rounded-md border border-border bg-card p-4" onSubmit={handleSubmit(onSubmit)}>
-        {catalogStatus === 'failed' && <p className="text-sm text-destructive">{catalogError}</p>}
-        {createStatus === 'failed' && <p className="text-sm text-destructive">{createError}</p>}
-        {createStatus === 'succeeded' && (
-          <p className="text-sm text-green-600">Producto creado correctamente.</p>
-        )}
-
-        <div className="mt-4 grid gap-3 md:grid-cols-2">
+        <div className="grid gap-3 md:grid-cols-2">
           <label className="text-sm">
             Nombre
             <input className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2" {...register('nombre')} />
@@ -223,13 +216,13 @@ function ProductosCreatePage() {
 
           <label className="text-sm">
             Precio referencia
-            <input type="number" step="0.01" min="0" className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2" {...register('precio_referencia', { valueAsNumber: true })} />
+            <input type="number" step="1" min="0" className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2" {...register('precio_referencia', { valueAsNumber: true })} />
             {errors.precio_referencia && <span className="mt-1 block text-xs text-destructive">{errors.precio_referencia.message}</span>}
           </label>
 
           <label className="text-sm">
             Precio costo
-            <input type="number" step="0.01" min="0" className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2" {...register('precio_costo', { valueAsNumber: true })} />
+            <input type="number" step="1" min="0" className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2" {...register('precio_costo', { valueAsNumber: true })} />
             {errors.precio_costo && <span className="mt-1 block text-xs text-destructive">{errors.precio_costo.message}</span>}
           </label>
 
@@ -251,13 +244,13 @@ function ProductosCreatePage() {
         </div>
 
         <div className="mt-4">
-          <button
-            type="submit"
+          <Button
             disabled={createStatus === 'loading'}
-            className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-70"
+            size="md"
+            type="submit"
           >
             {createStatus === 'loading' ? 'Guardando...' : 'Crear producto'}
-          </button>
+          </Button>
         </div>
       </form>
     </section>

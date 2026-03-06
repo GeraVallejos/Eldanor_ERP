@@ -1,86 +1,16 @@
 import { createAsyncThunk, createSlice } from '@reduxjs/toolkit'
 import { api } from '@/api/client'
-
-function decodeJwtPayload(token) {
-  try {
-    const base64Payload = token.split('.')[1]
-    const normalized = base64Payload.replace(/-/g, '+').replace(/_/g, '/')
-    return JSON.parse(atob(normalized))
-  } catch {
-    return null
-  }
-}
-
-function buildUserFromAccessToken(accessToken, fallbackUser = null) {
-  const payload = decodeJwtPayload(accessToken)
-
-  const fallbackUsername = fallbackUser?.username || fallbackUser?.email || null
-  const fallbackEmail = fallbackUser?.email || null
-
-  if (!payload) {
-    if (!fallbackUsername && !fallbackEmail) {
-      return null
-    }
-
-    return {
-      id: fallbackUser?.id || null,
-      username: fallbackUsername,
-      email: fallbackEmail,
-      exp: null,
-    }
-  }
-
-  const usernameFromPayload = payload.username || payload.email || fallbackUsername
-  const emailFromPayload = payload.email || fallbackEmail
-
-  return {
-    id: payload.user_id || fallbackUser?.id || null,
-    username: usernameFromPayload,
-    email: emailFromPayload,
-    exp: payload.exp,
-  }
-}
-
-function normalizeErrorMessage(error, fallback) {
-  const data = error?.response?.data
-  const detail = data?.detail
-
-  if (typeof detail === 'string') {
-    if (/No active account found/i.test(detail)) {
-      return 'Correo o contrasena incorrectos.'
-    }
-
-    if (/credentials/i.test(detail)) {
-      return 'Credenciales invalidas.'
-    }
-
-    return detail
-  }
-
-  if (Array.isArray(detail) && detail.length > 0) {
-    return data.detail[0]
-  }
-
-  if (Array.isArray(data?.non_field_errors) && data.non_field_errors.length > 0) {
-    return data.non_field_errors[0]
-  }
-
-  if (Array.isArray(data?.email) && data.email.length > 0) {
-    return data.email[0]
-  }
-
-  if (!error?.response) {
-    return 'No pudimos conectar con el servidor. Intenta nuevamente.'
-  }
-
-  return fallback
-}
+import { normalizeApiError } from '@/api/errors'
 
 const initialState = {
-  accessToken: null,
-  refreshToken: null,
   user: null,
+  empresas: [],
+  empresasStatus: 'idle',
+  empresasError: null,
+  changingEmpresaId: null,
+  isAuthenticated: false,
   status: 'idle',
+  bootstrapStatus: 'idle',
   error: null,
 }
 
@@ -93,15 +23,82 @@ export const login = createAsyncThunk(
         password: credentials.password,
       }
 
-      const { data } = await api.post('/token/', payload)
-      return {
-        accessToken: data.access,
-        refreshToken: data.refresh,
-        userEmail: payload.email,
-      }
+      const { data } = await api.post('/token/', payload, {
+        suppressGlobalErrorToast: true,
+      })
+      return data?.user
     } catch (error) {
       return rejectWithValue(
-        normalizeErrorMessage(error, 'No se pudo iniciar sesion.'),
+        normalizeApiError(error, {
+          fallback: 'No se pudo iniciar sesion.',
+          transformDetail: (detail) => {
+            if (/No active account found/i.test(detail)) {
+              return 'Correo o contrasena incorrectos.'
+            }
+
+            if (/credentials/i.test(detail)) {
+              return 'Credenciales invalidas.'
+            }
+
+            return detail
+          },
+        }),
+      )
+    }
+  },
+)
+
+export const bootstrapSession = createAsyncThunk(
+  'auth/bootstrapSession',
+  async (_, { rejectWithValue }) => {
+    try {
+      const { data } = await api.get('/auth/me/', {
+        suppressGlobalErrorToast: true,
+      })
+      return data?.user
+    } catch (error) {
+      return rejectWithValue(error?.response?.status || 401)
+    }
+  },
+)
+
+export const logoutUser = createAsyncThunk('auth/logoutUser', async () => {
+  await api.post('/auth/logout/', undefined, {
+    suppressGlobalErrorToast: true,
+  })
+})
+
+export const fetchEmpresasUsuario = createAsyncThunk(
+  'auth/fetchEmpresasUsuario',
+  async (_, { rejectWithValue }) => {
+    try {
+      const { data } = await api.get('/empresas-usuario/', {
+        suppressGlobalErrorToast: true,
+      })
+      return Array.isArray(data) ? data : []
+    } catch (error) {
+      return rejectWithValue(
+        normalizeApiError(error, { fallback: 'No se pudieron cargar las empresas.' }),
+      )
+    }
+  },
+)
+
+export const changeEmpresaActiva = createAsyncThunk(
+  'auth/changeEmpresaActiva',
+  async (empresaId, { dispatch, rejectWithValue }) => {
+    try {
+      await api.post(
+        '/cambiar-empresa-activa/',
+        { empresa_id: empresaId },
+        { suppressGlobalErrorToast: true },
+      )
+      await dispatch(bootstrapSession()).unwrap()
+      await dispatch(fetchEmpresasUsuario()).unwrap()
+      return empresaId
+    } catch (error) {
+      return rejectWithValue(
+        normalizeApiError(error, { fallback: 'No se pudo cambiar la empresa activa.' }),
       )
     }
   },
@@ -111,37 +108,13 @@ const authSlice = createSlice({
   name: 'auth',
   initialState,
   reducers: {
-    restoreSession: (state, action) => {
-      const { accessToken, refreshToken, userEmail } = action.payload || {}
-
-      if (!accessToken || !refreshToken) {
-        return
-      }
-
-      state.accessToken = accessToken
-      state.refreshToken = refreshToken
-      state.user = buildUserFromAccessToken(accessToken, {
-        username: userEmail,
-        email: userEmail,
-      })
-      state.error = null
-    },
-    setCredentials: (state, action) => {
-      const { accessToken, refreshToken, userEmail } = action.payload
-
-      state.accessToken = accessToken
-      state.refreshToken = refreshToken || state.refreshToken
-      state.user = buildUserFromAccessToken(accessToken, {
-        ...state.user,
-        username: userEmail || state.user?.username,
-        email: userEmail || state.user?.email,
-      })
-      state.error = null
-    },
     logout: (state) => {
-      state.accessToken = null
-      state.refreshToken = null
       state.user = null
+      state.empresas = []
+      state.empresasStatus = 'idle'
+      state.empresasError = null
+      state.changingEmpresaId = null
+      state.isAuthenticated = false
       state.status = 'idle'
       state.error = null
     },
@@ -157,28 +130,74 @@ const authSlice = createSlice({
       })
       .addCase(login.fulfilled, (state, action) => {
         state.status = 'succeeded'
-        state.accessToken = action.payload.accessToken
-        state.refreshToken = action.payload.refreshToken
-        state.user = buildUserFromAccessToken(action.payload.accessToken, {
-          username: action.payload.userEmail,
-          email: action.payload.userEmail,
-        })
+        state.user = action.payload || null
+        state.isAuthenticated = Boolean(action.payload)
+        state.error = null
       })
       .addCase(login.rejected, (state, action) => {
         state.status = 'failed'
         state.error = action.payload || 'Error de autenticacion.'
       })
+      .addCase(bootstrapSession.pending, (state) => {
+        state.bootstrapStatus = 'loading'
+      })
+      .addCase(bootstrapSession.fulfilled, (state, action) => {
+        state.bootstrapStatus = 'succeeded'
+        state.user = action.payload || null
+        state.isAuthenticated = Boolean(action.payload)
+      })
+      .addCase(bootstrapSession.rejected, (state) => {
+        state.bootstrapStatus = 'failed'
+        state.user = null
+        state.isAuthenticated = false
+      })
+      .addCase(logoutUser.fulfilled, (state) => {
+        state.user = null
+        state.empresas = []
+        state.empresasStatus = 'idle'
+        state.empresasError = null
+        state.changingEmpresaId = null
+        state.isAuthenticated = false
+        state.status = 'idle'
+        state.error = null
+      })
+      .addCase(fetchEmpresasUsuario.pending, (state) => {
+        state.empresasStatus = 'loading'
+        state.empresasError = null
+      })
+      .addCase(fetchEmpresasUsuario.fulfilled, (state, action) => {
+        state.empresasStatus = 'succeeded'
+        state.empresas = action.payload
+      })
+      .addCase(fetchEmpresasUsuario.rejected, (state, action) => {
+        state.empresasStatus = 'failed'
+        state.empresas = []
+        state.empresasError = action.payload || 'Error al cargar empresas.'
+      })
+      .addCase(changeEmpresaActiva.pending, (state, action) => {
+        state.changingEmpresaId = action.meta.arg || null
+      })
+      .addCase(changeEmpresaActiva.fulfilled, (state) => {
+        state.changingEmpresaId = null
+      })
+      .addCase(changeEmpresaActiva.rejected, (state, action) => {
+        state.changingEmpresaId = null
+        state.empresasError = action.payload || 'Error al cambiar empresa.'
+      })
   },
 })
 
-export const { restoreSession, setCredentials, logout, clearAuthError } = authSlice.actions
+export const { logout, clearAuthError } = authSlice.actions
 
 export const selectAuth = (state) => state.auth
-export const selectAccessToken = (state) => state.auth.accessToken
-export const selectRefreshToken = (state) => state.auth.refreshToken
 export const selectAuthStatus = (state) => state.auth.status
+export const selectAuthBootstrapStatus = (state) => state.auth.bootstrapStatus
 export const selectAuthError = (state) => state.auth.error
 export const selectCurrentUser = (state) => state.auth.user
-export const selectIsAuthenticated = (state) => Boolean(state.auth.accessToken)
+export const selectEmpresasUsuario = (state) => state.auth.empresas
+export const selectEmpresasStatus = (state) => state.auth.empresasStatus
+export const selectEmpresasError = (state) => state.auth.empresasError
+export const selectChangingEmpresaId = (state) => state.auth.changingEmpresaId
+export const selectIsAuthenticated = (state) => state.auth.isAuthenticated
 
 export default authSlice.reducer

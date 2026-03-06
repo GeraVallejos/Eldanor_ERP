@@ -1,5 +1,6 @@
 import { createAsyncThunk, createSlice } from '@reduxjs/toolkit'
 import { api } from '@/api/client'
+import { normalizeApiError } from '@/api/errors'
 import { login, logout } from '@/modules/auth/authSlice'
 
 function normalizeProductsResponse(data) {
@@ -12,24 +13,6 @@ function normalizeProductsResponse(data) {
   }
 
   return []
-}
-
-function normalizeErrorMessage(error, fallback) {
-  const data = error?.response?.data
-
-  if (typeof data?.detail === 'string') {
-    return data.detail
-  }
-
-  if (Array.isArray(data?.detail) && data.detail.length > 0) {
-    return data.detail[0]
-  }
-
-  if (Array.isArray(data?.non_field_errors) && data.non_field_errors.length > 0) {
-    return data.non_field_errors[0]
-  }
-
-  return fallback
 }
 
 function normalizeCatalogResponse(data) {
@@ -60,11 +43,13 @@ export const fetchProductos = createAsyncThunk(
   'productos/fetchProductos',
   async (_, { rejectWithValue }) => {
     try {
-      const { data } = await api.get('/productos/')
+      const { data } = await api.get('/productos/', {
+        suppressGlobalErrorToast: true,
+      })
       return normalizeProductsResponse(data)
     } catch (error) {
       return rejectWithValue(
-        normalizeErrorMessage(error, 'No se pudo cargar productos.'),
+        normalizeApiError(error, { fallback: 'No se pudo cargar productos.' }),
       )
     }
   },
@@ -75,8 +60,8 @@ export const fetchCatalogosProducto = createAsyncThunk(
   async (_, { rejectWithValue }) => {
     try {
       const [{ data: categoriasData }, { data: impuestosData }] = await Promise.all([
-        api.get('/categorias/'),
-        api.get('/impuestos/'),
+        api.get('/categorias/', { suppressGlobalErrorToast: true }),
+        api.get('/impuestos/', { suppressGlobalErrorToast: true }),
       ])
 
       return {
@@ -85,7 +70,7 @@ export const fetchCatalogosProducto = createAsyncThunk(
       }
     } catch (error) {
       return rejectWithValue(
-        normalizeErrorMessage(error, 'No se pudieron cargar categorias e impuestos.'),
+        normalizeApiError(error, { fallback: 'No se pudieron cargar categorias e impuestos.' }),
       )
     }
   },
@@ -95,11 +80,13 @@ export const createProducto = createAsyncThunk(
   'productos/createProducto',
   async (payload, { rejectWithValue }) => {
     try {
-      const { data } = await api.post('/productos/', payload)
+      const { data } = await api.post('/productos/', payload, {
+        suppressGlobalErrorToast: true,
+      })
       return data
     } catch (error) {
       return rejectWithValue(
-        normalizeErrorMessage(error, 'No se pudo crear el producto.'),
+        normalizeApiError(error, { fallback: 'No se pudo crear el producto.' }),
       )
     }
   },

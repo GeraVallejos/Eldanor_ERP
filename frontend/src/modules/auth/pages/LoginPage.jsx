@@ -21,7 +21,6 @@ import {
     selectAuthError,
     selectAuthStatus,
 } from '@/modules/auth/authSlice'
-import { writeStoredSession } from '@/modules/auth/utils/tokenStorage'
 
 const loginSchema = z.object({
     email: z.string().trim().min(1, 'El email es requerido.').email('Formato de email inválido.'),
@@ -61,8 +60,7 @@ function LoginPage() {
 
     const onSubmit = async (values) => {
         try {
-            const result = await dispatch(login(values)).unwrap()
-            writeStoredSession(result)
+            await dispatch(login(values)).unwrap()
 
             const nextPath = location.state?.from?.pathname || '/productos'
             navigate(nextPath, { replace: true })

@@ -131,7 +131,7 @@ AXES_ENABLED = not DEBUG
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
-        "rest_framework_simplejwt.authentication.JWTAuthentication",
+        "apps.core.authentication.CookieJWTAuthentication",
     ),
     "DEFAULT_PERMISSION_CLASSES": (
         "rest_framework.permissions.IsAuthenticated",
@@ -161,13 +161,20 @@ SIMPLE_JWT = {
     "AUTH_HEADER_TYPES": ("Bearer",),
 }
 
+AUTH_COOKIE_ACCESS_NAME = config("AUTH_COOKIE_ACCESS_NAME", default="erp_access")
+AUTH_COOKIE_REFRESH_NAME = config("AUTH_COOKIE_REFRESH_NAME", default="erp_refresh")
+AUTH_COOKIE_SECURE = config("AUTH_COOKIE_SECURE", default=not DEBUG, cast=bool)
+AUTH_COOKIE_SAMESITE = config("AUTH_COOKIE_SAMESITE", default="Lax")
+AUTH_COOKIE_DOMAIN = config("AUTH_COOKIE_DOMAIN", default=None)
+AUTH_COOKIE_PATH = config("AUTH_COOKIE_PATH", default="/")
+
 # =========================================================
 # CORS
 # =========================================================
 
 CORS_ALLOWED_ORIGINS = config(
     "CORS_ALLOWED_ORIGINS",
-    default="http://localhost:5173"
+    default="http://localhost:5173,http://127.0.0.1:5173"
 ).split(",")
 
 CORS_ALLOW_CREDENTIALS = True
@@ -194,13 +201,37 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 
 
 # Configuración Cloudflare R2
-# AWS_ACCESS_KEY_ID = config("AWS_ACCESS_KEY_ID")
-# AWS_SECRET_ACCESS_KEY = config("AWS_SECRET_ACCESS_KEY")
-# AWS_STORAGE_BUCKET_NAME = config("AWS_STORAGE_BUCKET_NAME")
-# AWS_S3_ENDPOINT_URL = config("AWS_S3_ENDPOINT_URL")
-# AWS_S3_REGION_NAME = config("AWS_S3_REGION_NAME")
-# AWS_S3_CUSTOM_DOMAIN = config("AWS_S3_CUSTOM_DOMAIN")
-# AWS_S3_FILE_OVERWRITE = True
+AWS_ACCESS_KEY_ID = config("AWS_ACCESS_KEY_ID")
+AWS_SECRET_ACCESS_KEY = config("AWS_SECRET_ACCESS_KEY")
+AWS_STORAGE_BUCKET_NAME = config("AWS_STORAGE_BUCKET_NAME")
+AWS_S3_ENDPOINT_URL = config("AWS_S3_ENDPOINT_URL")
+AWS_S3_REGION_NAME = config("AWS_S3_REGION_NAME")
+_custom_domain = config("AWS_S3_CUSTOM_DOMAIN", default="").strip()
+if _custom_domain.startswith("tu-dominio-configurado"):
+    _custom_domain = ""
+if _custom_domain.startswith("http://"):
+    _custom_domain = _custom_domain[len("http://") :]
+if _custom_domain.startswith("https://"):
+    _custom_domain = _custom_domain[len("https://") :]
+_custom_domain = _custom_domain.rstrip("/")
+AWS_S3_CUSTOM_DOMAIN = _custom_domain or None
+AWS_S3_FILE_OVERWRITE = True
+AWS_S3_SIGNATURE_VERSION = "s3v4"
+AWS_S3_ADDRESSING_STYLE = "path"
 
-# Indicar a Django que use R2 para archivos media
-# DEFAULT_FILE_STORAGE = config("DEFAULT_FILE_STORAGE", default="storages.backends.s3boto3.S3Boto3Storage")
+AWS_DEFAULT_ACL = None
+AWS_QUERYSTRING_AUTH = False
+
+AWS_S3_OBJECT_PARAMETERS = {
+    "CacheControl": "max-age=86400, s-maxage=86400, must-revalidate",
+}
+
+# Django 6 storage configuration.
+STORAGES = {
+    "default": {
+        "BACKEND": "apps.core.storage.tenant_storage.TenantStorage",
+    },
+    "staticfiles": {
+        "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+    },
+}
