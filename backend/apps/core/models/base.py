@@ -1,6 +1,7 @@
 import uuid
 from django.db import models
 from django.conf import settings
+from apps.core.exceptions import BusinessRuleError
 from ..tenant import get_current_empresa, get_current_user
 from ..managers import EmpresaManager, AllObjectsManager
 
@@ -64,7 +65,7 @@ class BaseModel(models.Model):
                                     curr_user.save(update_fields=['empresa_activa'])
 
                 if not curr_empresa:
-                    raise ValueError("No hay empresa activa en el contexto.")
+                    raise BusinessRuleError("No hay empresa activa en el contexto.")
                 self.empresa = curr_empresa
 
             if not self.creado_por_id:
@@ -80,7 +81,7 @@ class BaseModel(models.Model):
                 .first()
             )
             if original_empresa_id and str(original_empresa_id) != str(self.empresa_id):
-                raise ValueError("La empresa propietaria no puede ser modificada.")
+                raise BusinessRuleError("La empresa propietaria no puede ser modificada.")
 
         skip_clean = kwargs.pop("skip_clean", False)
         if not skip_clean:

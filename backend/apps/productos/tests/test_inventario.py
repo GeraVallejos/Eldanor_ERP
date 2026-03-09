@@ -1,6 +1,6 @@
 import pytest
 from decimal import Decimal
-from django.core.exceptions import ValidationError
+from apps.core.exceptions import BusinessRuleError
 
 from apps.core.tenant import set_current_empresa
 from apps.productos.models import Producto, TipoProducto
@@ -64,7 +64,7 @@ class TestInventarioService:
         producto_fisico.stock_actual = Decimal("5.00")
         producto_fisico.save()
 
-        with pytest.raises(ValidationError) as excinfo:
+        with pytest.raises(BusinessRuleError) as excinfo:
             InventarioService.registrar_movimiento(
                 producto_id=producto_fisico.id,
                 tipo=TipoMovimiento.SALIDA,
@@ -86,7 +86,7 @@ class TestInventarioService:
             precio_referencia=Decimal("1000"),
         )
 
-        with pytest.raises(ValidationError) as excinfo:
+        with pytest.raises(BusinessRuleError) as excinfo:
             InventarioService.registrar_movimiento(
                 producto_id=servicio.id,
                 tipo=TipoMovimiento.ENTRADA,

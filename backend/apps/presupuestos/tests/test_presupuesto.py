@@ -1,7 +1,7 @@
 import pytest
 from decimal import Decimal
 from django.core.exceptions import ValidationError as DjangoValidationError
-from rest_framework.exceptions import ValidationError
+from apps.core.exceptions import BusinessRuleError
 from django.test import RequestFactory
 from apps.presupuestos.services.presupuesto_service import PresupuestoService
 from apps.productos.models import Producto
@@ -166,7 +166,7 @@ class TestPresupuestoService:
             precio_unitario=Decimal("100.00"),
         )
 
-        with pytest.raises(DjangoValidationError):
+        with pytest.raises(BusinessRuleError):
             PresupuestoService.aprobar_presupuesto(
                 presupuesto.id,
                 empresa,

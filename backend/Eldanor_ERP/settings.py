@@ -133,6 +133,7 @@ REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
         "apps.core.authentication.CookieJWTAuthentication",
     ),
+    "EXCEPTION_HANDLER": "apps.core.api.exception_handler.custom_exception_handler",
     "DEFAULT_PERMISSION_CLASSES": (
         "rest_framework.permissions.IsAuthenticated",
     ),

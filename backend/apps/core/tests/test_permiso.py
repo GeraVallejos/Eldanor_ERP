@@ -145,14 +145,14 @@ def cliente(empresa):
     )
 
 @pytest.fixture
-def presupuesto_borrador(empresa, cliente, usuario_owner):
+def presupuesto_borrador(empresa, cliente, usuario):
     return Presupuesto.objects.create(
         empresa=empresa,
         cliente=cliente,
         numero=1,
         fecha=date.today(),
         estado=EstadoPresupuesto.BORRADOR,
-        creado_por=usuario_owner
+        creado_por=usuario
     )
 
 @pytest.fixture
@@ -277,13 +277,14 @@ class TestPermisos:
 
 
     def test_vendedor_no_puede_aprobar_presupuesto(
+        self,
         usuario_vendedor,
         empresa,
         presupuesto_borrador
     ):
-        from rest_framework.exceptions import ValidationError
+        from apps.core.exceptions import AuthorizationError
 
-        with pytest.raises(ValidationError):
+        with pytest.raises(AuthorizationError):
             PresupuestoService.aprobar_presupuesto(
                 presupuesto_borrador.id,
                 empresa,
@@ -292,13 +293,14 @@ class TestPermisos:
 
 
     def test_usuario_no_puede_operar_en_empresa_ajena(
+        self,
         usuario_owner_empresa_a,
         empresa_b,
         presupuesto_empresa_b
     ):
-        from rest_framework.exceptions import ValidationError
+        from apps.core.exceptions import AuthorizationError
 
-        with pytest.raises(ValidationError):
+        with pytest.raises(AuthorizationError):
             PresupuestoService.aprobar_presupuesto(
                 presupuesto_empresa_b.id,
                 empresa_b,
@@ -307,13 +309,14 @@ class TestPermisos:
 
 
     def test_relacion_inactiva_bloquea_servicios(
+        self,
         usuario_admin_inactivo,
         empresa,
         presupuesto_borrador
     ):
-        from rest_framework.exceptions import ValidationError
+        from apps.core.exceptions import AuthorizationError
 
-        with pytest.raises(ValidationError):
+        with pytest.raises(AuthorizationError):
             PresupuestoService.aprobar_presupuesto(
                 presupuesto_borrador.id,
                 empresa,
@@ -383,9 +386,9 @@ class TestPermisos:
         )
 
         # No puede aprobar en B
-        from rest_framework.exceptions import ValidationError
+        from apps.core.exceptions import AuthorizationError
 
-        with pytest.raises(ValidationError):
+        with pytest.raises(AuthorizationError):
             PresupuestoService.aprobar_presupuesto(
                 presupuesto_b.id,
                 empresa_b,

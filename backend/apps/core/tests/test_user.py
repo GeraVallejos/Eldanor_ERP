@@ -3,6 +3,7 @@ from django.test import RequestFactory
 from apps.core.middleware import EmpresaMiddleware
 from apps.core.tenant import get_current_empresa, set_current_empresa, set_current_user
 from apps.core.models import Empresa, ModelPrueba
+from apps.core.exceptions import BusinessRuleError
 from apps.core.models.userEmpresa import UserEmpresa
 
 # --- FIXTURES ---
@@ -95,7 +96,7 @@ def test_prohibir_cambio_de_empresa(empresa_activa):
     empresa_b = Empresa.objects.create(nombre="Empresa B", rut="222-2", email="b@b.com")
     
     obj.empresa = empresa_b
-    with pytest.raises(ValueError, match="La empresa propietaria no puede ser modificada"):
+    with pytest.raises(BusinessRuleError, match="La empresa propietaria no puede ser modificada"):
         obj.save()
 
 @pytest.mark.django_db

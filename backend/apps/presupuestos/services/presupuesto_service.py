@@ -1,6 +1,6 @@
 from django.db import transaction
 from django.db.models import Max
-from rest_framework.exceptions import ValidationError
+from apps.core.exceptions import AuthorizationError, BusinessRuleError
 from apps.presupuestos.models import EstadoPresupuesto
 from apps.productos.models import MovimientoInventario, TipoMovimiento
 from apps.core.services.secuencia_service import SecuenciaService
@@ -84,7 +84,7 @@ class PresupuestoService:
     def crear_presupuesto(data, empresa, usuario):
 
         if not usuario.tiene_permiso(Modulos.PRESUPUESTOS, Acciones.CREAR, empresa):
-            raise ValidationError("No tiene permisos para crear presupuestos.")
+            raise AuthorizationError("No tiene permisos para crear presupuestos.")
 
         numero = SecuenciaService.obtener_siguiente_numero(
             empresa=empresa,
@@ -110,15 +110,15 @@ class PresupuestoService:
         # 1. Traer el objeto y bloquearlo para edición
         presupuesto = Presupuesto.all_objects.select_for_update().get(id=presupuesto_id, empresa=empresa)
 
+        if not usuario.tiene_permiso(Modulos.PRESUPUESTOS, Acciones.APROBAR, empresa):
+            raise AuthorizationError("No tiene permisos para aprobar presupuestos.")
+
         # 2. Validaciones de negocio
         if not PresupuestoService._items_queryset(presupuesto).exists():
-            raise ValidationError("No se puede aprobar un presupuesto sin ítems.")
+            raise BusinessRuleError("No se puede aprobar un presupuesto sin ítems.")
         
         if presupuesto.estado not in (EstadoPresupuesto.BORRADOR, EstadoPresupuesto.ENVIADO):
-            raise ValidationError("Solo se pueden aprobar presupuestos en estado Borrador o Enviado.")
-        
-        if not usuario.tiene_permiso(Modulos.PRESUPUESTOS, Acciones.APROBAR, empresa):
-            raise ValidationError("No tiene permisos para aprobar presupuestos.")
+            raise BusinessRuleError("Solo se pueden aprobar presupuestos en estado Borrador o Enviado.")
 
         # 3. Capturar cambios para el historial usando el Mixin
         # Seteamos el nuevo estado temporalmente en la instancia para que el Mixin vea la diferencia
@@ -158,14 +158,14 @@ class PresupuestoService:
 
         estados_validos = {valor for valor, _ in EstadoPresupuesto.choices}
         if nuevo_estado not in estados_validos:
-            raise ValidationError("Estado de presupuesto invalido.")
+            raise BusinessRuleError("Estado de presupuesto invalido.")
 
         if nuevo_estado == estado_actual:
             return presupuesto
 
         permitidos = PresupuestoService.ESTADOS_TRANSICION_VALIDA.get(estado_actual, set())
         if nuevo_estado not in permitidos:
-            raise ValidationError(
+            raise BusinessRuleError(
                 f"No se puede cambiar de {estado_actual} a {nuevo_estado} con las reglas actuales."
             )
 
@@ -185,7 +185,7 @@ class PresupuestoService:
             return Presupuesto.all_objects.get(id=presupuesto_id, empresa=empresa)
 
         if not usuario.tiene_permiso(Modulos.PRESUPUESTOS, Acciones.EDITAR, empresa):
-            raise ValidationError("No tiene permisos para cambiar el estado del presupuesto.")
+            raise AuthorizationError("No tiene permisos para cambiar el estado del presupuesto.")
 
         estado_anterior = presupuesto.estado
         presupuesto.estado = nuevo_estado
@@ -214,7 +214,7 @@ class PresupuestoService:
 
         # Seguridad: Solo ciertos roles pueden anular
         if not usuario.tiene_permiso(Modulos.PRESUPUESTOS, Acciones.ANULAR, empresa):
-            raise ValidationError("No tiene permisos para anular presupuestos")
+            raise AuthorizationError("No tiene permisos para anular presupuestos")
 
         # Regla de negocio: se permite anular desde borrador/enviado/aprobado.
         if presupuesto.estado not in (
@@ -222,7 +222,7 @@ class PresupuestoService:
             EstadoPresupuesto.ENVIADO,
             EstadoPresupuesto.APROBADO,
         ):
-            raise ValidationError(
+            raise BusinessRuleError(
                 f"Solo se pueden anular presupuestos en estado borrador, enviado o aprobado. Estado actual: {presupuesto.estado}"
             )
 
@@ -250,14 +250,14 @@ class PresupuestoService:
 
         # Seguridad: Solo ciertos roles pueden eliminar
         if not usuario.tiene_permiso(Modulos.PRESUPUESTOS, Acciones.BORRAR, empresa):
-            raise ValidationError("No tiene permisos para eliminar presupuestos")
+            raise AuthorizationError("No tiene permisos para eliminar presupuestos")
 
         # SEGURIDAD DE INVENTARIO
         if presupuesto.estado == EstadoPresupuesto.APROBADO:
             # Si el ERP permite borrar algo aprobado (solo el último folio),
             # DEBEMOS devolver la mercadería al estante.
             if not PresupuestoService._es_ultimo_folio(presupuesto):
-                 raise ValidationError("No se puede eliminar un presupuesto aprobado que no sea el último. Debe anularlo.")
+                  raise BusinessRuleError("No se puede eliminar un presupuesto aprobado que no sea el último. Debe anularlo.")
             
             PresupuestoService._revertir_inventario(presupuesto, usuario)
 
@@ -279,10 +279,10 @@ class PresupuestoService:
         original = Presupuesto.all_objects.get(id=presupuesto_id, empresa=empresa)
 
         if not PresupuestoService._items_queryset(original).exists():
-            raise ValidationError("No se puede clonar un presupuesto sin ítems.")
+            raise BusinessRuleError("No se puede clonar un presupuesto sin ítems.")
         
         if not usuario.tiene_permiso(Modulos.PRESUPUESTOS, Acciones.CREAR, empresa):
-            raise ValidationError("No tiene permisos para crear presupuestos.")
+            raise AuthorizationError("No tiene permisos para crear presupuestos.")
         
         # 1. Obtener nuevo número
         nuevo_numero = SecuenciaService.obtener_siguiente_numero(

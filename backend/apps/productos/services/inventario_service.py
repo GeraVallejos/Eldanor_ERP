@@ -1,5 +1,5 @@
 from django.db import transaction
-from django.core.exceptions import ValidationError
+from apps.core.exceptions import BusinessRuleError
 from apps.productos.models.producto import Producto
 from apps.productos.models.movimiento import MovimientoInventario, TipoMovimiento
 
@@ -22,10 +22,10 @@ class InventarioService:
         """
 
         if cantidad <= 0:
-            raise ValidationError("La cantidad debe ser mayor a cero.")
+            raise BusinessRuleError("La cantidad debe ser mayor a cero.")
 
         if tipo not in TipoMovimiento.values:
-            raise ValidationError("Tipo de movimiento inválido.")
+            raise BusinessRuleError("Tipo de movimiento inválido.")
 
         # Bloqueo seguro multiempresa
         # Evitamos depender del contexto tenant implícito: el servicio ya recibe empresa.
@@ -36,7 +36,7 @@ class InventarioService:
         )
 
         if not producto.maneja_inventario:
-            raise ValidationError(
+            raise BusinessRuleError(
                 f"El producto {producto.nombre} no maneja inventario."
             )
 
@@ -50,7 +50,7 @@ class InventarioService:
             nuevo_stock = stock_anterior - cantidad
 
             if nuevo_stock < 0:
-                raise ValidationError(
+                raise BusinessRuleError(
                     f"Stock insuficiente para {producto.nombre}. "
                     f"Disponible: {stock_anterior}"
                 )
