@@ -6,6 +6,7 @@ from rest_framework import status
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from apps.core.models import UserEmpresa
+from apps.documentos.models import TipoDocumentoReferencia
 from apps.inventario.services.inventario_service import InventarioService
 from apps.productos.models import Producto
 
@@ -85,3 +86,78 @@ class TestInventarioApi:
 
         assert resp.status_code == status.HTTP_200_OK
         assert str(resp.data["producto"]) == str(producto.id)
+
+    def test_kardex_endpoint_permita_filtros_y_paginacion(self, api_client, owner_usuario, empresa):
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
+
+        producto = Producto.objects.create(
+            empresa=empresa,
+            nombre="Producto Filtros Kardex",
+            sku="PK-FILT-1",
+            stock_actual=Decimal("0.00"),
+            maneja_inventario=True,
+            precio_referencia=Decimal("1500"),
+        )
+
+        InventarioService.registrar_movimiento(
+            producto_id=producto.id,
+            tipo="ENTRADA",
+            cantidad=Decimal("2.00"),
+            referencia="COMPRA TEST UNO",
+            empresa=empresa,
+            usuario=owner_usuario,
+            documento_tipo=TipoDocumentoReferencia.COMPRA_RECEPCION,
+        )
+        InventarioService.registrar_movimiento(
+            producto_id=producto.id,
+            tipo="SALIDA",
+            cantidad=Decimal("1.00"),
+            referencia="VENTA TEST DOS",
+            empresa=empresa,
+            usuario=owner_usuario,
+            documento_tipo=TipoDocumentoReferencia.VENTA_FACTURA,
+        )
+
+        resp = api_client.get(
+            reverse("movimiento-inventario-kardex"),
+            {
+                "producto_id": str(producto.id),
+                "tipo": "ENTRADA",
+                "documento_tipo": TipoDocumentoReferencia.COMPRA_RECEPCION,
+                "referencia": "COMPRA",
+                "page_size": 1,
+            },
+        )
+
+        assert resp.status_code == status.HTTP_200_OK
+        assert "count" in resp.data
+        assert len(resp.data["results"]) == 1
+        assert resp.data["results"][0]["tipo"] == "ENTRADA"
+
+    def test_resumen_valorizado_endpoint(self, api_client, owner_usuario, empresa):
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
+
+        producto = Producto.objects.create(
+            empresa=empresa,
+            nombre="Producto Resumen",
+            sku="PR-RES-1",
+            stock_actual=Decimal("0.00"),
+            maneja_inventario=True,
+            precio_referencia=Decimal("2500"),
+        )
+
+        InventarioService.registrar_movimiento(
+            producto_id=producto.id,
+            tipo="ENTRADA",
+            cantidad=Decimal("4.00"),
+            costo_unitario=Decimal("1000.00"),
+            referencia="RESUMEN-TEST",
+            empresa=empresa,
+            usuario=owner_usuario,
+        )
+
+        resp = api_client.get(reverse("stock-producto-resumen"), {"group_by": "producto"})
+
+        assert resp.status_code == status.HTTP_200_OK
+        assert "totales" in resp.data
+        assert Decimal(str(resp.data["totales"]["stock_total"])) > 0

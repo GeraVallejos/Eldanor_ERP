@@ -175,10 +175,30 @@ class InventarioService:
         return movimiento
 
     @staticmethod
-    def obtener_kardex(*, empresa, producto_id, bodega_id=None):
+    def obtener_kardex(
+        *,
+        empresa,
+        producto_id,
+        bodega_id=None,
+        desde=None,
+        hasta=None,
+        tipo=None,
+        documento_tipo=None,
+        referencia=None,
+    ):
         queryset = MovimientoInventario.all_objects.filter(empresa=empresa, producto_id=producto_id)
         if bodega_id:
             queryset = queryset.filter(bodega_id=bodega_id)
+        if desde is not None:
+            queryset = queryset.filter(creado_en__gte=desde)
+        if hasta is not None:
+            queryset = queryset.filter(creado_en__lte=hasta)
+        if tipo:
+            queryset = queryset.filter(tipo=tipo)
+        if documento_tipo:
+            queryset = queryset.filter(documento_tipo=documento_tipo)
+        if referencia:
+            queryset = queryset.filter(referencia__icontains=referencia)
         return queryset.order_by("creado_en", "id")
 
     @staticmethod
