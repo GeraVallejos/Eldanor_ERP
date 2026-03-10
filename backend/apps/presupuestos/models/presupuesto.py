@@ -4,7 +4,7 @@ from django.core.exceptions import ValidationError
 from django.db import models
 
 from apps.core.mixins import AuditDiffMixin, TenantRelationValidationMixin
-from apps.core.models import BaseModel
+from apps.documentos.models import DocumentoBase
 
 
 class EstadoPresupuesto(models.TextChoices):
@@ -15,7 +15,7 @@ class EstadoPresupuesto(models.TextChoices):
     ANULADO = "ANULADO", "Anulado"
 
 
-class Presupuesto(AuditDiffMixin, TenantRelationValidationMixin, BaseModel):
+class Presupuesto(AuditDiffMixin, TenantRelationValidationMixin, DocumentoBase):
     tenant_fk_fields = ["cliente"]
 
     numero = models.PositiveIntegerField()
@@ -39,8 +39,6 @@ class Presupuesto(AuditDiffMixin, TenantRelationValidationMixin, BaseModel):
     descuento = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     impuesto_total = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     total = models.DecimalField(max_digits=14, decimal_places=2, default=0)
-
-    observaciones = models.TextField(blank=True)
 
     class Meta:
         ordering = ["-fecha"]

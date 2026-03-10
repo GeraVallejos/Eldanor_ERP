@@ -4,8 +4,8 @@ from apps.core.exceptions import BusinessRuleError
 
 from apps.core.tenant import set_current_empresa
 from apps.productos.models import Producto, TipoProducto
-from apps.productos.models.movimiento import TipoMovimiento
-from apps.productos.services.inventario_service import InventarioService
+from apps.inventario.models.movimiento import TipoMovimiento
+from apps.inventario.services.inventario_service import InventarioService
 
 
 @pytest.fixture

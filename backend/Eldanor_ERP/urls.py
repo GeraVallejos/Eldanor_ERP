@@ -9,4 +9,6 @@ urlpatterns = [
     path("api/", include("apps.productos.api.urls")),
     path("api/", include("apps.contactos.api.urls")),
     path("api/", include("apps.presupuestos.api.urls")),
+    path("api/", include("apps.compras.api.urls")),
+    path("api/", include("apps.inventario.api.urls")),
 ]

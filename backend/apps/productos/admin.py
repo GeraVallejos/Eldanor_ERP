@@ -4,7 +4,7 @@ from  apps.core.admin import TenantAdminMixin
 from .models.producto import Producto
 from .models.categoria import Categoria
 from .models.impuesto import Impuesto
-from .models.movimiento import MovimientoInventario, TipoMovimiento
+from ..inventario.models.movimiento import MovimientoInventario, TipoMovimiento
 
 class MovimientoInventarioInline(TenantAdminMixin, admin.TabularInline):
     model = MovimientoInventario

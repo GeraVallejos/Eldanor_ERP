@@ -66,6 +66,11 @@ class Producto(TenantRelationValidationMixin, BaseModel):
         decimal_places=2,
         default=0
     )
+    costo_promedio = models.DecimalField(
+        max_digits=12,
+        decimal_places=4,
+        default=0
+    )
 
     activo = models.BooleanField(default=True)
 
@@ -103,6 +108,7 @@ class Producto(TenantRelationValidationMixin, BaseModel):
         if self.tipo == TipoProducto.SERVICIO:
             self.maneja_inventario = False
             self.stock_actual = 0
+            self.costo_promedio = 0
 
         super().save(*args, **kwargs)
 

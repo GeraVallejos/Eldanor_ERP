@@ -4,11 +4,11 @@ from django.core.exceptions import ValidationError
 from django.db import models, transaction
 
 from apps.core.mixins import TenantRelationValidationMixin
-from apps.core.models import BaseModel
+from apps.documentos.models import DocumentoItemBase
 from apps.presupuestos.models.presupuesto import EstadoPresupuesto, Presupuesto
 
 
-class PresupuestoItem(TenantRelationValidationMixin, BaseModel):
+class PresupuestoItem(TenantRelationValidationMixin, DocumentoItemBase):
     tenant_fk_fields = ["presupuesto", "producto", "impuesto"]
 
     presupuesto = models.ForeignKey(
@@ -24,24 +24,15 @@ class PresupuestoItem(TenantRelationValidationMixin, BaseModel):
         blank=True,
     )
 
-    descripcion = models.CharField(max_length=255)
-
     cantidad = models.DecimalField(max_digits=14, decimal_places=2)
     precio_unitario = models.DecimalField(max_digits=14, decimal_places=2)
 
     descuento = models.DecimalField(max_digits=14, decimal_places=2, default=0)
 
-    impuesto = models.ForeignKey(
-        "productos.Impuesto",
-        on_delete=models.PROTECT,
-        null=True,
-        blank=True,
-    )
-
     impuesto_porcentaje = models.DecimalField(max_digits=5, decimal_places=2, default=0)
 
-    subtotal = models.DecimalField(max_digits=14, decimal_places=2, default=0)
-    total = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    class Meta:
+        base_manager_name = "all_objects"
 
     @transaction.atomic
     def save(self, *args, **kwargs):

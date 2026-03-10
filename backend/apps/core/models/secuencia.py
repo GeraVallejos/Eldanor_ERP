@@ -10,6 +10,14 @@ class TipoDocumento(models.TextChoices):
 class SecuenciaDocumento(BaseModel):
 
     tipo_documento = models.CharField(max_length=30, choices=TipoDocumento.choices)
+    prefijo = models.CharField(
+        max_length=10,
+        blank=True
+    )
+
+    padding = models.PositiveIntegerField(
+        default=5
+    )
     ultimo_numero = models.PositiveIntegerField(default=0)
 
     class Meta:
