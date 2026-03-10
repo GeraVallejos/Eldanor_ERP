@@ -10,6 +10,11 @@ import ProveedoresListPage from '@/modules/contactos/pages/ProveedoresListPage'
 import PresupuestosCreatePage from '@/modules/presupuestos/pages/PresupuestosCreatePage'
 import PresupuestosEditPage from '@/modules/presupuestos/pages/PresupuestosEditPage'
 import PresupuestosListPage from '@/modules/presupuestos/pages/PresupuestosListPage'
+import ComprasOrdenesListPage from '@/modules/compras/pages/ComprasOrdenesListPage'
+import ComprasOrdenesCreatePage from '@/modules/compras/pages/ComprasOrdenesCreatePage'
+import ComprasRecepcionesPage from '@/modules/compras/pages/ComprasRecepcionesPage'
+import InventarioKardexPage from '@/modules/inventario/pages/InventarioKardexPage'
+import InventarioResumenPage from '@/modules/inventario/pages/InventarioResumenPage'
 import ProductosCreatePage from '@/modules/productos/pages/ProductosCreatePage'
 import ProductosListPage from '@/modules/productos/pages/ProductosListPage'
 import NotFoundPage from '@/modules/shared/pages/NotFoundPage'
@@ -33,6 +38,11 @@ const router = createBrowserRouter([
           { path: 'presupuestos/:id/editar', element: <PresupuestosEditPage /> },
           { path: 'productos', element: <ProductosListPage /> },
           { path: 'productos/nuevo', element: <ProductosCreatePage /> },
+          { path: 'compras/ordenes', element: <ComprasOrdenesListPage /> },
+          { path: 'compras/ordenes/nuevo', element: <ComprasOrdenesCreatePage /> },
+          { path: 'compras/recepciones', element: <ComprasRecepcionesPage /> },
+          { path: 'inventario/kardex', element: <InventarioKardexPage /> },
+          { path: 'inventario/resumen', element: <InventarioResumenPage /> },
         ],
       },
     ],
