@@ -16,12 +16,16 @@ import Button from '@/components/ui/Button'
 import { buttonVariants } from '@/components/ui/buttonVariants'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import { cn } from '@/lib/utils'
+import { invalidateProductosCatalogCache } from '@/modules/productos/services/productosCatalogCache'
+import { downloadExcelFile } from '@/modules/shared/exports/downloadExcelFile'
+import { downloadSimpleTablePdf } from '@/modules/shared/exports/downloadSimpleTablePdf'
 import {
   fetchProductos,
   selectProductos,
   selectProductosError,
   selectProductosStatus,
 } from '@/modules/productos/productosSlice'
+import { selectCurrentUser } from '@/modules/auth/authSlice'
 
 const columnHelper = createColumnHelper()
 
@@ -37,6 +41,7 @@ function formatMoney(value) {
 function ProductosListPage() {
   const dispatch = useDispatch()
   const productos = useSelector(selectProductos)
+  const currentUser = useSelector(selectCurrentUser)
   const status = useSelector(selectProductosStatus)
   const error = useSelector(selectProductosError)
   const [sorting, setSorting] = useState([])
@@ -45,6 +50,7 @@ function ProductosListPage() {
   const [savingEdit, setSavingEdit] = useState(false)
   const [deletingId, setDeletingId] = useState(null)
   const [productoToDelete, setProductoToDelete] = useState(null)
+  const [includeInactive, setIncludeInactive] = useState(false)
   const [editForm, setEditForm] = useState({
     id: null,
     nombre: '',
@@ -58,11 +64,12 @@ function ProductosListPage() {
     activo: true,
   })
 
+  const userRole = String(currentUser?.rol || '').toUpperCase()
+  const canViewInactive = userRole === 'OWNER' || userRole === 'ADMIN'
+
   useEffect(() => {
-    if (status === 'idle') {
-      dispatch(fetchProductos())
-    }
-  }, [dispatch, status])
+    dispatch(fetchProductos({ includeInactive: canViewInactive && includeInactive }))
+  }, [dispatch, canViewInactive, includeInactive])
 
   const openEditModal = (producto) => {
     setEditForm({
@@ -114,9 +121,10 @@ function ProductosListPage() {
         { suppressGlobalErrorToast: true },
       )
 
+      invalidateProductosCatalogCache()
       toast.success('Producto actualizado correctamente.')
       closeEditModal()
-      dispatch(fetchProductos())
+      dispatch(fetchProductos({ includeInactive: canViewInactive && includeInactive }))
     } catch (error) {
       toast.error(normalizeApiError(error, { fallback: 'No se pudo actualizar el producto.' }))
       setSavingEdit(false)
@@ -137,8 +145,9 @@ function ProductosListPage() {
 
     try {
       await api.delete(`/productos/${producto.id}/`, { suppressGlobalErrorToast: true })
-      toast.success('Producto eliminado correctamente.')
-      dispatch(fetchProductos())
+      invalidateProductosCatalogCache()
+      toast.success('Producto procesado correctamente.')
+      dispatch(fetchProductos({ includeInactive: canViewInactive && includeInactive }))
       setProductoToDelete(null)
     } catch (error) {
       toast.error(normalizeApiError(error, { fallback: 'No se pudo eliminar el producto.' }))
@@ -220,47 +229,58 @@ function ProductosListPage() {
       return
     }
 
-    const ExcelJS = await import('exceljs')
-    const workbook = new ExcelJS.Workbook()
-    const sheet = workbook.addWorksheet('Productos')
-
-    sheet.columns = [
-      { header: 'Nombre', key: 'nombre', width: 30 },
-      { header: 'SKU', key: 'sku', width: 20 },
-      { header: 'Tipo', key: 'tipo', width: 18 },
-      { header: 'Precio referencia', key: 'precio_referencia', width: 18 },
-      { header: 'Precio costo', key: 'precio_costo', width: 18 },
-      { header: 'Stock actual', key: 'stock_actual', width: 16 },
-      { header: 'Activo', key: 'activo', width: 12 },
-    ]
-
-    rows.forEach((row) => {
-      const item = row.original
-      sheet.addRow({
-        nombre: item?.nombre || '',
-        sku: item?.sku || '',
-        tipo: item?.tipo || '',
-        precio_referencia: item?.precio_referencia ?? 0,
-        precio_costo: item?.precio_costo ?? 0,
-        stock_actual: item?.stock_actual ?? 0,
-        activo: item?.activo ? 'Si' : 'No',
-      })
-    })
-
-    const buffer = await workbook.xlsx.writeBuffer()
-    const blob = new Blob([buffer], {
-      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-    })
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
     const today = new Date().toISOString().slice(0, 10)
 
-    link.href = url
-    link.download = `productos_${today}.xlsx`
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
-    URL.revokeObjectURL(url)
+    await downloadExcelFile({
+      sheetName: 'Productos',
+      fileName: `productos_${today}.xlsx`,
+      columns: [
+        { header: 'Nombre', key: 'nombre', width: 30 },
+        { header: 'SKU', key: 'sku', width: 20 },
+        { header: 'Tipo', key: 'tipo', width: 18 },
+        { header: 'Precio referencia', key: 'precio_referencia', width: 18 },
+        { header: 'Precio costo', key: 'precio_costo', width: 18 },
+        { header: 'Stock actual', key: 'stock_actual', width: 16 },
+        { header: 'Activo', key: 'activo', width: 12 },
+      ],
+      rows: rows.map((row) => {
+        const item = row.original
+        return {
+          nombre: item?.nombre || '',
+          sku: item?.sku || '',
+          tipo: item?.tipo || '',
+          precio_referencia: item?.precio_referencia ?? 0,
+          precio_costo: item?.precio_costo ?? 0,
+          stock_actual: item?.stock_actual ?? 0,
+          activo: item?.activo ? 'Si' : 'No',
+        }
+      }),
+    })
+  }
+
+  const handleExportPdf = async () => {
+    const rows = table.getRowModel().rows
+
+    if (rows.length === 0) {
+      return
+    }
+
+    const today = new Date().toISOString().slice(0, 10)
+    await downloadSimpleTablePdf({
+      title: 'Listado de productos',
+      fileName: `productos_${today}.pdf`,
+      headers: ['Nombre', 'SKU', 'Tipo', 'Precio ref.', 'Activo'],
+      rows: rows.map((row) => {
+        const item = row.original
+        return [
+          item?.nombre || '-',
+          item?.sku || '-',
+          item?.tipo || '-',
+          formatMoney(item?.precio_referencia ?? 0),
+          item?.activo ? 'Si' : 'No',
+        ]
+      }),
+    })
   }
 
   const getSortIndicator = (column) => {
@@ -284,15 +304,6 @@ function ProductosListPage() {
 
         <div className="grid grid-cols-1 gap-2 sm:flex sm:items-center sm:justify-end sm:gap-2">
           <Button
-            onClick={() => dispatch(fetchProductos())}
-            variant="outline"
-            size="md"
-            fullWidth
-            className="sm:w-auto"
-          >
-            Recargar
-          </Button>
-          <Button
             onClick={handleExportExcel}
             disabled={status !== 'succeeded' || table.getRowModel().rows.length === 0}
             variant="outline"
@@ -301,6 +312,16 @@ function ProductosListPage() {
             className="sm:w-auto"
           >
             Exportar Excel
+          </Button>
+          <Button
+            onClick={handleExportPdf}
+            disabled={status !== 'succeeded' || table.getRowModel().rows.length === 0}
+            variant="outline"
+            size="md"
+            fullWidth
+            className="sm:w-auto"
+          >
+            Exportar PDF
           </Button>
           <Link
             to="/productos/nuevo"
@@ -312,28 +333,40 @@ function ProductosListPage() {
       </div>
 
       <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-        <div className="relative w-full md:max-w-sm">
-          <input
-            type="text"
-            value={globalFilter}
-            onChange={(event) => setGlobalFilter(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Escape') {
-                setGlobalFilter('')
-              }
-            }}
-            placeholder="Buscar por nombre, sku, tipo..."
-            className="w-full rounded-md border border-input bg-background px-3 py-2 pr-9 text-sm"
-          />
-          {globalFilter ? (
-            <button
-              type="button"
-              onClick={() => setGlobalFilter('')}
-              className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
-              aria-label="Limpiar busqueda"
-            >
-              x
-            </button>
+        <div className="flex w-full flex-col gap-2 md:max-w-xl">
+          <div className="relative w-full md:max-w-sm">
+            <input
+              type="text"
+              value={globalFilter}
+              onChange={(event) => setGlobalFilter(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Escape') {
+                  setGlobalFilter('')
+                }
+              }}
+              placeholder="Buscar por nombre, sku, tipo..."
+              className="w-full rounded-md border border-input bg-background px-3 py-2 pr-9 text-sm"
+            />
+            {globalFilter ? (
+              <button
+                type="button"
+                onClick={() => setGlobalFilter('')}
+                className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
+                aria-label="Limpiar busqueda"
+              >
+                x
+              </button>
+            ) : null}
+          </div>
+          {canViewInactive ? (
+            <label className="inline-flex items-center gap-2 text-xs text-muted-foreground">
+              <input
+                type="checkbox"
+                checked={includeInactive}
+                onChange={(event) => setIncludeInactive(event.target.checked)}
+              />
+              Mostrar tambien productos no activos (solo admin)
+            </label>
           ) : null}
         </div>
         <p className="text-xs text-muted-foreground">
@@ -360,16 +393,20 @@ function ProductosListPage() {
                       }
                     >
                       {header.isPlaceholder ? null : (
-                        <button
-                          type="button"
-                          onClick={header.column.getToggleSortingHandler()}
-                          className="inline-flex items-center gap-1 hover:text-primary"
-                        >
-                          {flexRender(header.column.columnDef.header, header.getContext())}
-                          <span className="text-xs text-muted-foreground">
-                            {getSortIndicator(header.column)}
-                          </span>
-                        </button>
+                        header.id === 'acciones' ? (
+                          <span>{flexRender(header.column.columnDef.header, header.getContext())}</span>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={header.column.getToggleSortingHandler()}
+                            className="inline-flex items-center gap-1 hover:text-primary"
+                          >
+                            {flexRender(header.column.columnDef.header, header.getContext())}
+                            <span className="text-xs text-muted-foreground">
+                              {getSortIndicator(header.column)}
+                            </span>
+                          </button>
+                        )
                       )}
                     </th>
                   ))}
@@ -535,10 +572,10 @@ function ProductosListPage() {
         title="Eliminar producto"
         description={
           productoToDelete
-            ? `Se eliminara el producto "${productoToDelete.nombre}". Esta accion no se puede deshacer.`
+            ? `Se procesara el producto "${productoToDelete.nombre}". Si tiene historial, quedara anulado en lugar de eliminarse.`
             : ''
         }
-        confirmLabel="Eliminar"
+        confirmLabel="Confirmar"
         loading={deletingId === productoToDelete?.id}
         onCancel={() => {
           if (!deletingId) {

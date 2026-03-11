@@ -2,6 +2,7 @@ import { createAsyncThunk, createSlice } from '@reduxjs/toolkit'
 import { api } from '@/api/client'
 import { normalizeApiError } from '@/api/errors'
 import { login, logout } from '@/modules/auth/authSlice'
+import { invalidateProductosCatalogCache } from '@/modules/productos/services/productosCatalogCache'
 
 function normalizeProductsResponse(data) {
   if (Array.isArray(data)) {
@@ -41,9 +42,11 @@ const initialState = {
 
 export const fetchProductos = createAsyncThunk(
   'productos/fetchProductos',
-  async (_, { rejectWithValue }) => {
+  async (options = {}, { rejectWithValue }) => {
     try {
+      const includeInactive = Boolean(options?.includeInactive)
       const { data } = await api.get('/productos/', {
+        params: includeInactive ? { include_inactive: 1 } : undefined,
         suppressGlobalErrorToast: true,
       })
       return normalizeProductsResponse(data)
@@ -83,6 +86,7 @@ export const createProducto = createAsyncThunk(
       const { data } = await api.post('/productos/', payload, {
         suppressGlobalErrorToast: true,
       })
+      invalidateProductosCatalogCache()
       return data
     } catch (error) {
       return rejectWithValue(

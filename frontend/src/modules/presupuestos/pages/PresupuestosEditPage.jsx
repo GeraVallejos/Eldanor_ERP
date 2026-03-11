@@ -4,6 +4,7 @@ import { toast } from 'sonner'
 import { api } from '@/api/client'
 import { normalizeApiError } from '@/api/errors'
 import Button from '@/components/ui/Button'
+import { getProductosCatalog } from '@/modules/productos/services/productosCatalogCache'
 import { buttonVariants } from '@/components/ui/buttonVariants'
 import { cn } from '@/lib/utils'
 
@@ -134,20 +135,20 @@ function PresupuestosEditPage() {
             { data: itemsData },
             { data: clientesData },
             { data: contactosData },
-            { data: productosData },
+            productosData,
             { data: impuestosData },
           ] = await Promise.all([
             api.get(`/presupuestos/${id}/`, { suppressGlobalErrorToast: true }),
             api.get('/presupuesto-items/', { suppressGlobalErrorToast: true }),
             api.get('/clientes/', { suppressGlobalErrorToast: true }),
             api.get('/contactos/', { suppressGlobalErrorToast: true }),
-            api.get('/productos/', { suppressGlobalErrorToast: true }),
+            getProductosCatalog(),
             api.get('/impuestos/', { suppressGlobalErrorToast: true }),
           ])
 
           const clientesList = normalizeListResponse(clientesData)
           const contactosList = normalizeListResponse(contactosData)
-          const productosList = normalizeListResponse(productosData)
+          const productosList = productosData
           const impuestosList = normalizeListResponse(impuestosData)
           const allItems = normalizeListResponse(itemsData)
           const scopedItems = allItems.filter((item) => String(item.presupuesto) === String(id))

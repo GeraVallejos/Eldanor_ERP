@@ -3,6 +3,10 @@ import { toast } from 'sonner'
 import { api } from '@/api/client'
 import { normalizeApiError } from '@/api/errors'
 import Button from '@/components/ui/Button'
+import SearchableSelect from '@/components/ui/SearchableSelect'
+import { getProductosCatalog } from '@/modules/productos/services/productosCatalogCache'
+import { downloadExcelFile } from '@/modules/shared/exports/downloadExcelFile'
+import { downloadSimpleTablePdf } from '@/modules/shared/exports/downloadSimpleTablePdf'
 
 function normalizeListResponse(data) {
   if (Array.isArray(data)) {
@@ -44,12 +48,12 @@ function InventarioKardexPage() {
 
   const loadCatalogs = async () => {
     try {
-      const [{ data: productosData }, { data: bodegasData }] = await Promise.all([
-        api.get('/productos/', { suppressGlobalErrorToast: true }),
+      const [productosData, { data: bodegasData }] = await Promise.all([
+        getProductosCatalog(),
         api.get('/bodegas/', { suppressGlobalErrorToast: true }),
       ])
 
-      setProductos(normalizeListResponse(productosData))
+      setProductos(productosData)
       setBodegas(normalizeListResponse(bodegasData))
     } catch (error) {
       toast.error(normalizeApiError(error, { fallback: 'No se pudieron cargar los catalogos de inventario.' }))
@@ -134,12 +138,93 @@ function InventarioKardexPage() {
     [productos, filters.producto_id],
   )
 
+  const productoOptions = useMemo(
+    () =>
+      productos.map((producto) => ({
+        value: String(producto.id),
+        label: producto.nombre || `Producto ${producto.id}`,
+        keywords: `${producto.sku || ''} ${producto.tipo || ''}`,
+      })),
+    [productos],
+  )
+
+  const bodegaOptions = useMemo(
+    () =>
+      bodegas.map((bodega) => ({
+        value: String(bodega.id),
+        label: bodega.nombre || `Bodega ${bodega.id}`,
+      })),
+    [bodegas],
+  )
+
   const applyFilters = async (event) => {
     event.preventDefault()
+    if (!filters.producto_id) {
+      toast.error('Debes seleccionar un producto.')
+      return
+    }
     await fetchKardex({ ...filters, page: 1 })
   }
 
   const pageLabel = `${filters.page}`
+
+  const getTodaySuffix = () => new Date().toISOString().slice(0, 10)
+
+  const handleExportExcel = async () => {
+    if (movimientos.length === 0) {
+      return
+    }
+
+    await downloadExcelFile({
+      sheetName: 'Kardex',
+      fileName: `kardex_${getTodaySuffix()}.xlsx`,
+      columns: [
+        { header: 'Fecha', key: 'fecha', width: 20 },
+        { header: 'Tipo', key: 'tipo', width: 14 },
+        { header: 'Cantidad', key: 'cantidad', width: 14 },
+        { header: 'Stock anterior', key: 'stock_anterior', width: 14 },
+        { header: 'Stock nuevo', key: 'stock_nuevo', width: 14 },
+        { header: 'Costo unitario', key: 'costo_unitario', width: 16 },
+        { header: 'Valor total', key: 'valor_total', width: 16 },
+        { header: 'Documento', key: 'documento_tipo', width: 20 },
+        { header: 'Referencia', key: 'referencia', width: 24 },
+      ],
+      rows: movimientos.map((row) => ({
+        fecha: row.creado_en ? String(row.creado_en).slice(0, 19).replace('T', ' ') : '-',
+        tipo: row.tipo || '-',
+        cantidad: row.cantidad || 0,
+        stock_anterior: row.stock_anterior || 0,
+        stock_nuevo: row.stock_nuevo || 0,
+        costo_unitario: Number(row.costo_unitario || 0),
+        valor_total: Number(row.valor_total || 0),
+        documento_tipo: row.documento_tipo || '-',
+        referencia: row.referencia || '-',
+      })),
+    })
+  }
+
+  const handleExportPdf = async () => {
+    if (movimientos.length === 0) {
+      return
+    }
+
+    await downloadSimpleTablePdf({
+      title: 'Kardex de inventario',
+      fileName: `kardex_${getTodaySuffix()}.pdf`,
+      headers: ['Fecha', 'Tipo', 'Cantidad', 'Stock ant.', 'Stock nuevo', 'Costo', 'Valor', 'Documento', 'Referencia'],
+      rows: movimientos.map((row) => [
+        row.creado_en ? String(row.creado_en).slice(0, 19).replace('T', ' ') : '-',
+        row.tipo || '-',
+        String(row.cantidad || 0),
+        String(row.stock_anterior || 0),
+        String(row.stock_nuevo || 0),
+        formatMoney(row.costo_unitario),
+        formatMoney(row.valor_total),
+        row.documento_tipo || '-',
+        row.referencia || '-',
+      ]),
+    })
+  }
 
   return (
     <section className="space-y-4">
@@ -151,35 +236,28 @@ function InventarioKardexPage() {
       <form className="grid gap-3 rounded-md border border-border bg-card p-4 md:grid-cols-4" onSubmit={applyFilters}>
         <label className="text-sm">
           Producto
-          <select
-            className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
+          <SearchableSelect
+            className="mt-1"
             value={filters.producto_id}
-            onChange={(event) => updateFilter('producto_id', event.target.value)}
-            required
-          >
-            <option value="">Selecciona producto</option>
-            {productos.map((producto) => (
-              <option key={producto.id} value={producto.id}>
-                {producto.nombre}
-              </option>
-            ))}
-          </select>
+            onChange={(next) => updateFilter('producto_id', next)}
+            options={productoOptions}
+            ariaLabel="Producto"
+            placeholder="Buscar producto..."
+            emptyText="No hay productos coincidentes"
+          />
         </label>
 
         <label className="text-sm">
           Bodega
-          <select
-            className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
+          <SearchableSelect
+            className="mt-1"
             value={filters.bodega_id}
-            onChange={(event) => updateFilter('bodega_id', event.target.value)}
-          >
-            <option value="">Todas</option>
-            {bodegas.map((bodega) => (
-              <option key={bodega.id} value={bodega.id}>
-                {bodega.nombre}
-              </option>
-            ))}
-          </select>
+            onChange={(next) => updateFilter('bodega_id', next)}
+            options={bodegaOptions}
+            ariaLabel="Bodega"
+            placeholder="Buscar bodega..."
+            emptyText="No hay bodegas coincidentes"
+          />
         </label>
 
         <label className="text-sm">
@@ -241,8 +319,14 @@ function InventarioKardexPage() {
           />
         </label>
 
-        <div className="flex items-end">
+        <div className="flex items-end gap-2">
           <Button type="submit">Consultar</Button>
+          <Button type="button" variant="outline" onClick={handleExportExcel} disabled={movimientos.length === 0}>
+            Excel
+          </Button>
+          <Button type="button" variant="outline" onClick={handleExportPdf} disabled={movimientos.length === 0}>
+            PDF
+          </Button>
         </div>
       </form>
 

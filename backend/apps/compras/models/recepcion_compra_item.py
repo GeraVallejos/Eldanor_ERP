@@ -14,8 +14,10 @@ class RecepcionCompraItem(BaseModel):
 
     orden_item = models.ForeignKey(
         OrdenCompraItem,
-        on_delete=models.PROTECT,
-        related_name="recepciones"
+        on_delete=models.SET_NULL,
+        related_name="recepciones",
+        null=True,
+        blank=True,
     )
 
     producto = models.ForeignKey(
@@ -26,6 +28,12 @@ class RecepcionCompraItem(BaseModel):
     cantidad = models.DecimalField(
         max_digits=12,
         decimal_places=2
+    )
+
+    precio_unitario = models.DecimalField(
+        max_digits=14,
+        decimal_places=2,
+        default=0,
     )
 
     class Meta:

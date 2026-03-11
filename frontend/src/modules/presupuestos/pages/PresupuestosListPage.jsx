@@ -8,6 +8,7 @@ import { normalizeApiError } from '@/api/errors'
 import Button from '@/components/ui/Button'
 import { buttonVariants } from '@/components/ui/buttonVariants'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
+import { useTableSorting } from '@/lib/tableSorting'
 import { cn } from '@/lib/utils'
 import { selectCurrentUser } from '@/modules/auth/authSlice'
 import PresupuestoPdfDocument from '@/modules/presupuestos/components/PresupuestoPdfDocument'
@@ -49,19 +50,6 @@ function formatMoney(value) {
   }
 
   return Math.round(num).toLocaleString('es-CL')
-}
-
-function formatDateTime(value) {
-  if (!value) {
-    return '-'
-  }
-
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) {
-    return String(value)
-  }
-
-  return date.toLocaleString('es-CL')
 }
 
 function PresupuestosListPage() {
@@ -157,6 +145,17 @@ function PresupuestosListPage() {
     const contacto = contactoById.get(String(cliente?.contacto))
     return contacto?.nombre || `Cliente #${clienteId}`
   }
+
+  const { sortedRows: sortedPresupuestos, toggleSort, getSortIndicator } = useTableSorting(presupuestos, {
+    accessors: {
+      numero: (presupuesto) => presupuesto.numero,
+      cliente: (presupuesto) => resolveClienteNombre(presupuesto.cliente),
+      fecha: (presupuesto) => presupuesto.fecha,
+      fecha_vencimiento: (presupuesto) => presupuesto.fecha_vencimiento,
+      estado: (presupuesto) => resolveStatusLabel(presupuesto.estado),
+      total: (presupuesto) => Number(presupuesto.total ?? 0),
+    },
+  })
 
   const requestDeletePresupuesto = (presupuesto) => {
     setPresupuestoToDelete(presupuesto)
@@ -326,9 +325,6 @@ function PresupuestosListPage() {
         <h2 className="text-2xl font-semibold">Presupuestos</h2>
 
         <div className="grid grid-cols-1 gap-2 sm:flex sm:items-center sm:justify-end sm:gap-2">
-          <Button variant="outline" size="md" fullWidth className="sm:w-auto" onClick={loadData}>
-            Recargar
-          </Button>
           {canCreatePresupuesto ? (
             <Link
               to="/presupuestos/nuevo"
@@ -347,12 +343,36 @@ function PresupuestosListPage() {
           <table className="min-w-full text-sm">
             <thead className="bg-muted/40">
               <tr>
-                <th className="px-3 py-2 text-left font-medium">Numero</th>
-                <th className="px-3 py-2 text-left font-medium">Cliente</th>
-                <th className="px-3 py-2 text-left font-medium">Fecha</th>
-                <th className="px-3 py-2 text-left font-medium">Vencimiento</th>
-                <th className="px-3 py-2 text-left font-medium">Estado</th>
-                <th className="px-3 py-2 text-left font-medium">Total</th>
+                <th className="px-3 py-2 text-left font-medium">
+                  <button type="button" onClick={() => toggleSort('numero')} className="inline-flex items-center gap-1 hover:text-primary">
+                    Numero <span className="text-xs text-muted-foreground">{getSortIndicator('numero')}</span>
+                  </button>
+                </th>
+                <th className="px-3 py-2 text-left font-medium">
+                  <button type="button" onClick={() => toggleSort('cliente')} className="inline-flex items-center gap-1 hover:text-primary">
+                    Cliente <span className="text-xs text-muted-foreground">{getSortIndicator('cliente')}</span>
+                  </button>
+                </th>
+                <th className="px-3 py-2 text-left font-medium">
+                  <button type="button" onClick={() => toggleSort('fecha')} className="inline-flex items-center gap-1 hover:text-primary">
+                    Fecha <span className="text-xs text-muted-foreground">{getSortIndicator('fecha')}</span>
+                  </button>
+                </th>
+                <th className="px-3 py-2 text-left font-medium">
+                  <button type="button" onClick={() => toggleSort('fecha_vencimiento')} className="inline-flex items-center gap-1 hover:text-primary">
+                    Vencimiento <span className="text-xs text-muted-foreground">{getSortIndicator('fecha_vencimiento')}</span>
+                  </button>
+                </th>
+                <th className="px-3 py-2 text-left font-medium">
+                  <button type="button" onClick={() => toggleSort('estado')} className="inline-flex items-center gap-1 hover:text-primary">
+                    Estado <span className="text-xs text-muted-foreground">{getSortIndicator('estado')}</span>
+                  </button>
+                </th>
+                <th className="px-3 py-2 text-left font-medium">
+                  <button type="button" onClick={() => toggleSort('total')} className="inline-flex items-center gap-1 hover:text-primary">
+                    Total <span className="text-xs text-muted-foreground">{getSortIndicator('total')}</span>
+                  </button>
+                </th>
                 <th className="px-2 py-2 text-right font-medium" style={{ minWidth: '280px' }}>
                   Acciones
                 </th>
@@ -366,7 +386,7 @@ function PresupuestosListPage() {
                   </td>
                 </tr>
               ) : (
-                presupuestos.map((presupuesto) => {
+                sortedPresupuestos.map((presupuesto) => {
                   const statusOptions = getStatusOptions(presupuesto)
                   const isStatusUpdating = changingStatusId === presupuesto.id
 
@@ -376,16 +396,7 @@ function PresupuestosListPage() {
                     <td className="px-3 py-2">{resolveClienteNombre(presupuesto.cliente)}</td>
                     <td className="px-3 py-2">{presupuesto.fecha || '-'}</td>
                     <td className="px-3 py-2">{presupuesto.fecha_vencimiento || '-'}</td>
-                    <td className="px-3 py-2">
-                      <p>{resolveStatusLabel(presupuesto.estado)}</p>
-                      {presupuesto?.auditoria_ultima ? (
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          {`${resolveStatusLabel(presupuesto.auditoria_ultima.estado_anterior)} -> ${resolveStatusLabel(presupuesto.auditoria_ultima.estado_nuevo)} | ${presupuesto.auditoria_ultima.usuario || 'Sin usuario'} | ${formatDateTime(presupuesto.auditoria_ultima.creado_en)}`}
-                        </p>
-                      ) : (
-                        <p className="mt-1 text-xs text-muted-foreground">Sin auditoria de estado</p>
-                      )}
-                    </td>
+                    <td className="px-3 py-2">{resolveStatusLabel(presupuesto.estado)}</td>
                     <td className="px-3 py-2">{formatMoney(presupuesto.total ?? 0)}</td>
                     <td className="px-2 py-2" style={{ minWidth: '280px' }}>
                       <div className="flex flex-wrap items-center justify-end gap-2">

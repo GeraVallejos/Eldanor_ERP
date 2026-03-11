@@ -6,7 +6,10 @@ import { normalizeApiError } from '@/api/errors'
 import Button from '@/components/ui/Button'
 import { buttonVariants } from '@/components/ui/buttonVariants'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
+import { useTableSorting } from '@/lib/tableSorting'
 import { cn } from '@/lib/utils'
+import { downloadExcelFile } from '@/modules/shared/exports/downloadExcelFile'
+import { downloadSimpleTablePdf } from '@/modules/shared/exports/downloadSimpleTablePdf'
 
 function normalizeListResponse(data) {
   if (Array.isArray(data)) {
@@ -36,6 +39,10 @@ function toIntegerString(value) {
   }
 
   return String(Math.round(num))
+}
+
+function getTodaySuffix() {
+  return new Date().toISOString().slice(0, 10)
 }
 
 function ClientesListPage() {
@@ -114,6 +121,20 @@ function ClientesListPage() {
       return nombre.includes(query) || rut.includes(query) || email.includes(query)
     })
   }, [clientes, contactoById, search])
+
+  const { sortedRows: sortedClientes, toggleSort, getSortIndicator } = useTableSorting(filteredClientes, {
+    accessors: {
+      nombre: (cliente) => contactoById.get(String(cliente.contacto))?.nombre || '',
+      rut: (cliente) => contactoById.get(String(cliente.contacto))?.rut || '',
+      email: (cliente) => contactoById.get(String(cliente.contacto))?.email || '',
+      telefono: (cliente) => {
+        const contacto = contactoById.get(String(cliente.contacto))
+        return contacto?.telefono || contacto?.celular || ''
+      },
+      limite_credito: (cliente) => Number(cliente?.limite_credito ?? 0),
+      dias_credito: (cliente) => Number(cliente?.dias_credito ?? 0),
+    },
+  })
 
   const openEditModal = (cliente) => {
     const contacto = contactoById.get(String(cliente.contacto))
@@ -232,14 +253,84 @@ function ClientesListPage() {
     }
   }
 
+  const handleExportExcel = async () => {
+    if (filteredClientes.length === 0) {
+      return
+    }
+
+    await downloadExcelFile({
+      sheetName: 'Clientes',
+      fileName: `clientes_${getTodaySuffix()}.xlsx`,
+      columns: [
+        { header: 'Nombre', key: 'nombre', width: 32 },
+        { header: 'RUT', key: 'rut', width: 18 },
+        { header: 'Email', key: 'email', width: 28 },
+        { header: 'Telefono', key: 'telefono', width: 18 },
+        { header: 'Limite credito', key: 'limite_credito', width: 16 },
+        { header: 'Dias credito', key: 'dias_credito', width: 14 },
+      ],
+      rows: filteredClientes.map((cliente) => {
+        const contacto = contactoById.get(String(cliente.contacto))
+        return {
+          nombre: contacto?.nombre || '-',
+          rut: contacto?.rut || '-',
+          email: contacto?.email || '-',
+          telefono: contacto?.telefono || contacto?.celular || '-',
+          limite_credito: Number(cliente?.limite_credito ?? 0),
+          dias_credito: Number(cliente?.dias_credito ?? 0),
+        }
+      }),
+    })
+  }
+
+  const handleExportPdf = async () => {
+    if (filteredClientes.length === 0) {
+      return
+    }
+
+    await downloadSimpleTablePdf({
+      title: 'Reporte de clientes',
+      fileName: `clientes_${getTodaySuffix()}.pdf`,
+      headers: ['Nombre', 'RUT', 'Email', 'Telefono', 'Limite credito', 'Dias credito'],
+      rows: filteredClientes.map((cliente) => {
+        const contacto = contactoById.get(String(cliente.contacto))
+        return [
+          contacto?.nombre || '-',
+          contacto?.rut || '-',
+          contacto?.email || '-',
+          contacto?.telefono || contacto?.celular || '-',
+          formatMoney(cliente?.limite_credito ?? 0),
+          String(cliente?.dias_credito ?? 0),
+        ]
+      }),
+    })
+  }
+
   return (
     <section className="space-y-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h2 className="text-2xl font-semibold">Clientes</h2>
 
         <div className="grid grid-cols-1 gap-2 sm:flex sm:items-center sm:justify-end sm:gap-2">
-          <Button variant="outline" size="md" fullWidth className="sm:w-auto" onClick={loadData}>
-            Recargar
+          <Button
+            variant="outline"
+            size="md"
+            fullWidth
+            className="sm:w-auto"
+            onClick={handleExportExcel}
+            disabled={filteredClientes.length === 0}
+          >
+            Exportar Excel
+          </Button>
+          <Button
+            variant="outline"
+            size="md"
+            fullWidth
+            className="sm:w-auto"
+            onClick={handleExportPdf}
+            disabled={filteredClientes.length === 0}
+          >
+            Exportar PDF
           </Button>
           <Link
             to="/contactos/clientes/nuevo"
@@ -287,12 +378,12 @@ function ClientesListPage() {
           <table className="min-w-full text-sm">
             <thead className="bg-muted/40">
               <tr>
-                <th className="px-3 py-2 text-left font-medium">Nombre</th>
-                <th className="px-3 py-2 text-left font-medium">RUT</th>
-                <th className="px-3 py-2 text-left font-medium">Email</th>
-                <th className="px-3 py-2 text-left font-medium">Telefono</th>
-                <th className="px-3 py-2 text-left font-medium">Limite credito</th>
-                <th className="px-3 py-2 text-left font-medium">Dias credito</th>
+                <th className="px-3 py-2 text-left font-medium"><button type="button" onClick={() => toggleSort('nombre')} className="inline-flex items-center gap-1 hover:text-primary">Nombre <span className="text-xs text-muted-foreground">{getSortIndicator('nombre')}</span></button></th>
+                <th className="px-3 py-2 text-left font-medium"><button type="button" onClick={() => toggleSort('rut')} className="inline-flex items-center gap-1 hover:text-primary">RUT <span className="text-xs text-muted-foreground">{getSortIndicator('rut')}</span></button></th>
+                <th className="px-3 py-2 text-left font-medium"><button type="button" onClick={() => toggleSort('email')} className="inline-flex items-center gap-1 hover:text-primary">Email <span className="text-xs text-muted-foreground">{getSortIndicator('email')}</span></button></th>
+                <th className="px-3 py-2 text-left font-medium"><button type="button" onClick={() => toggleSort('telefono')} className="inline-flex items-center gap-1 hover:text-primary">Telefono <span className="text-xs text-muted-foreground">{getSortIndicator('telefono')}</span></button></th>
+                <th className="px-3 py-2 text-left font-medium"><button type="button" onClick={() => toggleSort('limite_credito')} className="inline-flex items-center gap-1 hover:text-primary">Limite credito <span className="text-xs text-muted-foreground">{getSortIndicator('limite_credito')}</span></button></th>
+                <th className="px-3 py-2 text-left font-medium"><button type="button" onClick={() => toggleSort('dias_credito')} className="inline-flex items-center gap-1 hover:text-primary">Dias credito <span className="text-xs text-muted-foreground">{getSortIndicator('dias_credito')}</span></button></th>
                 <th className="w-px whitespace-nowrap px-2 py-2 text-left font-medium">Acciones</th>
               </tr>
             </thead>
@@ -304,7 +395,7 @@ function ClientesListPage() {
                   </td>
                 </tr>
               ) : (
-                filteredClientes.map((cliente) => {
+                sortedClientes.map((cliente) => {
                   const contacto = contactoById.get(String(cliente.contacto))
 
                   return (

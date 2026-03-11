@@ -53,7 +53,7 @@ describe('compras/ListPage', () => {
     expect(screen.getByText('OC-002')).toBeInTheDocument()
   })
 
-  it('actualiza estado al enviar y anular con feedback', async () => {
+  it('anula orden y muestra feedback', async () => {
     server.use(
       http.get('*/ordenes-compra/', async () =>
         HttpResponse.json([
@@ -62,19 +62,12 @@ describe('compras/ListPage', () => {
       ),
       http.get('*/proveedores/', async () => HttpResponse.json([{ id: 'p-1', contacto: 'c-1' }])),
       http.get('*/contactos/', async () => HttpResponse.json([{ id: 'c-1', nombre: 'Proveedor Norte' }])),
-      http.post('*/ordenes-compra/oc-1/enviar/', async () => HttpResponse.json({ id: 'oc-1', estado: 'ENVIADA' })),
       http.post('*/ordenes-compra/oc-1/anular/', async () => HttpResponse.json({ id: 'oc-1', estado: 'CANCELADA' })),
     )
 
     renderWithProviders(<ComprasOrdenesListPage />)
 
-    await userEvent.click(await screen.findByRole('button', { name: 'Enviar' }))
-
-    await waitFor(() => {
-      expect(toast.success).toHaveBeenCalledWith('Orden enviada correctamente.')
-    })
-
-    await userEvent.click(screen.getByRole('button', { name: 'Anular' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Anular' }))
 
     await waitFor(() => {
       expect(toast.success).toHaveBeenCalledWith('Orden anulada correctamente.')

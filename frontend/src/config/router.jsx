@@ -12,7 +12,10 @@ import PresupuestosEditPage from '@/modules/presupuestos/pages/PresupuestosEditP
 import PresupuestosListPage from '@/modules/presupuestos/pages/PresupuestosListPage'
 import ComprasOrdenesListPage from '@/modules/compras/pages/ComprasOrdenesListPage'
 import ComprasOrdenesCreatePage from '@/modules/compras/pages/ComprasOrdenesCreatePage'
-import ComprasRecepcionesPage from '@/modules/compras/pages/ComprasRecepcionesPage'
+import ComprasOrdenesDetailPage from '@/modules/compras/pages/ComprasOrdenesDetailPage'
+import ComprasDocumentosListPage from '@/modules/compras/pages/ComprasDocumentosListPage'
+import ComprasDocumentosCreatePage from '@/modules/compras/pages/ComprasDocumentosCreatePage'
+import ComprasDocumentosDetailPage from '@/modules/compras/pages/ComprasDocumentosDetailPage'
 import InventarioKardexPage from '@/modules/inventario/pages/InventarioKardexPage'
 import InventarioResumenPage from '@/modules/inventario/pages/InventarioResumenPage'
 import ProductosCreatePage from '@/modules/productos/pages/ProductosCreatePage'
@@ -40,7 +43,12 @@ const router = createBrowserRouter([
           { path: 'productos/nuevo', element: <ProductosCreatePage /> },
           { path: 'compras/ordenes', element: <ComprasOrdenesListPage /> },
           { path: 'compras/ordenes/nuevo', element: <ComprasOrdenesCreatePage /> },
-          { path: 'compras/recepciones', element: <ComprasRecepcionesPage /> },
+          { path: 'compras/ordenes/:id', element: <ComprasOrdenesDetailPage /> },
+          { path: 'compras/ordenes/:id/editar', element: <ComprasOrdenesCreatePage /> },
+          { path: 'compras/documentos', element: <ComprasDocumentosListPage /> },
+          { path: 'compras/documentos/nuevo', element: <ComprasDocumentosCreatePage /> },
+          { path: 'compras/documentos/:id', element: <ComprasDocumentosDetailPage /> },
+          { path: 'compras/documentos/:id/editar', element: <ComprasDocumentosCreatePage /> },
           { path: 'inventario/kardex', element: <InventarioKardexPage /> },
           { path: 'inventario/resumen', element: <InventarioResumenPage /> },
         ],

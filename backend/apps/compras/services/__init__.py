@@ -1,1 +1,2 @@
 from .compra_service import OrdenCompraService, RecepcionCompraService
+from .documento_compra_service import DocumentoCompraService

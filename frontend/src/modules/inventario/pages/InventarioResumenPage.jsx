@@ -3,6 +3,10 @@ import { toast } from 'sonner'
 import { api } from '@/api/client'
 import { normalizeApiError } from '@/api/errors'
 import Button from '@/components/ui/Button'
+import SearchableSelect from '@/components/ui/SearchableSelect'
+import { getProductosCatalog } from '@/modules/productos/services/productosCatalogCache'
+import { downloadExcelFile } from '@/modules/shared/exports/downloadExcelFile'
+import { downloadSimpleTablePdf } from '@/modules/shared/exports/downloadSimpleTablePdf'
 
 function normalizeListResponse(data) {
   if (Array.isArray(data)) {
@@ -38,13 +42,13 @@ function InventarioResumenPage() {
 
   const loadCatalogs = async () => {
     try {
-      const [{ data: stocksData }, { data: productosData }, { data: bodegasData }] = await Promise.all([
+      const [{ data: stocksData }, productosData, { data: bodegasData }] = await Promise.all([
         api.get('/stocks/', { suppressGlobalErrorToast: true }),
-        api.get('/productos/', { suppressGlobalErrorToast: true }),
+        getProductosCatalog(),
         api.get('/bodegas/', { suppressGlobalErrorToast: true }),
       ])
       setStocks(normalizeListResponse(stocksData))
-      setProductos(normalizeListResponse(productosData))
+      setProductos(productosData)
       setBodegas(normalizeListResponse(bodegasData))
     } catch (error) {
       toast.error(normalizeApiError(error, { fallback: 'No se pudieron cargar los catalogos de resumen.' }))
@@ -83,6 +87,25 @@ function InventarioResumenPage() {
     setFilters((prev) => ({ ...prev, [key]: value }))
   }
 
+  const productoOptions = useMemo(
+    () =>
+      productos.map((producto) => ({
+        value: String(producto.id),
+        label: producto.nombre || `Producto ${producto.id}`,
+        keywords: `${producto.sku || ''} ${producto.tipo || ''}`,
+      })),
+    [productos],
+  )
+
+  const bodegaOptions = useMemo(
+    () =>
+      bodegas.map((bodega) => ({
+        value: String(bodega.id),
+        label: bodega.nombre || `Bodega ${bodega.id}`,
+      })),
+    [bodegas],
+  )
+
   const onSubmit = async (event) => {
     event.preventDefault()
     await loadResumen(filters)
@@ -91,6 +114,48 @@ function InventarioResumenPage() {
   const summaryStock = useMemo(() => {
     return stocks.reduce((acc, row) => acc + Number(row.stock || 0), 0)
   }, [stocks])
+
+  const getTodaySuffix = () => new Date().toISOString().slice(0, 10)
+
+  const handleExportExcel = async () => {
+    const rows = Array.isArray(resumen?.detalle) ? resumen.detalle : []
+    if (rows.length === 0) {
+      return
+    }
+
+    await downloadExcelFile({
+      sheetName: 'ResumenInventario',
+      fileName: `resumen_inventario_${getTodaySuffix()}.xlsx`,
+      columns: [
+        { header: filters.group_by === 'bodega' ? 'Bodega' : 'Producto', key: 'grupo', width: 30 },
+        { header: 'Stock', key: 'stock_total', width: 14 },
+        { header: 'Valor', key: 'valor_total', width: 16 },
+      ],
+      rows: rows.map((row) => ({
+        grupo: row.producto__nombre || row.bodega__nombre || '-',
+        stock_total: Number(row.stock_total || 0),
+        valor_total: Number(row.valor_total || 0),
+      })),
+    })
+  }
+
+  const handleExportPdf = async () => {
+    const rows = Array.isArray(resumen?.detalle) ? resumen.detalle : []
+    if (rows.length === 0) {
+      return
+    }
+
+    await downloadSimpleTablePdf({
+      title: 'Resumen valorizado de inventario',
+      fileName: `resumen_inventario_${getTodaySuffix()}.pdf`,
+      headers: [filters.group_by === 'bodega' ? 'Bodega' : 'Producto', 'Stock', 'Valor'],
+      rows: rows.map((row) => [
+        row.producto__nombre || row.bodega__nombre || '-',
+        formatMoney(row.stock_total),
+        formatMoney(row.valor_total),
+      ]),
+    })
+  }
 
   return (
     <section className="space-y-4">
@@ -114,38 +179,48 @@ function InventarioResumenPage() {
 
         <label className="text-sm">
           Producto
-          <select
-            className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
+          <SearchableSelect
+            className="mt-1"
             value={filters.producto_id}
-            onChange={(event) => updateFilter('producto_id', event.target.value)}
-          >
-            <option value="">Todos</option>
-            {productos.map((producto) => (
-              <option key={producto.id} value={producto.id}>
-                {producto.nombre}
-              </option>
-            ))}
-          </select>
+            onChange={(next) => updateFilter('producto_id', next)}
+            options={productoOptions}
+            ariaLabel="Producto"
+            placeholder="Buscar producto..."
+            emptyText="No hay productos coincidentes"
+          />
         </label>
 
         <label className="text-sm">
           Bodega
-          <select
-            className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
+          <SearchableSelect
+            className="mt-1"
             value={filters.bodega_id}
-            onChange={(event) => updateFilter('bodega_id', event.target.value)}
-          >
-            <option value="">Todas</option>
-            {bodegas.map((bodega) => (
-              <option key={bodega.id} value={bodega.id}>
-                {bodega.nombre}
-              </option>
-            ))}
-          </select>
+            onChange={(next) => updateFilter('bodega_id', next)}
+            options={bodegaOptions}
+            ariaLabel="Bodega"
+            placeholder="Buscar bodega..."
+            emptyText="No hay bodegas coincidentes"
+          />
         </label>
 
-        <div className="flex items-end">
+        <div className="flex items-end gap-2">
           <Button type="submit">Actualizar</Button>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={handleExportExcel}
+            disabled={!Array.isArray(resumen?.detalle) || resumen.detalle.length === 0}
+          >
+            Excel
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={handleExportPdf}
+            disabled={!Array.isArray(resumen?.detalle) || resumen.detalle.length === 0}
+          >
+            PDF
+          </Button>
         </div>
       </form>
 

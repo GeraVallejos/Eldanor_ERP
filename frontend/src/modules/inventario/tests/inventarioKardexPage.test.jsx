@@ -55,8 +55,14 @@ describe('inventario/InventarioKardexPage', () => {
 
     renderWithProviders(<InventarioKardexPage />)
 
-    await userEvent.selectOptions(await screen.findByLabelText('Producto'), 'prod-1')
-    await userEvent.selectOptions(screen.getByLabelText('Bodega'), 'bod-1')
+    const productoInput = await screen.findByLabelText('Producto')
+    await userEvent.type(productoInput, 'Tijera')
+    await userEvent.click(await screen.findByRole('button', { name: 'Tijera poda' }))
+
+    const bodegaInput = screen.getByLabelText('Bodega')
+    await userEvent.type(bodegaInput, 'Principal')
+    await userEvent.click(await screen.findByRole('button', { name: 'Principal' }))
+
     await userEvent.selectOptions(screen.getByLabelText('Tipo'), 'ENTRADA')
     await userEvent.type(screen.getByPlaceholderText('Buscar texto de referencia'), 'OC-001')
     await userEvent.click(screen.getByRole('button', { name: 'Consultar' }))

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { api } from '@/api/client'
 import { normalizeApiError } from '@/api/errors'
@@ -35,29 +35,39 @@ function todayDate() {
 
 function ComprasOrdenesCreatePage() {
   const navigate = useNavigate()
+  const location = useLocation()
+  const { id: ordenId } = useParams()
+  const isEditMode = Boolean(ordenId)
+  const precargarDe = !isEditMode ? (location.state?.precargarDe ?? null) : null
   const [status, setStatus] = useState('idle')
+  const [loadingInitial, setLoadingInitial] = useState(true)
   const [proveedores, setProveedores] = useState([])
   const [contactos, setContactos] = useState([])
   const [productos, setProductos] = useState([])
   const [impuestos, setImpuestos] = useState([])
+  const [numeroPreview, setNumeroPreview] = useState('...')
   const [form, setForm] = useState({
     proveedor: '',
-    numero: '',
     fecha_emision: todayDate(),
     fecha_entrega: '',
     observaciones: '',
   })
   const [items, setItems] = useState([createEmptyItem()])
 
-  const loadCatalogs = async () => {
+  const loadInitialData = async () => {
+    setLoadingInitial(true)
     try {
-      const [{ data: proveedoresData }, { data: contactosData }, { data: productosData }, { data: impuestosData }] =
-        await Promise.all([
-          api.get('/proveedores/', { suppressGlobalErrorToast: true }),
-          api.get('/contactos/', { suppressGlobalErrorToast: true }),
-          api.get('/productos/', { suppressGlobalErrorToast: true }),
-          api.get('/impuestos/', { suppressGlobalErrorToast: true }),
-        ])
+      const [
+        { data: proveedoresData },
+        { data: contactosData },
+        { data: productosData },
+        { data: impuestosData },
+      ] = await Promise.all([
+        api.get('/proveedores/', { suppressGlobalErrorToast: true }),
+        api.get('/contactos/', { suppressGlobalErrorToast: true }),
+        api.get('/productos/', { suppressGlobalErrorToast: true }),
+        api.get('/impuestos/', { suppressGlobalErrorToast: true }),
+      ])
 
       setProveedores(normalizeListResponse(proveedoresData))
       setContactos(normalizeListResponse(contactosData))
@@ -67,18 +77,80 @@ function ComprasOrdenesCreatePage() {
         ),
       )
       setImpuestos(normalizeListResponse(impuestosData))
+
+      if (isEditMode) {
+        const [{ data: ordenData }, { data: itemsData }] = await Promise.all([
+          api.get(`/ordenes-compra/${ordenId}/`, { suppressGlobalErrorToast: true }),
+          api.get('/ordenes-compra-items/', { suppressGlobalErrorToast: true }),
+        ])
+
+        setForm({
+          proveedor: String(ordenData.proveedor || ''),
+          fecha_emision: ordenData.fecha_emision || todayDate(),
+          fecha_entrega: ordenData.fecha_entrega || '',
+          observaciones: ordenData.observaciones || '',
+        })
+
+        if (ordenData.estado !== 'BORRADOR') {
+          toast.error('Solo se pueden editar órdenes en estado borrador. Use la acción corregir para órdenes ya enviadas.')
+          navigate('/compras/ordenes', { replace: true })
+          return
+        }
+
+        setNumeroPreview(String(ordenData.numero || '-'))
+
+        const scopedItems = normalizeListResponse(itemsData).filter(
+          (row) => String(row.orden_compra) === String(ordenId),
+        )
+
+        setItems(
+          scopedItems.length > 0
+            ? scopedItems.map((item) => ({
+                producto: String(item.producto || ''),
+                descripcion: item.descripcion || '',
+                cantidad: String(item.cantidad || '1'),
+                precio_unitario: String(item.precio_unitario || '0'),
+                impuesto: item.impuesto ? String(item.impuesto) : '',
+              }))
+            : [createEmptyItem()],
+        )
+      } else {
+        const { data: numeroData } = await api.get('/ordenes-compra/siguiente_numero/', {
+          suppressGlobalErrorToast: true,
+        })
+        setNumeroPreview(String(numeroData?.numero || '-'))
+
+        if (precargarDe) {
+          setForm({
+            proveedor: precargarDe.proveedor,
+            fecha_emision: precargarDe.fecha_emision || todayDate(),
+            fecha_entrega: precargarDe.fecha_entrega || '',
+            observaciones: precargarDe.observaciones || '',
+          })
+          setItems(precargarDe.items?.length > 0 ? precargarDe.items : [createEmptyItem()])
+        }
+      }
     } catch (error) {
-      toast.error(normalizeApiError(error, { fallback: 'No se pudieron cargar los catalogos de compras.' }))
+      setNumeroPreview('-')
+      toast.error(
+        normalizeApiError(error, {
+          fallback: isEditMode
+            ? 'No se pudo cargar la orden para editar.'
+            : 'No se pudieron cargar los catalogos de compras.',
+        }),
+      )
+    } finally {
+      setLoadingInitial(false)
     }
   }
 
   useEffect(() => {
     const timeoutId = setTimeout(() => {
-      void loadCatalogs()
+      void loadInitialData()
     }, 0)
 
     return () => clearTimeout(timeoutId)
-  }, [])
+  }, [isEditMode, ordenId])
 
   const contactoById = useMemo(() => {
     const map = new Map()
@@ -161,11 +233,6 @@ function ComprasOrdenesCreatePage() {
       return
     }
 
-    if (!form.numero.trim()) {
-      toast.error('El numero de la orden es obligatorio.')
-      return
-    }
-
     const hasInvalidItem = items.some(
       (item) => !item.producto || !String(item.descripcion || '').trim() || Number(item.cantidad) <= 0,
     )
@@ -182,21 +249,39 @@ function ComprasOrdenesCreatePage() {
       const total = totals.reduce((acc, row) => acc + row.total, 0)
       const impuestosTotal = total - subtotal
 
-      const { data: orden } = await api.post(
-        '/ordenes-compra/',
-        {
-          proveedor: form.proveedor,
-          numero: form.numero,
-          estado: 'BORRADOR',
-          fecha_emision: form.fecha_emision,
-          fecha_entrega: form.fecha_entrega || null,
-          observaciones: form.observaciones || '',
-          subtotal,
-          impuestos: impuestosTotal,
-          total,
-        },
-        { suppressGlobalErrorToast: true },
-      )
+      const payload = {
+        proveedor: form.proveedor,
+        estado: 'BORRADOR',
+        fecha_emision: form.fecha_emision,
+        fecha_entrega: form.fecha_entrega || null,
+        observaciones: form.observaciones || '',
+        subtotal,
+        impuestos: impuestosTotal,
+        total,
+      }
+
+      let targetOrdenId = ordenId
+      if (isEditMode) {
+        await api.patch(`/ordenes-compra/${ordenId}/`, payload, { suppressGlobalErrorToast: true })
+
+        const { data: existingItemsData } = await api.get('/ordenes-compra-items/', {
+          suppressGlobalErrorToast: true,
+        })
+        const existingItems = normalizeListResponse(existingItemsData).filter(
+          (row) => String(row.orden_compra) === String(ordenId),
+        )
+
+        await Promise.all(
+          existingItems.map((row) =>
+            api.delete(`/ordenes-compra-items/${row.id}/`, { suppressGlobalErrorToast: true }),
+          ),
+        )
+      } else {
+        const { data: orden } = await api.post('/ordenes-compra/', payload, {
+          suppressGlobalErrorToast: true,
+        })
+        targetOrdenId = orden.id
+      }
 
       await Promise.all(
         items.map((item, index) => {
@@ -204,7 +289,7 @@ function ComprasOrdenesCreatePage() {
           return api.post(
             '/ordenes-compra-items/',
             {
-              orden_compra: orden.id,
+              orden_compra: targetOrdenId,
               producto: item.producto,
               descripcion: item.descripcion,
               cantidad: Number(item.cantidad),
@@ -218,20 +303,28 @@ function ComprasOrdenesCreatePage() {
         }),
       )
 
-      toast.success('Orden de compra creada correctamente.')
+      toast.success(isEditMode ? 'Orden de compra actualizada correctamente.' : 'Orden de compra creada correctamente.')
       navigate('/compras/ordenes')
     } catch (error) {
-      toast.error(normalizeApiError(error, { fallback: 'No se pudo crear la orden de compra.' }))
+      toast.error(
+        normalizeApiError(error, {
+          fallback: isEditMode ? 'No se pudo actualizar la orden de compra.' : 'No se pudo crear la orden de compra.',
+        }),
+      )
     } finally {
       setStatus('idle')
     }
+  }
+
+  if (loadingInitial) {
+    return <p className="text-sm text-muted-foreground">Cargando orden...</p>
   }
 
   return (
     <section className="space-y-4">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <h2 className="text-2xl font-semibold">Nueva orden de compra</h2>
+          <h2 className="text-2xl font-semibold">{isEditMode ? 'Editar orden de compra' : precargarDe ? 'Duplicar orden de compra' : 'Nueva orden de compra'}</h2>
           <p className="text-sm text-muted-foreground">Registra la orden y sus items para abastecimiento.</p>
         </div>
         <Link to="/compras/ordenes" className={cn(buttonVariants({ variant: 'outline', size: 'md' }))}>
@@ -259,14 +352,15 @@ function ComprasOrdenesCreatePage() {
           </label>
 
           <label className="text-sm">
-            Numero
+            Numero asignado
             <input
-              className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
-              value={form.numero}
-              onChange={(event) => updateField('numero', event.target.value)}
-              required
+              className="mt-1 w-full rounded-md border border-input bg-muted px-3 py-2 text-muted-foreground"
+              value={numeroPreview}
+              readOnly
+              aria-label="Numero asignado"
             />
           </label>
+
 
           <label className="text-sm">
             Fecha emision
@@ -389,7 +483,7 @@ function ComprasOrdenesCreatePage() {
         </div>
 
         <Button type="submit" size="md" disabled={status === 'loading'}>
-          {status === 'loading' ? 'Guardando...' : 'Crear orden'}
+          {status === 'loading' ? 'Guardando...' : isEditMode ? 'Guardar cambios' : precargarDe ? 'Confirmar duplicado' : 'Crear orden'}
         </Button>
       </form>
     </section>

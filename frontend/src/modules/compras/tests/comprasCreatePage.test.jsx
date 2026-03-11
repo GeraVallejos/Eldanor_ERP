@@ -35,6 +35,7 @@ describe('compras/CreatePage', () => {
     server.use(
       http.get('*/proveedores/', async () => HttpResponse.json([{ id: 'p-1', contacto: 'c-1' }])),
       http.get('*/contactos/', async () => HttpResponse.json([{ id: 'c-1', nombre: 'Proveedor Uno' }])),
+      http.get('*/ordenes-compra/siguiente_numero/', async () => HttpResponse.json({ numero: 'ORD-00001' })),
       http.get('*/productos/', async () =>
         HttpResponse.json([{ id: 'prod-1', nombre: 'Producto A', tipo: 'PRODUCTO', precio_referencia: 1000, impuesto: 'imp-1' }]),
       ),
@@ -52,7 +53,6 @@ describe('compras/CreatePage', () => {
     renderWithProviders(<ComprasOrdenesCreatePage />)
 
     await userEvent.selectOptions(await screen.findByLabelText('Proveedor'), 'p-1')
-    await userEvent.type(screen.getByLabelText('Numero'), 'OC-200')
     await userEvent.selectOptions(screen.getAllByLabelText('Producto')[0], 'prod-1')
 
     await userEvent.click(screen.getByRole('button', { name: 'Crear orden' }))
@@ -63,7 +63,6 @@ describe('compras/CreatePage', () => {
 
     expect(ordenPayload).toMatchObject({
       proveedor: 'p-1',
-      numero: 'OC-200',
       estado: 'BORRADOR',
     })
 
@@ -79,6 +78,7 @@ describe('compras/CreatePage', () => {
     server.use(
       http.get('*/proveedores/', async () => HttpResponse.json([])),
       http.get('*/contactos/', async () => HttpResponse.json([])),
+      http.get('*/ordenes-compra/siguiente_numero/', async () => HttpResponse.json({ numero: 'ORD-00001' })),
       http.get('*/productos/', async () => HttpResponse.json([])),
       http.get('*/impuestos/', async () => HttpResponse.json([])),
       http.post('*/ordenes-compra/', async ({ request }) => {

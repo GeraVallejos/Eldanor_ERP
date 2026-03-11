@@ -19,12 +19,6 @@ const NAV_MODULES = [
         to: '/productos',
         enabled: true,
       },
-      {
-        id: 'productos-nuevo',
-        label: 'Nuevo producto',
-        to: '/productos/nuevo',
-        enabled: true,
-      },
     ],
   },
   {
@@ -40,21 +34,9 @@ const NAV_MODULES = [
         enabled: true,
       },
       {
-        id: 'contactos-clientes-nuevo',
-        label: 'Nuevo cliente',
-        to: '/contactos/clientes/nuevo',
-        enabled: true,
-      },
-      {
         id: 'contactos-proveedores-listado',
         label: 'Proveedores',
         to: '/contactos/proveedores',
-        enabled: true,
-      },
-      {
-        id: 'contactos-proveedores-nuevo',
-        label: 'Nuevo proveedor',
-        to: '/contactos/proveedores/nuevo',
         enabled: true,
       },
     ],
@@ -69,12 +51,6 @@ const NAV_MODULES = [
         id: 'presupuestos-listado',
         label: 'Listado',
         to: '/presupuestos',
-        enabled: true,
-      },
-      {
-        id: 'presupuestos-nuevo',
-        label: 'Nuevo presupuesto',
-        to: '/presupuestos/nuevo',
         enabled: true,
       },
     ],
@@ -114,15 +90,9 @@ const NAV_MODULES = [
         enabled: true,
       },
       {
-        id: 'compras-ordenes-nuevo',
-        label: 'Nueva orden',
-        to: '/compras/ordenes/nuevo',
-        enabled: true,
-      },
-      {
-        id: 'compras-recepciones',
-        label: 'Recepciones',
-        to: '/compras/recepciones',
+        id: 'compras-documentos',
+        label: 'Documentos (Guias/Facturas)',
+        to: '/compras/documentos',
         enabled: true,
       },
     ],
@@ -134,7 +104,21 @@ function hasRequiredPermissions(userPermissions, requiredPermissions) {
     return true
   }
 
-  return requiredPermissions.every((permission) => userPermissions.includes(permission))
+  const normalizedUserPermissions = userPermissions.map((permission) => String(permission || '').trim().toUpperCase())
+
+  return requiredPermissions.every((permission) => {
+    const target = String(permission || '').trim().toUpperCase()
+    if (!target) {
+      return true
+    }
+
+    if (normalizedUserPermissions.includes('*') || normalizedUserPermissions.includes(target)) {
+      return true
+    }
+
+    const [moduleCode] = target.split('.')
+    return Boolean(moduleCode) && normalizedUserPermissions.includes(`${moduleCode}.*`)
+  })
 }
 
 function hasRequiredRoles(userRoles, requiredRoles) {

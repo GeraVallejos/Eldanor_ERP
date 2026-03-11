@@ -4,6 +4,7 @@ import { toast } from 'sonner'
 import { api } from '@/api/client'
 import { normalizeApiError } from '@/api/errors'
 import Button from '@/components/ui/Button'
+import { getProductosCatalog } from '@/modules/productos/services/productosCatalogCache'
 import { buttonVariants } from '@/components/ui/buttonVariants'
 import { cn } from '@/lib/utils'
 
@@ -112,18 +113,18 @@ function PresupuestosCreatePage() {
       const [
         { data: clientesData },
         { data: contactosData },
-        { data: productosData },
+        productosData,
         { data: impuestosData },
       ] = await Promise.all([
         api.get('/clientes/', { suppressGlobalErrorToast: true }),
         api.get('/contactos/', { suppressGlobalErrorToast: true }),
-        api.get('/productos/', { suppressGlobalErrorToast: true }),
+        getProductosCatalog(),
         api.get('/impuestos/', { suppressGlobalErrorToast: true }),
       ])
 
       setClientes(normalizeListResponse(clientesData))
       setContactos(normalizeListResponse(contactosData))
-      setProductos(normalizeListResponse(productosData))
+      setProductos(productosData)
       setImpuestos(normalizeListResponse(impuestosData))
     } catch (error) {
       toast.error(normalizeApiError(error, { fallback: 'No se pudieron cargar los clientes.' }))

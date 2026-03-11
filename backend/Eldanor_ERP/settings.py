@@ -148,8 +148,9 @@ REST_FRAMEWORK = {
         "rest_framework.throttling.UserRateThrottle",
     ],
     "DEFAULT_THROTTLE_RATES": {
-        "anon": "30/hour",
-        "user": "200/hour",
+        # En desarrollo el frontend dispara varias cargas de catalogos.
+        "anon": config("DRF_THROTTLE_ANON_RATE", default="300/hour" if DEBUG else "30/hour"),
+        "user": config("DRF_THROTTLE_USER_RATE", default="2000/hour" if DEBUG else "200/hour"),
     },
 }
 

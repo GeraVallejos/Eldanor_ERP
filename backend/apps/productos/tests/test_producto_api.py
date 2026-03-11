@@ -1,0 +1,195 @@
+from datetime import date
+from decimal import Decimal
+
+import pytest
+from django.contrib.auth import get_user_model
+from django.urls import reverse
+from rest_framework import status
+from rest_framework_simplejwt.tokens import RefreshToken
+
+from apps.compras.models import DocumentoCompraProveedor, DocumentoCompraProveedorItem
+from apps.contactos.models import Contacto, Proveedor
+from apps.core.models import UserEmpresa
+from apps.productos.models import Producto
+
+
+def _token(user):
+    return str(RefreshToken.for_user(user).access_token)
+
+
+@pytest.fixture
+def owner_usuario(db, empresa):
+    User = get_user_model()
+    user = User.objects.create_user(
+        username="owner_productos",
+        email="owner_productos@test.com",
+        password="pass1234",
+        empresa_activa=empresa,
+    )
+    UserEmpresa.objects.create(user=user, empresa=empresa, rol="OWNER", activo=True)
+    return user
+
+
+@pytest.fixture
+def vendedor_usuario(db, empresa):
+    User = get_user_model()
+    user = User.objects.create_user(
+        username="vendedor_productos",
+        email="vendedor_productos@test.com",
+        password="pass1234",
+        empresa_activa=empresa,
+    )
+    UserEmpresa.objects.create(user=user, empresa=empresa, rol="VENDEDOR", activo=True)
+    return user
+
+
+@pytest.fixture
+def proveedor(db, empresa):
+    contacto = Contacto.objects.create(
+        empresa=empresa,
+        nombre="Proveedor Productos API",
+        rut="10111222-3",
+        email="proveedor_productos@test.com",
+    )
+    return Proveedor.objects.create(empresa=empresa, contacto=contacto)
+
+
+@pytest.mark.django_db
+class TestProductoApi:
+    def test_listado_productos_oculta_inactivos_por_defecto(self, api_client, owner_usuario, empresa):
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
+
+        Producto.objects.create(
+            empresa=empresa,
+            nombre="Producto Activo",
+            sku="PA-001",
+            precio_referencia=Decimal("1200"),
+            activo=True,
+        )
+        Producto.objects.create(
+            empresa=empresa,
+            nombre="Producto Inactivo",
+            sku="PI-001",
+            precio_referencia=Decimal("1300"),
+            activo=False,
+        )
+
+        resp = api_client.get(reverse("producto-list"))
+
+        assert resp.status_code == status.HTTP_200_OK
+        nombres = {item["nombre"].upper() for item in resp.data}
+        assert "PRODUCTO ACTIVO" in nombres
+        assert "PRODUCTO INACTIVO" not in nombres
+
+    def test_owner_puede_listar_inactivos_con_include_inactive(
+        self,
+        api_client,
+        owner_usuario,
+        empresa,
+    ):
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
+
+        Producto.objects.create(
+            empresa=empresa,
+            nombre="Producto Activo Owner",
+            sku="PAO-001",
+            precio_referencia=Decimal("1200"),
+            activo=True,
+        )
+        Producto.objects.create(
+            empresa=empresa,
+            nombre="Producto Inactivo Owner",
+            sku="PIO-001",
+            precio_referencia=Decimal("1300"),
+            activo=False,
+        )
+
+        resp = api_client.get(reverse("producto-list"), {"include_inactive": "1"})
+
+        assert resp.status_code == status.HTTP_200_OK
+        nombres = {item["nombre"].upper() for item in resp.data}
+        assert "PRODUCTO ACTIVO OWNER" in nombres
+        assert "PRODUCTO INACTIVO OWNER" in nombres
+
+    def test_usuario_no_avanzado_no_puede_listar_inactivos(
+        self,
+        api_client,
+        vendedor_usuario,
+        empresa,
+    ):
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(vendedor_usuario)}")
+
+        Producto.objects.create(
+            empresa=empresa,
+            nombre="Producto Activo Vendedor",
+            sku="PAV-001",
+            precio_referencia=Decimal("1200"),
+            activo=True,
+        )
+        Producto.objects.create(
+            empresa=empresa,
+            nombre="Producto Inactivo Vendedor",
+            sku="PIV-001",
+            precio_referencia=Decimal("1300"),
+            activo=False,
+        )
+
+        resp = api_client.get(reverse("producto-list"), {"include_inactive": "1"})
+
+        assert resp.status_code == status.HTTP_200_OK
+        nombres = {item["nombre"].upper() for item in resp.data}
+        assert "PRODUCTO ACTIVO VENDEDOR" in nombres
+        assert "PRODUCTO INACTIVO VENDEDOR" not in nombres
+
+    def test_delete_producto_sin_referencias_elimina(self, api_client, owner_usuario, empresa):
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
+
+        producto = Producto.objects.create(
+            empresa=empresa,
+            nombre="Producto Sin Uso",
+            sku="PSU-001",
+            precio_referencia=Decimal("1200"),
+        )
+
+        resp = api_client.delete(reverse("producto-detail", args=[producto.id]))
+
+        assert resp.status_code == status.HTTP_204_NO_CONTENT
+        assert not Producto.all_objects.filter(id=producto.id).exists()
+
+    def test_delete_producto_con_referencias_lo_anula(self, api_client, owner_usuario, empresa, proveedor):
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
+
+        producto = Producto.objects.create(
+            empresa=empresa,
+            nombre="Producto Con Historial",
+            sku="PCH-001",
+            precio_referencia=Decimal("2500"),
+        )
+
+        documento = DocumentoCompraProveedor.objects.create(
+            empresa=empresa,
+            creado_por=owner_usuario,
+            tipo_documento="FACTURA_COMPRA",
+            proveedor=proveedor,
+            folio="FAC-PROD-001",
+            fecha_emision=date.today(),
+            fecha_recepcion=date.today(),
+            subtotal_neto=Decimal("7500"),
+            impuestos=Decimal("0"),
+            total=Decimal("7500"),
+        )
+        DocumentoCompraProveedorItem.objects.create(
+            empresa=empresa,
+            creado_por=owner_usuario,
+            documento=documento,
+            producto=producto,
+            cantidad=Decimal("3.00"),
+            precio_unitario=Decimal("2500"),
+            subtotal=Decimal("7500"),
+        )
+
+        resp = api_client.delete(reverse("producto-detail", args=[producto.id]))
+
+        assert resp.status_code == status.HTTP_204_NO_CONTENT
+        producto.refresh_from_db()
+        assert producto.activo is False

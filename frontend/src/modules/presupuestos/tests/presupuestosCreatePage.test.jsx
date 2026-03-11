@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import PresupuestosCreatePage from '@/modules/presupuestos/pages/PresupuestosCreatePage'
+import { invalidateProductosCatalogCache } from '@/modules/productos/services/productosCatalogCache'
 import { server } from '@/test/msw/server'
 import { renderWithProviders } from '@/test/utils/renderWithProviders'
 
@@ -19,6 +20,7 @@ import { toast } from 'sonner'
 describe('presupuestos/PresupuestosCreatePage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    invalidateProductosCatalogCache()
   })
 
   it('muestra errores inline de item cuando se envia sin producto', async () => {

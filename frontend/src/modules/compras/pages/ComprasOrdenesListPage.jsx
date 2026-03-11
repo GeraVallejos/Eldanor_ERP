@@ -1,11 +1,15 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { api } from '@/api/client'
 import { normalizeApiError } from '@/api/errors'
 import Button from '@/components/ui/Button'
+import DocumentActionsDialog from '@/components/ui/DocumentActionsDialog'
 import { buttonVariants } from '@/components/ui/buttonVariants'
+import { useTableSorting } from '@/lib/tableSorting'
 import { cn } from '@/lib/utils'
+import { downloadExcelFile } from '@/modules/shared/exports/downloadExcelFile'
+import { downloadSimpleTablePdf } from '@/modules/shared/exports/downloadSimpleTablePdf'
 
 function normalizeListResponse(data) {
   if (Array.isArray(data)) {
@@ -29,12 +33,17 @@ function formatMoney(value) {
 }
 
 function ComprasOrdenesListPage() {
+  const navigate = useNavigate()
   const [status, setStatus] = useState('idle')
   const [ordenes, setOrdenes] = useState([])
   const [proveedores, setProveedores] = useState([])
   const [contactos, setContactos] = useState([])
   const [search, setSearch] = useState('')
   const [updatingId, setUpdatingId] = useState(null)
+  const [actionDialogOpen, setActionDialogOpen] = useState(false)
+  const [actionType, setActionType] = useState(null)
+  const [actionItem, setActionItem] = useState(null)
+  const [actionReason, setActionReason] = useState('')
 
   const loadData = async () => {
     setStatus('loading')
@@ -95,17 +104,174 @@ function ComprasOrdenesListPage() {
     })
   }, [ordenes, search, proveedorById, contactoById])
 
+  const { sortedRows: sortedOrdenes, toggleSort, getSortIndicator } = useTableSorting(filteredOrdenes, {
+    accessors: {
+      numero: (orden) => orden.numero,
+      proveedor: (orden) => {
+        const proveedor = proveedorById.get(String(orden.proveedor))
+        const contacto = contactoById.get(String(proveedor?.contacto))
+        return contacto?.nombre || ''
+      },
+      fecha_emision: (orden) => orden.fecha_emision,
+      estado: (orden) => orden.estado,
+      total: (orden) => Number(orden.total || 0),
+    },
+  })
+
   const updateEstado = async (orden, action) => {
     setUpdatingId(orden.id)
     try {
       const { data } = await api.post(`/ordenes-compra/${orden.id}/${action}/`, {}, { suppressGlobalErrorToast: true })
       setOrdenes((prev) => prev.map((row) => (String(row.id) === String(orden.id) ? { ...row, ...data } : row)))
-      toast.success(action === 'enviar' ? 'Orden enviada correctamente.' : 'Orden anulada correctamente.')
+      toast.success('Orden anulada correctamente.')
     } catch (error) {
-      toast.error(normalizeApiError(error, { fallback: 'No se pudo actualizar la orden.' }))
+      const fallback =
+        action === 'anular'
+          ? 'No se puede anular la orden. Verifique si tiene documentos de compra activos asociados.'
+          : 'No se pudo actualizar la orden.'
+      toast.error(normalizeApiError(error, { fallback }))
     } finally {
       setUpdatingId(null)
     }
+  }
+
+  const handleDeleteConfirm = async () => {
+    if (!actionItem || actionType !== 'eliminar') return
+
+    setUpdatingId(actionItem.id)
+    try {
+      await api.post(`/ordenes-compra/${actionItem.id}/eliminar_sin_documentos/`, {}, { suppressGlobalErrorToast: true })
+      setOrdenes((prev) => prev.filter((row) => String(row.id) !== String(actionItem.id)))
+      toast.success('Orden eliminada correctamente.')
+      closeActionDialog()
+    } catch (error) {
+      toast.error(normalizeApiError(error, { fallback: 'No se pudo eliminar la orden.' }))
+    } finally {
+      setUpdatingId(null)
+    }
+  }
+
+  const openActionDialog = (orden, action) => {
+    setActionItem(orden)
+    setActionType(action)
+    setActionReason('')
+    setActionDialogOpen(true)
+  }
+
+  const closeActionDialog = () => {
+    setActionDialogOpen(false)
+    setActionItem(null)
+    setActionType(null)
+    setActionReason('')
+  }
+
+  const handleActionConfirm = async () => {
+    if (!actionItem || !actionType) return
+
+    if (actionType === 'eliminar') {
+      await handleDeleteConfirm()
+      return
+    }
+
+    setUpdatingId(actionItem.id)
+    try {
+      if (actionType === 'corregir') {
+        const response = await api.post(
+          `/ordenes-compra/${actionItem.id}/corregir/`,
+          { motivo: actionReason.trim() },
+          { suppressGlobalErrorToast: true },
+        )
+        setOrdenes((prev) => [...prev, response.data])
+        toast.success('Orden corregida. Se creó un nuevo borrador.')
+        closeActionDialog()
+      } else if (actionType === 'duplicar') {
+        const [{ data: ordenData }, { data: itemsData }] = await Promise.all([
+          api.get(`/ordenes-compra/${actionItem.id}/`, { suppressGlobalErrorToast: true }),
+          api.get('/ordenes-compra-items/', { suppressGlobalErrorToast: true }),
+        ])
+
+        const scopedItems = normalizeListResponse(itemsData).filter(
+          (row) => String(row.orden_compra) === String(actionItem.id),
+        )
+
+        closeActionDialog()
+        navigate('/compras/ordenes/nuevo', {
+          state: {
+            precargarDe: {
+              proveedor: String(ordenData.proveedor || ''),
+              fecha_emision: new Date().toISOString().slice(0, 10),
+              fecha_entrega: ordenData.fecha_entrega || '',
+              observaciones: ordenData.observaciones || '',
+              items: scopedItems.map((item) => ({
+                producto: String(item.producto || ''),
+                descripcion: item.descripcion || '',
+                cantidad: String(item.cantidad || '1'),
+                precio_unitario: String(item.precio_unitario || '0'),
+                impuesto: item.impuesto ? String(item.impuesto) : '',
+              })),
+            },
+          },
+        })
+      }
+    } catch (error) {
+      toast.error(normalizeApiError(error, { fallback: 'No se pudo completar la acción.' }))
+    } finally {
+      setUpdatingId(null)
+    }
+  }
+
+  const getTodaySuffix = () => new Date().toISOString().slice(0, 10)
+
+  const handleExportExcel = async () => {
+    if (filteredOrdenes.length === 0) {
+      return
+    }
+
+    await downloadExcelFile({
+      sheetName: 'OrdenesCompra',
+      fileName: `ordenes_compra_${getTodaySuffix()}.xlsx`,
+      columns: [
+        { header: 'Numero', key: 'numero', width: 18 },
+        { header: 'Proveedor', key: 'proveedor', width: 32 },
+        { header: 'Fecha emision', key: 'fecha_emision', width: 18 },
+        { header: 'Estado', key: 'estado', width: 16 },
+        { header: 'Total', key: 'total', width: 16 },
+      ],
+      rows: filteredOrdenes.map((orden) => {
+        const proveedor = proveedorById.get(String(orden.proveedor))
+        const contacto = contactoById.get(String(proveedor?.contacto))
+        return {
+          numero: orden.numero || '-',
+          proveedor: contacto?.nombre || '-',
+          fecha_emision: orden.fecha_emision || '-',
+          estado: orden.estado || '-',
+          total: Number(orden.total || 0),
+        }
+      }),
+    })
+  }
+
+  const handleExportPdf = async () => {
+    if (filteredOrdenes.length === 0) {
+      return
+    }
+
+    await downloadSimpleTablePdf({
+      title: 'Ordenes de compra',
+      fileName: `ordenes_compra_${getTodaySuffix()}.pdf`,
+      headers: ['Numero', 'Proveedor', 'Fecha emision', 'Estado', 'Total'],
+      rows: filteredOrdenes.map((orden) => {
+        const proveedor = proveedorById.get(String(orden.proveedor))
+        const contacto = contactoById.get(String(proveedor?.contacto))
+        return [
+          orden.numero || '-',
+          contacto?.nombre || '-',
+          orden.fecha_emision || '-',
+          orden.estado || '-',
+          formatMoney(orden.total),
+        ]
+      }),
+    })
   }
 
   return (
@@ -114,20 +280,31 @@ function ComprasOrdenesListPage() {
         <h2 className="text-2xl font-semibold">Ordenes de compra</h2>
 
         <div className="grid grid-cols-1 gap-2 sm:flex sm:items-center sm:justify-end sm:gap-2">
-          <Button variant="outline" size="md" fullWidth className="sm:w-auto" onClick={loadData}>
-            Recargar
+          <Button
+            variant="outline"
+            size="md"
+            fullWidth
+            className="sm:w-auto"
+            onClick={handleExportExcel}
+            disabled={filteredOrdenes.length === 0}
+          >
+            Exportar Excel
+          </Button>
+          <Button
+            variant="outline"
+            size="md"
+            fullWidth
+            className="sm:w-auto"
+            onClick={handleExportPdf}
+            disabled={filteredOrdenes.length === 0}
+          >
+            Exportar PDF
           </Button>
           <Link
             to="/compras/ordenes/nuevo"
             className={cn(buttonVariants({ variant: 'default', size: 'md', fullWidth: true }), 'sm:w-auto')}
           >
             Nueva orden
-          </Link>
-          <Link
-            to="/compras/recepciones"
-            className={cn(buttonVariants({ variant: 'outline', size: 'md', fullWidth: true }), 'sm:w-auto')}
-          >
-            Recepciones
           </Link>
         </div>
       </div>
@@ -149,11 +326,31 @@ function ComprasOrdenesListPage() {
           <table className="min-w-full text-sm">
             <thead className="bg-muted/40">
               <tr>
-                <th className="px-3 py-2 text-left font-medium">Numero</th>
-                <th className="px-3 py-2 text-left font-medium">Proveedor</th>
-                <th className="px-3 py-2 text-left font-medium">Fecha emision</th>
-                <th className="px-3 py-2 text-left font-medium">Estado</th>
-                <th className="px-3 py-2 text-left font-medium">Total</th>
+                <th className="px-3 py-2 text-left font-medium">
+                  <button type="button" onClick={() => toggleSort('numero')} className="inline-flex items-center gap-1 hover:text-primary">
+                    Numero <span className="text-xs text-muted-foreground">{getSortIndicator('numero')}</span>
+                  </button>
+                </th>
+                <th className="px-3 py-2 text-left font-medium">
+                  <button type="button" onClick={() => toggleSort('proveedor')} className="inline-flex items-center gap-1 hover:text-primary">
+                    Proveedor <span className="text-xs text-muted-foreground">{getSortIndicator('proveedor')}</span>
+                  </button>
+                </th>
+                <th className="px-3 py-2 text-left font-medium">
+                  <button type="button" onClick={() => toggleSort('fecha_emision')} className="inline-flex items-center gap-1 hover:text-primary">
+                    Fecha emision <span className="text-xs text-muted-foreground">{getSortIndicator('fecha_emision')}</span>
+                  </button>
+                </th>
+                <th className="px-3 py-2 text-left font-medium">
+                  <button type="button" onClick={() => toggleSort('estado')} className="inline-flex items-center gap-1 hover:text-primary">
+                    Estado <span className="text-xs text-muted-foreground">{getSortIndicator('estado')}</span>
+                  </button>
+                </th>
+                <th className="px-3 py-2 text-left font-medium">
+                  <button type="button" onClick={() => toggleSort('total')} className="inline-flex items-center gap-1 hover:text-primary">
+                    Total <span className="text-xs text-muted-foreground">{getSortIndicator('total')}</span>
+                  </button>
+                </th>
                 <th className="px-3 py-2 text-right font-medium">Acciones</th>
               </tr>
             </thead>
@@ -165,7 +362,7 @@ function ComprasOrdenesListPage() {
                   </td>
                 </tr>
               ) : (
-                filteredOrdenes.map((orden) => {
+                sortedOrdenes.map((orden) => {
                   const proveedor = proveedorById.get(String(orden.proveedor))
                   const contacto = contactoById.get(String(proveedor?.contacto))
 
@@ -178,15 +375,29 @@ function ComprasOrdenesListPage() {
                       <td className="px-3 py-2">{formatMoney(orden.total)}</td>
                       <td className="px-3 py-2">
                         <div className="flex justify-end gap-2">
+                          <Link
+                            to={`/compras/ordenes/${orden.id}`}
+                            className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'h-8 px-3 text-xs')}
+                          >
+                            Ver
+                          </Link>
+
                           {orden.estado === 'BORRADOR' ? (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              disabled={updatingId === orden.id}
-                              onClick={() => updateEstado(orden, 'enviar')}
+                            <Link
+                              to={`/compras/documentos/nuevo?orden_compra=${orden.id}`}
+                              className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'h-8 px-3 text-xs')}
                             >
-                              Enviar
-                            </Button>
+                              Crear doc
+                            </Link>
+                          ) : null}
+
+                          {orden.estado === 'BORRADOR' ? (
+                            <Link
+                              to={`/compras/ordenes/${orden.id}/editar`}
+                              className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'h-8 px-3 text-xs')}
+                            >
+                              Editar
+                            </Link>
                           ) : null}
 
                           {orden.estado !== 'CANCELADA' && orden.estado !== 'RECIBIDA' ? (
@@ -200,6 +411,40 @@ function ComprasOrdenesListPage() {
                               Anular
                             </Button>
                           ) : null}
+
+                          {orden.estado !== 'BORRADOR' && orden.estado !== 'CANCELADA' ? (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="text-xs"
+                              disabled={updatingId === orden.id}
+                              onClick={() => openActionDialog(orden, 'corregir')}
+                            >
+                              Corregir
+                            </Button>
+                          ) : null}
+
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="text-xs"
+                            disabled={updatingId === orden.id}
+                            onClick={() => openActionDialog(orden, 'duplicar')}
+                          >
+                            Duplicar
+                          </Button>
+
+                          {!orden.tiene_documentos ? (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="border-destructive/40 text-destructive hover:bg-destructive/10"
+                              disabled={updatingId === orden.id}
+                              onClick={() => openActionDialog(orden, 'eliminar')}
+                            >
+                              Eliminar
+                            </Button>
+                          ) : null}
                         </div>
                       </td>
                     </tr>
@@ -210,6 +455,17 @@ function ComprasOrdenesListPage() {
           </table>
         </div>
       ) : null}
+
+      <DocumentActionsDialog
+        actionType={actionType}
+        open={actionDialogOpen}
+        loading={Boolean(actionItem && updatingId === actionItem.id)}
+        value={actionReason}
+        onChange={setActionReason}
+        item={actionItem}
+        onCancel={closeActionDialog}
+        onConfirm={handleActionConfirm}
+      />
     </section>
   )
 }

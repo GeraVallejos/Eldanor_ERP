@@ -8,6 +8,7 @@ import { z } from 'zod'
 import Button from '@/components/ui/Button'
 import { buttonVariants } from '@/components/ui/buttonVariants'
 import { cn } from '@/lib/utils'
+import { invalidateProductosCatalogCache } from '@/modules/productos/services/productosCatalogCache'
 import {
   createProducto,
   fetchCatalogosProducto,
@@ -129,6 +130,7 @@ function ProductosCreatePage() {
 
     try {
       await dispatch(createProducto(payload)).unwrap()
+      invalidateProductosCatalogCache()
       toast.success('Producto creado correctamente.')
       reset({
         nombre: '',

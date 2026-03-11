@@ -1,4 +1,8 @@
+from django.db.models.deletion import ProtectedError
 from rest_framework.viewsets import ModelViewSet
+
+from apps.core.exceptions import ConflictError
+from apps.core.roles import RolUsuario
 from apps.productos.models import Producto, Categoria, Impuesto
 from apps.productos.api.serializer import ImpuestoSerializer, ProductoSerializer, CategoriaSerializer
 from apps.core.mixins import TenantViewSetMixin
@@ -21,6 +25,44 @@ class ProductoViewSet(TenantViewSetMixin, ModelViewSet ):
         "partial_update": Acciones.EDITAR,
         "destroy": Acciones.BORRAR,
     }
+
+    @staticmethod
+    def _is_truthy(value):
+        return str(value).strip().lower() in {"1", "true", "t", "yes", "y", "si", "on"}
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        include_inactive = self._is_truthy(self.request.query_params.get("include_inactive"))
+
+        if not include_inactive:
+            return queryset.filter(activo=True)
+
+        user = self.request.user
+        if getattr(user, "is_superuser", False):
+            return queryset
+
+        empresa = self.get_empresa()
+        if not empresa:
+            return queryset.filter(activo=True)
+
+        rol = user.get_rol_en_empresa(empresa)
+        if rol in {RolUsuario.OWNER, RolUsuario.ADMIN}:
+            return queryset
+
+        return queryset.filter(activo=True)
+
+    def perform_destroy(self, instance):
+        self._set_tenant_context()
+        try:
+            instance.delete()
+        except ProtectedError:
+            if not instance.activo:
+                raise ConflictError(
+                    "El producto ya esta anulado y mantiene referencias historicas."
+                )
+            # Conserva integridad historica cuando el producto ya fue usado.
+            instance.activo = False
+            instance.save(skip_clean=True, update_fields=["activo"])
 
 
 class CategoriaViewSet(TenantViewSetMixin, ModelViewSet):

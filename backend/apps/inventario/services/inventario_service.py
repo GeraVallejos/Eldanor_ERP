@@ -58,7 +58,7 @@ class InventarioService:
         if tipo not in {TipoMovimiento.ENTRADA, TipoMovimiento.SALIDA}:
             raise BusinessRuleError("Tipo de movimiento invalido.")
 
-        if tipo == TipoMovimiento.ENTRADA and costo_unitario is not None and Decimal(costo_unitario) < 0:
+        if costo_unitario is not None and Decimal(costo_unitario) < 0:
             raise BusinessRuleError("El costo unitario no puede ser negativo.")
 
         bodega_id = InventarioService._resolver_bodega_id(empresa=empresa, bodega_id=bodega_id)
@@ -83,7 +83,9 @@ class InventarioService:
                 bodega_id=bodega_id,
                 defaults={
                     "stock": producto.stock_actual,
-                    "valor_stock": InventarioService._money(Decimal("0")),
+                    "valor_stock": InventarioService._money(
+                        Decimal(producto.stock_actual) * Decimal(producto.costo_promedio)
+                    ),
                 }
             )
         )
@@ -101,30 +103,23 @@ class InventarioService:
                     f"Stock insuficiente para {producto.nombre}"
                 )
 
-        # costeo promedio
-        if tipo == TipoMovimiento.ENTRADA and costo_unitario is not None:
-            costo_unitario = Decimal(costo_unitario)
-
-            valor_existente = producto.stock_actual * producto.costo_promedio
-            valor_compra = cantidad * costo_unitario
-
-            nuevo_costo = (
-                (valor_existente + valor_compra)
-                / (producto.stock_actual + cantidad)
-                if (producto.stock_actual + cantidad) > 0
-                else costo_unitario
-            )
-
-            producto.costo_promedio = InventarioService._cost(nuevo_costo)
-
-        costo_movimiento = (
-            costo_unitario
-            if (tipo == TipoMovimiento.ENTRADA and costo_unitario is not None)
-            else producto.costo_promedio
-        )
+        costo_movimiento = Decimal(costo_unitario) if costo_unitario is not None else producto.costo_promedio
         costo_movimiento = InventarioService._cost(costo_movimiento)
 
         valor_total = InventarioService._money(Decimal(cantidad) * Decimal(costo_movimiento))
+
+        valor_stock_anterior = InventarioService._money(stock_obj.valor_stock)
+        if tipo == TipoMovimiento.ENTRADA:
+            valor_stock_nuevo = InventarioService._money(valor_stock_anterior + valor_total)
+        else:
+            valor_stock_nuevo = InventarioService._money(valor_stock_anterior - valor_total)
+            if valor_stock_nuevo < 0:
+                valor_stock_nuevo = InventarioService._money(Decimal("0"))
+
+        if nuevo_stock > 0:
+            producto.costo_promedio = InventarioService._cost(valor_stock_nuevo / Decimal(nuevo_stock))
+        else:
+            producto.costo_promedio = InventarioService._cost(Decimal("0"))
 
         if documento_tipo and documento_tipo not in {valor for valor, _ in TipoDocumentoReferencia.choices}:
             raise BusinessRuleError("Tipo de documento invalido para inventario.")
@@ -146,9 +141,7 @@ class InventarioService:
         )
 
         stock_obj.stock = nuevo_stock
-        stock_obj.valor_stock = InventarioService._money(
-            Decimal(nuevo_stock) * Decimal(producto.costo_promedio)
-        )
+        stock_obj.valor_stock = valor_stock_nuevo
         stock_obj.save(update_fields=["stock", "valor_stock"])
 
         InventorySnapshot.all_objects.create(

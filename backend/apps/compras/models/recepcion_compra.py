@@ -12,8 +12,10 @@ class RecepcionCompra(BaseModel):
 
     orden_compra = models.ForeignKey(
         OrdenCompra,
-        on_delete=models.PROTECT,
-        related_name="recepciones"
+        on_delete=models.SET_NULL,
+        related_name="recepciones",
+        null=True,
+        blank=True,
     )
 
     fecha = models.DateField()

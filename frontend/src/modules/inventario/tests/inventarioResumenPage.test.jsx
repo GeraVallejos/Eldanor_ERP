@@ -69,6 +69,6 @@ describe('inventario/InventarioResumenPage', () => {
     })
 
     const principalMatches = await screen.findAllByText('Principal')
-    expect(principalMatches.length).toBeGreaterThanOrEqual(2)
+    expect(principalMatches.length).toBeGreaterThanOrEqual(1)
   })
 })

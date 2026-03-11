@@ -6,6 +6,8 @@ class TipoDocumento(models.TextChoices):
     PRESUPUESTO = "PRESUPUESTO", "Presupuesto"
     FACTURA = "FACTURA", "Factura"
     GUIA = "GUIA", "Guía"
+    ORDEN_COMPRA = "ORDEN_COMPRA", "Orden de Compra"
+    DOCUMENTO_COMPRA = "DOCUMENTO_COMPRA", "Documento de Compra"
 
 class SecuenciaDocumento(BaseModel):
 
