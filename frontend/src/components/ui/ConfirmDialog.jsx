@@ -26,9 +26,10 @@ function ConfirmDialog({
           </Button>
           <Button
             type="button"
+            variant="outline"
             onClick={onConfirm}
             disabled={loading}
-            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            className="border-destructive/40 text-destructive hover:bg-destructive/10"
           >
             {loading ? 'Procesando...' : confirmLabel}
           </Button>

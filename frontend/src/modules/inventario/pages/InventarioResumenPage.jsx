@@ -39,6 +39,7 @@ function InventarioResumenPage() {
     producto_id: '',
     bodega_id: '',
   })
+  const [onlyWithStock, setOnlyWithStock] = useState(true)
 
   const loadCatalogs = async () => {
     try {
@@ -97,6 +98,14 @@ function InventarioResumenPage() {
     [productos],
   )
 
+  const productoById = useMemo(() => {
+    const map = new Map()
+    productos.forEach((producto) => {
+      map.set(String(producto.id), producto)
+    })
+    return map
+  }, [productos])
+
   const bodegaOptions = useMemo(
     () =>
       bodegas.map((bodega) => ({
@@ -117,8 +126,40 @@ function InventarioResumenPage() {
 
   const getTodaySuffix = () => new Date().toISOString().slice(0, 10)
 
-  const handleExportExcel = async () => {
+  const detalleRows = useMemo(() => {
     const rows = Array.isArray(resumen?.detalle) ? resumen.detalle : []
+
+    if (filters.group_by === 'bodega') {
+      return rows.map((row) => ({
+        groupLabel: row.bodega__nombre || '-',
+        stockTotal: Number(row.stock_total || 0),
+        valorTotal: Number(row.valor_total || 0),
+      }))
+    }
+
+    return rows.map((row) => {
+      const productoId = String(row.producto_id || '')
+      const producto = productoById.get(productoId)
+      return {
+        groupLabel: row.producto__nombre || producto?.nombre || '-',
+        categoria: row.producto__categoria__nombre || '-',
+        sku: producto?.sku || '-',
+        tipo: producto?.tipo || '-',
+        stockTotal: Number(row.stock_total || 0),
+        valorTotal: Number(row.valor_total || 0),
+      }
+    })
+  }, [resumen, filters.group_by, productoById])
+
+  const visibleRows = useMemo(() => {
+    if (!onlyWithStock) {
+      return detalleRows
+    }
+    return detalleRows.filter((row) => Number(row.stockTotal || 0) > 0)
+  }, [detalleRows, onlyWithStock])
+
+  const handleExportExcel = async () => {
+    const rows = visibleRows
     if (rows.length === 0) {
       return
     }
@@ -126,21 +167,34 @@ function InventarioResumenPage() {
     await downloadExcelFile({
       sheetName: 'ResumenInventario',
       fileName: `resumen_inventario_${getTodaySuffix()}.xlsx`,
-      columns: [
-        { header: filters.group_by === 'bodega' ? 'Bodega' : 'Producto', key: 'grupo', width: 30 },
-        { header: 'Stock', key: 'stock_total', width: 14 },
-        { header: 'Valor', key: 'valor_total', width: 16 },
-      ],
+      columns:
+        filters.group_by === 'bodega'
+          ? [
+              { header: 'Bodega', key: 'grupo', width: 30 },
+              { header: 'Stock', key: 'stock_total', width: 14 },
+              { header: 'Valor', key: 'valor_total', width: 16 },
+            ]
+          : [
+              { header: 'Producto', key: 'grupo', width: 30 },
+              { header: 'Categoria', key: 'categoria', width: 22 },
+              { header: 'SKU', key: 'sku', width: 18 },
+              { header: 'Tipo', key: 'tipo', width: 16 },
+              { header: 'Stock', key: 'stock_total', width: 14 },
+              { header: 'Valor', key: 'valor_total', width: 16 },
+            ],
       rows: rows.map((row) => ({
-        grupo: row.producto__nombre || row.bodega__nombre || '-',
-        stock_total: Number(row.stock_total || 0),
-        valor_total: Number(row.valor_total || 0),
+        grupo: row.groupLabel,
+        categoria: row.categoria,
+        sku: row.sku,
+        tipo: row.tipo,
+        stock_total: row.stockTotal,
+        valor_total: row.valorTotal,
       })),
     })
   }
 
   const handleExportPdf = async () => {
-    const rows = Array.isArray(resumen?.detalle) ? resumen.detalle : []
+    const rows = visibleRows
     if (rows.length === 0) {
       return
     }
@@ -148,12 +202,25 @@ function InventarioResumenPage() {
     await downloadSimpleTablePdf({
       title: 'Resumen valorizado de inventario',
       fileName: `resumen_inventario_${getTodaySuffix()}.pdf`,
-      headers: [filters.group_by === 'bodega' ? 'Bodega' : 'Producto', 'Stock', 'Valor'],
-      rows: rows.map((row) => [
-        row.producto__nombre || row.bodega__nombre || '-',
-        formatMoney(row.stock_total),
-        formatMoney(row.valor_total),
-      ]),
+      headers:
+        filters.group_by === 'bodega'
+          ? ['Bodega', 'Stock', 'Valor']
+          : ['Producto', 'Categoria', 'SKU', 'Tipo', 'Stock', 'Valor'],
+      rows:
+        filters.group_by === 'bodega'
+          ? rows.map((row) => [
+              row.groupLabel,
+              formatMoney(row.stockTotal),
+              formatMoney(row.valorTotal),
+            ])
+          : rows.map((row) => [
+              row.groupLabel,
+              row.categoria || '-',
+              row.sku || '-',
+              row.tipo || '-',
+              formatMoney(row.stockTotal),
+              formatMoney(row.valorTotal),
+            ]),
     })
   }
 
@@ -209,7 +276,7 @@ function InventarioResumenPage() {
             type="button"
             variant="outline"
             onClick={handleExportExcel}
-            disabled={!Array.isArray(resumen?.detalle) || resumen.detalle.length === 0}
+            disabled={visibleRows.length === 0}
           >
             Excel
           </Button>
@@ -217,7 +284,7 @@ function InventarioResumenPage() {
             type="button"
             variant="outline"
             onClick={handleExportPdf}
-            disabled={!Array.isArray(resumen?.detalle) || resumen.detalle.length === 0}
+            disabled={visibleRows.length === 0}
           >
             PDF
           </Button>
@@ -243,6 +310,15 @@ function InventarioResumenPage() {
 
       {status === 'loading' ? <p className="text-sm text-muted-foreground">Actualizando resumen...</p> : null}
 
+      <label className="inline-flex items-center gap-2 text-sm text-muted-foreground">
+        <input
+          type="checkbox"
+          checked={onlyWithStock}
+          onChange={(event) => setOnlyWithStock(event.target.checked)}
+        />
+        Mostrar solo items con stock mayor a 0
+      </label>
+
       <div className="overflow-x-auto rounded-md border border-border bg-card">
         <table className="min-w-full text-sm">
           <thead className="bg-muted/40">
@@ -250,22 +326,34 @@ function InventarioResumenPage() {
               <th className="px-3 py-2 text-left font-medium">
                 {filters.group_by === 'bodega' ? 'Bodega' : 'Producto'}
               </th>
+              {filters.group_by === 'producto' ? (
+                <th className="px-3 py-2 text-left font-medium">Categoria</th>
+              ) : null}
+              {filters.group_by === 'producto' ? (
+                <th className="px-3 py-2 text-left font-medium">SKU</th>
+              ) : null}
+              {filters.group_by === 'producto' ? (
+                <th className="px-3 py-2 text-left font-medium">Tipo</th>
+              ) : null}
               <th className="px-3 py-2 text-left font-medium">Stock</th>
               <th className="px-3 py-2 text-left font-medium">Valor</th>
             </tr>
           </thead>
           <tbody>
-            {Array.isArray(resumen?.detalle) && resumen.detalle.length > 0 ? (
-              resumen.detalle.map((row, index) => (
+            {visibleRows.length > 0 ? (
+              visibleRows.map((row, index) => (
                 <tr key={`${filters.group_by}-${index}`} className="border-t border-border">
-                  <td className="px-3 py-2">{row.producto__nombre || row.bodega__nombre || '-'}</td>
-                  <td className="px-3 py-2">{formatMoney(row.stock_total)}</td>
-                  <td className="px-3 py-2">{formatMoney(row.valor_total)}</td>
+                  <td className="px-3 py-2">{row.groupLabel}</td>
+                  {filters.group_by === 'producto' ? <td className="px-3 py-2">{row.categoria || '-'}</td> : null}
+                  {filters.group_by === 'producto' ? <td className="px-3 py-2">{row.sku || '-'}</td> : null}
+                  {filters.group_by === 'producto' ? <td className="px-3 py-2">{row.tipo || '-'}</td> : null}
+                  <td className="px-3 py-2">{formatMoney(row.stockTotal)}</td>
+                  <td className="px-3 py-2">{formatMoney(row.valorTotal)}</td>
                 </tr>
               ))
             ) : (
               <tr>
-                <td className="px-3 py-3 text-muted-foreground" colSpan={3}>
+                <td className="px-3 py-3 text-muted-foreground" colSpan={filters.group_by === 'producto' ? 6 : 3}>
                   Sin datos para mostrar.
                 </td>
               </tr>

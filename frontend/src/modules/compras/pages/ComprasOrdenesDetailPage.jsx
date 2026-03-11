@@ -36,6 +36,7 @@ function ComprasOrdenesDetailPage() {
   const [status, setStatus] = useState('idle')
   const [orden, setOrden] = useState(null)
   const [items, setItems] = useState([])
+  const [documentosAsociados, setDocumentosAsociados] = useState([])
   const [proveedores, setProveedores] = useState([])
   const [contactos, setContactos] = useState([])
   const [productos, setProductos] = useState([])
@@ -44,10 +45,11 @@ function ComprasOrdenesDetailPage() {
   const loadData = useCallback(async () => {
     setStatus('loading')
     try {
-      const [{ data: ordenData }, { data: itemsData }, { data: proveedoresData }, { data: contactosData }, productosData, { data: impuestosData }] =
+      const [{ data: ordenData }, { data: itemsData }, { data: documentosData }, { data: proveedoresData }, { data: contactosData }, productosData, { data: impuestosData }] =
         await Promise.all([
           api.get(`/ordenes-compra/${ordenId}/`, { suppressGlobalErrorToast: true }),
           api.get('/ordenes-compra-items/', { suppressGlobalErrorToast: true }),
+          api.get('/documentos-compra/', { suppressGlobalErrorToast: true }),
           api.get('/proveedores/', { suppressGlobalErrorToast: true }),
           api.get('/contactos/', { suppressGlobalErrorToast: true }),
           getProductosCatalog(),
@@ -56,6 +58,9 @@ function ComprasOrdenesDetailPage() {
 
       setOrden(ordenData)
       setItems(normalizeListResponse(itemsData).filter((row) => String(row.orden_compra) === String(ordenId)))
+      setDocumentosAsociados(
+        normalizeListResponse(documentosData).filter((doc) => String(doc.orden_compra) === String(ordenId)),
+      )
       setProveedores(normalizeListResponse(proveedoresData))
       setContactos(normalizeListResponse(contactosData))
       setProductos(productosData)
@@ -299,6 +304,30 @@ function ComprasOrdenesDetailPage() {
           <p className="mt-2 text-sm whitespace-pre-wrap">{orden.observaciones}</p>
         </div>
       )}
+
+      <div className="rounded-md border border-border bg-card p-4">
+        <p className="text-xs font-medium text-muted-foreground">Documentos asociados</p>
+        {documentosAsociados.length === 0 ? (
+          <p className="mt-2 text-sm text-muted-foreground">Esta orden no tiene documentos asociados.</p>
+        ) : (
+          <div className="mt-2 flex flex-col gap-2">
+            {documentosAsociados.map((doc) => (
+              <Link
+                key={doc.id}
+                to={`/compras/documentos/${doc.id}`}
+                className="inline-flex items-center gap-2 text-sm text-primary hover:underline"
+              >
+                <span>{doc.tipo_documento === 'FACTURA_COMPRA' ? 'Factura' : 'Guía'}</span>
+                <span>
+                  {doc.serie ? `${doc.serie}-` : ''}
+                  {doc.folio || 'S/F'}
+                </span>
+                <span className="text-muted-foreground">({doc.estado || '-'})</span>
+              </Link>
+            ))}
+          </div>
+        )}
+      </div>
 
       <div className="overflow-x-auto rounded-md border border-border bg-card">
         <table className="min-w-full text-sm">

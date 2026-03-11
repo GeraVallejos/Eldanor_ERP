@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   createColumnHelper,
   flexRender,
   getCoreRowModel,
   getFilteredRowModel,
+  getPaginationRowModel,
   getSortedRowModel,
   useReactTable,
 } from '@tanstack/react-table'
@@ -13,14 +14,18 @@ import { toast } from 'sonner'
 import { api } from '@/api/client'
 import { normalizeApiError } from '@/api/errors'
 import Button from '@/components/ui/Button'
+import BulkImportButton from '@/components/ui/BulkImportButton'
 import { buttonVariants } from '@/components/ui/buttonVariants'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
+import TablePagination from '@/components/ui/TablePagination'
 import { cn } from '@/lib/utils'
 import { invalidateProductosCatalogCache } from '@/modules/productos/services/productosCatalogCache'
 import { downloadExcelFile } from '@/modules/shared/exports/downloadExcelFile'
 import { downloadSimpleTablePdf } from '@/modules/shared/exports/downloadSimpleTablePdf'
 import {
+  fetchCatalogosProducto,
   fetchProductos,
+  selectCategorias,
   selectProductos,
   selectProductosError,
   selectProductosStatus,
@@ -41,11 +46,14 @@ function formatMoney(value) {
 function ProductosListPage() {
   const dispatch = useDispatch()
   const productos = useSelector(selectProductos)
+  const categorias = useSelector(selectCategorias)
   const currentUser = useSelector(selectCurrentUser)
   const status = useSelector(selectProductosStatus)
   const error = useSelector(selectProductosError)
-  const [sorting, setSorting] = useState([])
+  const [sorting, setSorting] = useState([{ id: 'creado_en', desc: true }])
   const [globalFilter, setGlobalFilter] = useState('')
+  const [categoryFilter, setCategoryFilter] = useState('ALL')
+  const [pagination, setPagination] = useState({ pageIndex: 0, pageSize: 20 })
   const [editModalOpen, setEditModalOpen] = useState(false)
   const [savingEdit, setSavingEdit] = useState(false)
   const [deletingId, setDeletingId] = useState(null)
@@ -66,10 +74,42 @@ function ProductosListPage() {
 
   const userRole = String(currentUser?.rol || '').toUpperCase()
   const canViewInactive = userRole === 'OWNER' || userRole === 'ADMIN'
+  const canBulkImport = userRole === 'ADMIN'
 
   useEffect(() => {
     dispatch(fetchProductos({ includeInactive: canViewInactive && includeInactive }))
   }, [dispatch, canViewInactive, includeInactive])
+
+  useEffect(() => {
+    dispatch(fetchCatalogosProducto())
+  }, [dispatch])
+
+  const categoriaLabelById = useMemo(() => {
+    const map = new Map()
+    categorias.forEach((categoria) => {
+      map.set(String(categoria.id), categoria.nombre || '-')
+    })
+    return map
+  }, [categorias])
+
+  const categoryOptions = useMemo(() => {
+    return categorias
+      .map((categoria) => ({
+        id: String(categoria.id),
+        nombre: categoria.nombre || '-',
+      }))
+      .sort((a, b) => String(a.nombre).localeCompare(String(b.nombre), 'es', { sensitivity: 'base' }))
+  }, [categorias])
+
+  const filteredByCategory = useMemo(() => {
+    if (categoryFilter === 'ALL') {
+      return productos
+    }
+    if (categoryFilter === 'SIN_CATEGORIA') {
+      return productos.filter((item) => !item?.categoria)
+    }
+    return productos.filter((item) => String(item?.categoria || '') === categoryFilter)
+  }, [productos, categoryFilter])
 
   const openEditModal = (producto) => {
     setEditForm({
@@ -157,6 +197,10 @@ function ProductosListPage() {
   }
 
   const columns = [
+      columnHelper.accessor('creado_en', {
+        header: 'Creado en',
+        enableHiding: true,
+      }),
       columnHelper.accessor('nombre', {
         header: 'Nombre',
         cell: (info) => info.getValue() || '-',
@@ -168,6 +212,10 @@ function ProductosListPage() {
       columnHelper.accessor('tipo', {
         header: 'Tipo',
         cell: (info) => info.getValue() || '-',
+      }),
+      columnHelper.accessor('categoria', {
+        header: 'Categoria',
+        cell: (info) => categoriaLabelById.get(String(info.getValue() || '')) || '-',
       }),
       columnHelper.accessor('precio_referencia', {
         header: 'Precio ref.',
@@ -209,21 +257,27 @@ function ProductosListPage() {
     ]
 
   const table = useReactTable({
-    data: productos,
+    data: filteredByCategory,
     columns,
+    initialState: {
+      columnVisibility: { creado_en: false },
+    },
     state: {
       sorting,
       globalFilter,
+      pagination,
     },
     onSortingChange: setSorting,
     onGlobalFilterChange: setGlobalFilter,
+    onPaginationChange: setPagination,
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
+    getPaginationRowModel: getPaginationRowModel(),
   })
 
   const handleExportExcel = async () => {
-    const rows = table.getRowModel().rows
+    const rows = table.getSortedRowModel().rows
 
     if (rows.length === 0) {
       return
@@ -238,6 +292,7 @@ function ProductosListPage() {
         { header: 'Nombre', key: 'nombre', width: 30 },
         { header: 'SKU', key: 'sku', width: 20 },
         { header: 'Tipo', key: 'tipo', width: 18 },
+        { header: 'Categoria', key: 'categoria', width: 22 },
         { header: 'Precio referencia', key: 'precio_referencia', width: 18 },
         { header: 'Precio costo', key: 'precio_costo', width: 18 },
         { header: 'Stock actual', key: 'stock_actual', width: 16 },
@@ -249,6 +304,7 @@ function ProductosListPage() {
           nombre: item?.nombre || '',
           sku: item?.sku || '',
           tipo: item?.tipo || '',
+          categoria: categoriaLabelById.get(String(item?.categoria || '')) || '-',
           precio_referencia: item?.precio_referencia ?? 0,
           precio_costo: item?.precio_costo ?? 0,
           stock_actual: item?.stock_actual ?? 0,
@@ -259,7 +315,7 @@ function ProductosListPage() {
   }
 
   const handleExportPdf = async () => {
-    const rows = table.getRowModel().rows
+    const rows = table.getSortedRowModel().rows
 
     if (rows.length === 0) {
       return
@@ -269,13 +325,14 @@ function ProductosListPage() {
     await downloadSimpleTablePdf({
       title: 'Listado de productos',
       fileName: `productos_${today}.pdf`,
-      headers: ['Nombre', 'SKU', 'Tipo', 'Precio ref.', 'Activo'],
+      headers: ['Nombre', 'SKU', 'Tipo', 'Categoria', 'Precio ref.', 'Activo'],
       rows: rows.map((row) => {
         const item = row.original
         return [
           item?.nombre || '-',
           item?.sku || '-',
           item?.tipo || '-',
+          categoriaLabelById.get(String(item?.categoria || '')) || '-',
           formatMoney(item?.precio_referencia ?? 0),
           item?.activo ? 'Si' : 'No',
         ]
@@ -303,6 +360,15 @@ function ProductosListPage() {
         <h2 className="text-2xl font-semibold">Productos</h2>
 
         <div className="grid grid-cols-1 gap-2 sm:flex sm:items-center sm:justify-end sm:gap-2">
+          {canBulkImport ? (
+            <BulkImportButton
+              endpoint="/productos/bulk_import/"
+              templateEndpoint="/productos/bulk_template/"
+              onCompleted={() => {
+                dispatch(fetchProductos({ includeInactive: canViewInactive && includeInactive }))
+              }}
+            />
+          ) : null}
           <Button
             onClick={handleExportExcel}
             disabled={status !== 'succeeded' || table.getRowModel().rows.length === 0}
@@ -334,29 +400,49 @@ function ProductosListPage() {
 
       <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
         <div className="flex w-full flex-col gap-2 md:max-w-xl">
-          <div className="relative w-full md:max-w-sm">
-            <input
-              type="text"
-              value={globalFilter}
-              onChange={(event) => setGlobalFilter(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === 'Escape') {
-                  setGlobalFilter('')
-                }
-              }}
-              placeholder="Buscar por nombre, sku, tipo..."
-              className="w-full rounded-md border border-input bg-background px-3 py-2 pr-9 text-sm"
-            />
-            {globalFilter ? (
-              <button
-                type="button"
-                onClick={() => setGlobalFilter('')}
-                className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
-                aria-label="Limpiar busqueda"
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_220px]">
+            <div className="relative w-full">
+              <input
+                type="text"
+                value={globalFilter}
+                onChange={(event) => setGlobalFilter(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Escape') {
+                    setGlobalFilter('')
+                  }
+                }}
+                placeholder="Buscar por nombre, sku, tipo..."
+                className="w-full rounded-md border border-input bg-background px-3 py-2 pr-9 text-sm"
+              />
+              {globalFilter ? (
+                <button
+                  type="button"
+                  onClick={() => setGlobalFilter('')}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
+                  aria-label="Limpiar busqueda"
+                >
+                  x
+                </button>
+              ) : null}
+            </div>
+
+            <div className="flex items-center gap-2 rounded-md border border-input bg-background px-2 py-1.5 text-sm">
+              <label htmlFor="productos-categoria-filter" className="whitespace-nowrap text-muted-foreground">Categoria</label>
+              <select
+                id="productos-categoria-filter"
+                className="w-full bg-transparent outline-none"
+                value={categoryFilter}
+                onChange={(event) => setCategoryFilter(event.target.value)}
               >
-                x
-              </button>
-            ) : null}
+                <option value="ALL">Todas</option>
+                <option value="SIN_CATEGORIA">Sin categoria</option>
+                {categoryOptions.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.nombre}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
           {canViewInactive ? (
             <label className="inline-flex items-center gap-2 text-xs text-muted-foreground">
@@ -370,7 +456,7 @@ function ProductosListPage() {
           ) : null}
         </div>
         <p className="text-xs text-muted-foreground">
-          Mostrando {table.getRowModel().rows.length} de {productos.length} productos
+          Mostrando {table.getFilteredRowModel().rows.length} de {productos.length} productos
         </p>
       </div>
 
@@ -443,6 +529,15 @@ function ProductosListPage() {
         </div>
       )}
 
+      <TablePagination
+        currentPage={table.getState().pagination.pageIndex + 1}
+        totalPages={Math.max(1, table.getPageCount())}
+        totalRows={table.getFilteredRowModel().rows.length}
+        pageSize={table.getState().pagination.pageSize}
+        onPrev={() => table.previousPage()}
+        onNext={() => table.nextPage()}
+      />
+
       {editModalOpen && (
         <div className="fixed inset-0 z-90 flex items-center justify-center bg-foreground/40 p-4">
           <div className="w-full max-w-2xl rounded-xl border border-border bg-card p-4 shadow-xl">
@@ -490,7 +585,15 @@ function ProductosListPage() {
                   <select
                     className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
                     value={editForm.tipo}
-                    onChange={(event) => updateEditField('tipo', event.target.value)}
+                    onChange={(event) => {
+                      const nextTipo = event.target.value
+                      setEditForm((prev) => ({
+                        ...prev,
+                        tipo: nextTipo,
+                        maneja_inventario: nextTipo === 'SERVICIO' ? false : true,
+                        stock_actual: nextTipo === 'SERVICIO' ? 0 : prev.stock_actual,
+                      }))
+                    }}
                   >
                     <option value="PRODUCTO">Producto</option>
                     <option value="SERVICIO">Servicio</option>

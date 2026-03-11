@@ -278,6 +278,46 @@ class TestComprasApi:
         orden = OrdenCompra.all_objects.get(id=orden_id)
         assert orden.estado != "CANCELADA"
 
+    def test_no_permite_corregir_oc_con_documento_activo_asociado(self, api_client, owner_usuario, proveedor):
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
+
+        orden_resp = api_client.post(
+            reverse("orden-compra-list"),
+            {
+                "proveedor": str(proveedor.id),
+                "fecha_emision": str(date.today()),
+                "estado": "BORRADOR",
+            },
+            format="json",
+        )
+        assert orden_resp.status_code == status.HTTP_201_CREATED, orden_resp.data
+        orden_id = orden_resp.data["id"]
+
+        documento_resp = api_client.post(
+            reverse("documento-compra-list"),
+            {
+                "tipo_documento": "FACTURA_COMPRA",
+                "proveedor": str(proveedor.id),
+                "orden_compra": str(orden_id),
+                "folio": "FAC-OC-CORR-BLOCK-001",
+                "fecha_emision": str(date.today()),
+                "fecha_recepcion": str(date.today()),
+                "estado": "BORRADOR",
+            },
+            format="json",
+        )
+        assert documento_resp.status_code == status.HTTP_201_CREATED, documento_resp.data
+
+        corregir_resp = api_client.post(
+            reverse("orden-compra-corregir", args=[orden_id]),
+            {"motivo": "Ajuste de cantidades"},
+            format="json",
+        )
+        assert corregir_resp.status_code == status.HTTP_409_CONFLICT
+
+        orden = OrdenCompra.all_objects.get(id=orden_id)
+        assert orden.estado == "ENVIADA"
+
     def test_duplicar_oc_preserva_totales(self, api_client, owner_usuario, proveedor):
         api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
 

@@ -101,6 +101,11 @@ function ProductosCreatePage() {
     if (tipoSeleccionado === 'SERVICIO') {
       setValue('maneja_inventario', false, { shouldValidate: true })
       setValue('stock_actual', 0, { shouldValidate: true })
+      return
+    }
+
+    if (tipoSeleccionado === 'PRODUCTO') {
+      setValue('maneja_inventario', true, { shouldValidate: true })
     }
   }, [setValue, tipoSeleccionado])
 

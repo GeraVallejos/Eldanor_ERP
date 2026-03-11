@@ -1,15 +1,19 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { useSelector } from 'react-redux'
 import { toast } from 'sonner'
 import { api } from '@/api/client'
 import { normalizeApiError } from '@/api/errors'
 import Button from '@/components/ui/Button'
+import BulkImportButton from '@/components/ui/BulkImportButton'
 import { buttonVariants } from '@/components/ui/buttonVariants'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
+import TablePagination from '@/components/ui/TablePagination'
 import { useTableSorting } from '@/lib/tableSorting'
 import { cn } from '@/lib/utils'
 import { downloadExcelFile } from '@/modules/shared/exports/downloadExcelFile'
 import { downloadSimpleTablePdf } from '@/modules/shared/exports/downloadSimpleTablePdf'
+import { selectCurrentUser } from '@/modules/auth/authSlice'
 
 function normalizeListResponse(data) {
   if (Array.isArray(data)) {
@@ -24,10 +28,12 @@ function normalizeListResponse(data) {
 }
 
 function ProveedoresListPage() {
+  const currentUser = useSelector(selectCurrentUser)
   const [proveedores, setProveedores] = useState([])
   const [contactos, setContactos] = useState([])
   const [status, setStatus] = useState('idle')
   const [search, setSearch] = useState('')
+  const [includeInactive, setIncludeInactive] = useState(false)
   const [editModalOpen, setEditModalOpen] = useState(false)
   const [savingEdit, setSavingEdit] = useState(false)
   const [deletingId, setDeletingId] = useState(null)
@@ -52,10 +58,12 @@ function ProveedoresListPage() {
   const loadData = async () => {
     setStatus('loading')
 
+    const params = canViewInactive && includeInactive ? { include_inactive: '1' } : undefined
+
     try {
       const [{ data: proveedoresData }, { data: contactosData }] = await Promise.all([
-        api.get('/proveedores/', { suppressGlobalErrorToast: true }),
-        api.get('/contactos/', { suppressGlobalErrorToast: true }),
+        api.get('/proveedores/', { params, suppressGlobalErrorToast: true }),
+        api.get('/contactos/', { params, suppressGlobalErrorToast: true }),
       ])
 
       setProveedores(normalizeListResponse(proveedoresData))
@@ -67,13 +75,17 @@ function ProveedoresListPage() {
     }
   }
 
+  const userRole = String(currentUser?.rol || '').toUpperCase()
+  const canViewInactive = userRole === 'OWNER' || userRole === 'ADMIN'
+  const canBulkImport = userRole === 'ADMIN'
+
   useEffect(() => {
     const timeoutId = setTimeout(() => {
       void loadData()
     }, 0)
 
     return () => clearTimeout(timeoutId)
-  }, [])
+  }, [includeInactive, canViewInactive])
 
   const contactoById = useMemo(() => {
     const map = new Map()
@@ -99,11 +111,13 @@ function ProveedoresListPage() {
     })
   }, [proveedores, contactoById, search])
 
-  const { sortedRows: sortedProveedores, toggleSort, getSortIndicator } = useTableSorting(filteredProveedores, {
+  const { paginatedRows: paginatedProveedores, toggleSort, getSortIndicator, currentPage, totalPages, totalRows, pageSize, nextPage, prevPage } = useTableSorting(filteredProveedores, {
     accessors: {
+      creado_en: (proveedor) => proveedor.creado_en,
       nombre: (proveedor) => contactoById.get(String(proveedor.contacto))?.nombre || '',
       rut: (proveedor) => contactoById.get(String(proveedor.contacto))?.rut || '',
       email: (proveedor) => contactoById.get(String(proveedor.contacto))?.email || '',
+      estado: (proveedor) => (contactoById.get(String(proveedor.contacto))?.activo ? 'Activo' : 'Inactivo'),
       telefono: (proveedor) => {
         const contacto = contactoById.get(String(proveedor.contacto))
         return contacto?.telefono || contacto?.celular || ''
@@ -111,6 +125,8 @@ function ProveedoresListPage() {
       giro: (proveedor) => proveedor?.giro || '',
       dias_credito: (proveedor) => Number(proveedor?.dias_credito ?? 0),
     },
+    initialKey: 'creado_en',
+    initialDirection: 'desc',
   })
 
   const openEditModal = (proveedor) => {
@@ -289,6 +305,15 @@ function ProveedoresListPage() {
         <h2 className="text-2xl font-semibold">Proveedores</h2>
 
         <div className="grid grid-cols-1 gap-2 sm:flex sm:items-center sm:justify-end sm:gap-2">
+          {canBulkImport ? (
+            <BulkImportButton
+              endpoint="/proveedores/bulk_import/"
+              templateEndpoint="/proveedores/bulk_template/"
+              onCompleted={() => {
+                void loadData()
+              }}
+            />
+          ) : null}
           <Button
             variant="outline"
             size="md"
@@ -343,6 +368,17 @@ function ProveedoresListPage() {
             </button>
           ) : null}
         </div>
+        {canViewInactive ? (
+          <label className="inline-flex items-center gap-2 text-sm text-muted-foreground">
+            <input
+              type="checkbox"
+              className="h-4 w-4"
+              checked={includeInactive}
+              onChange={(event) => setIncludeInactive(event.target.checked)}
+            />
+            Mostrar inactivos
+          </label>
+        ) : null}
         <p className="text-xs text-muted-foreground">
           Mostrando {filteredProveedores.length} de {proveedores.length} proveedores
         </p>
@@ -358,6 +394,7 @@ function ProveedoresListPage() {
                 <th className="px-3 py-2 text-left font-medium"><button type="button" onClick={() => toggleSort('nombre')} className="inline-flex items-center gap-1 hover:text-primary">Nombre <span className="text-xs text-muted-foreground">{getSortIndicator('nombre')}</span></button></th>
                 <th className="px-3 py-2 text-left font-medium"><button type="button" onClick={() => toggleSort('rut')} className="inline-flex items-center gap-1 hover:text-primary">RUT <span className="text-xs text-muted-foreground">{getSortIndicator('rut')}</span></button></th>
                 <th className="px-3 py-2 text-left font-medium"><button type="button" onClick={() => toggleSort('email')} className="inline-flex items-center gap-1 hover:text-primary">Email <span className="text-xs text-muted-foreground">{getSortIndicator('email')}</span></button></th>
+                <th className="px-3 py-2 text-left font-medium"><button type="button" onClick={() => toggleSort('estado')} className="inline-flex items-center gap-1 hover:text-primary">Estado <span className="text-xs text-muted-foreground">{getSortIndicator('estado')}</span></button></th>
                 <th className="px-3 py-2 text-left font-medium"><button type="button" onClick={() => toggleSort('telefono')} className="inline-flex items-center gap-1 hover:text-primary">Telefono <span className="text-xs text-muted-foreground">{getSortIndicator('telefono')}</span></button></th>
                 <th className="px-3 py-2 text-left font-medium"><button type="button" onClick={() => toggleSort('giro')} className="inline-flex items-center gap-1 hover:text-primary">Giro <span className="text-xs text-muted-foreground">{getSortIndicator('giro')}</span></button></th>
                 <th className="px-3 py-2 text-left font-medium"><button type="button" onClick={() => toggleSort('dias_credito')} className="inline-flex items-center gap-1 hover:text-primary">Dias credito <span className="text-xs text-muted-foreground">{getSortIndicator('dias_credito')}</span></button></th>
@@ -367,12 +404,12 @@ function ProveedoresListPage() {
             <tbody>
               {filteredProveedores.length === 0 ? (
                 <tr>
-                  <td className="px-3 py-3 text-muted-foreground" colSpan={7}>
+                  <td className="px-3 py-3 text-muted-foreground" colSpan={8}>
                     No hay proveedores cargados.
                   </td>
                 </tr>
               ) : (
-                sortedProveedores.map((proveedor) => {
+                paginatedProveedores.map((proveedor) => {
                   const contacto = contactoById.get(String(proveedor.contacto))
 
                   return (
@@ -380,6 +417,7 @@ function ProveedoresListPage() {
                       <td className="px-3 py-2">{contacto?.nombre || '-'}</td>
                       <td className="px-3 py-2">{contacto?.rut || '-'}</td>
                       <td className="px-3 py-2">{contacto?.email || '-'}</td>
+                      <td className="px-3 py-2">{contacto?.activo ? 'Activo' : 'Inactivo'}</td>
                       <td className="px-3 py-2">{contacto?.telefono || contacto?.celular || '-'}</td>
                       <td className="px-3 py-2">{proveedor?.giro || '-'}</td>
                       <td className="px-3 py-2">{proveedor?.dias_credito ?? 0}</td>
@@ -412,6 +450,15 @@ function ProveedoresListPage() {
           </table>
         </div>
       )}
+
+      <TablePagination
+        currentPage={currentPage}
+        totalPages={totalPages}
+        totalRows={totalRows}
+        pageSize={pageSize}
+        onPrev={prevPage}
+        onNext={nextPage}
+      />
 
       {editModalOpen && (
         <div className="fixed inset-0 z-90 flex items-center justify-center bg-foreground/40 p-4">

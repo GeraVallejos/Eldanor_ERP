@@ -93,11 +93,15 @@ function DocumentActionsDialog({
             Cancelar
           </Button>
           <Button
-            variant={isDestructive ? 'destructive' : 'default'}
+            variant={isDestructive ? 'outline' : 'default'}
             size="sm"
             onClick={onConfirm}
             disabled={loading || (showReasonInput && !value.trim())}
-            className="flex-1"
+            className={
+              isDestructive
+                ? 'flex-1 border-destructive/40 text-destructive hover:bg-destructive/10'
+                : 'flex-1'
+            }
           >
             {loading ? 'Procesando...' : confirmLabels[actionType]}
           </Button>

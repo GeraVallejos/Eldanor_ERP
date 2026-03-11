@@ -1,6 +1,7 @@
 from datetime import datetime, time
 
-from django.db.models import Sum
+from django.db.models import DecimalField, Q, Sum, Value
+from django.db.models.functions import Coalesce
 from django.utils.dateparse import parse_date, parse_datetime
 from rest_framework import status
 from rest_framework.decorators import action
@@ -20,6 +21,7 @@ from apps.inventario.api.serializer import (
 )
 from apps.inventario.models import Bodega, InventorySnapshot, MovimientoInventario, StockProducto
 from apps.inventario.services.inventario_service import InventarioService
+from apps.productos.models import Producto
 
 
 class BodegaViewSet(TenantViewSetMixin, ModelViewSet):
@@ -54,7 +56,8 @@ class StockProductoViewSet(TenantViewSetMixin, ModelViewSet):
 
     @action(detail=False, methods=["get"])
     def resumen(self, request):
-        queryset = self.get_queryset().filter(stock__gt=0)
+        queryset = self.get_queryset().filter(producto__activo=True)
+        empresa = self.get_empresa()
 
         producto_id = request.query_params.get("producto_id")
         bodega_id = request.query_params.get("bodega_id")
@@ -69,11 +72,41 @@ class StockProductoViewSet(TenantViewSetMixin, ModelViewSet):
         total_valor = queryset.aggregate(total=Sum("valor_stock"))["total"] or 0
 
         if group_by == "producto":
+            product_qs = Producto.all_objects.filter(empresa=empresa, activo=True)
+            if producto_id:
+                product_qs = product_qs.filter(id=producto_id)
+
+            stock_filter = Q(stocks__empresa=empresa)
+            if bodega_id:
+                stock_filter &= Q(stocks__bodega_id=bodega_id)
+
             detalle = list(
-                queryset.values("producto_id", "producto__nombre")
-                .annotate(stock_total=Sum("stock"), valor_total=Sum("valor_stock"))
-                .order_by("producto__nombre")
+                product_qs.values("id", "nombre", "categoria__nombre")
+                .annotate(
+                    stock_total=Coalesce(
+                        Sum("stocks__stock", filter=stock_filter),
+                        Value(0),
+                        output_field=DecimalField(max_digits=12, decimal_places=2),
+                    ),
+                    valor_total=Coalesce(
+                        Sum("stocks__valor_stock", filter=stock_filter),
+                        Value(0),
+                        output_field=DecimalField(max_digits=14, decimal_places=2),
+                    ),
+                )
+                .order_by("nombre")
             )
+
+            detalle = [
+                {
+                    "producto_id": item["id"],
+                    "producto__nombre": item["nombre"],
+                    "producto__categoria__nombre": item.get("categoria__nombre") or "-",
+                    "stock_total": item["stock_total"],
+                    "valor_total": item["valor_total"],
+                }
+                for item in detalle
+            ]
         elif group_by == "bodega":
             detalle = list(
                 queryset.values("bodega_id", "bodega__nombre")

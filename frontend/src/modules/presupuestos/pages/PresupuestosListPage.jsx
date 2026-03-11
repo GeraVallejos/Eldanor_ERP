@@ -8,6 +8,7 @@ import { normalizeApiError } from '@/api/errors'
 import Button from '@/components/ui/Button'
 import { buttonVariants } from '@/components/ui/buttonVariants'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
+import TablePagination from '@/components/ui/TablePagination'
 import { useTableSorting } from '@/lib/tableSorting'
 import { cn } from '@/lib/utils'
 import { selectCurrentUser } from '@/modules/auth/authSlice'
@@ -146,8 +147,9 @@ function PresupuestosListPage() {
     return contacto?.nombre || `Cliente #${clienteId}`
   }
 
-  const { sortedRows: sortedPresupuestos, toggleSort, getSortIndicator } = useTableSorting(presupuestos, {
+  const { paginatedRows: paginatedPresupuestos, toggleSort, getSortIndicator, currentPage, totalPages, totalRows, pageSize, nextPage, prevPage } = useTableSorting(presupuestos, {
     accessors: {
+      creado_en: (presupuesto) => presupuesto.creado_en,
       numero: (presupuesto) => presupuesto.numero,
       cliente: (presupuesto) => resolveClienteNombre(presupuesto.cliente),
       fecha: (presupuesto) => presupuesto.fecha,
@@ -155,6 +157,8 @@ function PresupuestosListPage() {
       estado: (presupuesto) => resolveStatusLabel(presupuesto.estado),
       total: (presupuesto) => Number(presupuesto.total ?? 0),
     },
+    initialKey: 'creado_en',
+    initialDirection: 'desc',
   })
 
   const requestDeletePresupuesto = (presupuesto) => {
@@ -386,7 +390,7 @@ function PresupuestosListPage() {
                   </td>
                 </tr>
               ) : (
-                sortedPresupuestos.map((presupuesto) => {
+                paginatedPresupuestos.map((presupuesto) => {
                   const statusOptions = getStatusOptions(presupuesto)
                   const isStatusUpdating = changingStatusId === presupuesto.id
 
@@ -451,6 +455,15 @@ function PresupuestosListPage() {
           </table>
         </div>
       )}
+
+      <TablePagination
+        currentPage={currentPage}
+        totalPages={totalPages}
+        totalRows={totalRows}
+        pageSize={pageSize}
+        onPrev={prevPage}
+        onNext={nextPage}
+      />
 
       <ConfirmDialog
         open={Boolean(presupuestoToDelete)}

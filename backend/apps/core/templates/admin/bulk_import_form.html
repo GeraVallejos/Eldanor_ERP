@@ -1,0 +1,31 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+  <a href="{% url 'admin:index' %}">{% translate 'Home' %}</a>
+  &rsaquo; <a href="{{ back_url }}">{{ opts.verbose_name_plural|capfirst }}</a>
+  &rsaquo; {{ title }}
+</div>
+{% endblock %}
+
+{% block content %}
+<div id="content-main">
+  <h1>{{ title }}</h1>
+  {% if bulk_template_url %}
+    <p style="margin-bottom: 12px;">
+      <a href="{{ bulk_template_url }}" class="button">Descargar plantilla XLSX</a>
+    </p>
+  {% endif %}
+  <form method="post" enctype="multipart/form-data" novalidate>
+    {% csrf_token %}
+    <fieldset class="module aligned">
+      {{ form.as_p }}
+    </fieldset>
+    <div class="submit-row">
+      <a href="{{ back_url }}" class="button cancel-link">Cancelar</a>
+      <input type="submit" class="default" value="Procesar archivo" />
+    </div>
+  </form>
+</div>
+{% endblock %}

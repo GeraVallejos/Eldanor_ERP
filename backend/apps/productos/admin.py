@@ -1,10 +1,12 @@
 from django.contrib import admin
 from django.utils.html import format_html
-from  apps.core.admin import TenantAdminMixin
+from apps.core.admin import BulkImportAdminMixin, TenantAdminMixin
+from apps.core.tenant import set_current_empresa, set_current_user
 from .models.producto import Producto
 from .models.categoria import Categoria
 from .models.impuesto import Impuesto
 from ..inventario.models.movimiento import MovimientoInventario, TipoMovimiento
+from .services.bulk_import_service import bulk_import_productos, build_productos_bulk_template
 
 class MovimientoInventarioInline(TenantAdminMixin, admin.TabularInline):
     model = MovimientoInventario
@@ -16,7 +18,9 @@ class MovimientoInventarioInline(TenantAdminMixin, admin.TabularInline):
         return False # Los movimientos se crean por Service, no a mano en el inline
 
 @admin.register(Producto)
-class ProductoAdmin(TenantAdminMixin, admin.ModelAdmin):
+class ProductoAdmin(BulkImportAdminMixin, TenantAdminMixin, admin.ModelAdmin):
+    change_list_template = 'admin/bulk_import_change_list.html'
+    bulk_import_title = 'Carga masiva productos'
     list_display = ('nombre', 'sku', 'tipo', 'categoria', 'color_stock', 'activo', 'empresa', 'creado_por')
     list_filter = ('tipo', 'categoria', 'activo')
     search_fields = ('nombre', 'sku')
@@ -62,6 +66,19 @@ class ProductoAdmin(TenantAdminMixin, admin.ModelAdmin):
             obj.stock_actual
         )
     color_stock.short_description = "Stock Actual"
+
+    def handle_bulk_import(self, request, uploaded_file):
+        empresa = self._resolve_empresa_for_user(request.user)
+        set_current_user(request.user)
+        set_current_empresa(empresa)
+        return bulk_import_productos(uploaded_file=uploaded_file, user=request.user, empresa=empresa)
+
+    def handle_bulk_template(self, request):
+        empresa = self._resolve_empresa_for_user(request.user)
+        set_current_user(request.user)
+        set_current_empresa(empresa)
+        content = build_productos_bulk_template(user=request.user, empresa=empresa)
+        return content, 'plantilla_productos.xlsx'
 
 @admin.register(Categoria)
 class CategoriaAdmin(TenantAdminMixin,admin.ModelAdmin):

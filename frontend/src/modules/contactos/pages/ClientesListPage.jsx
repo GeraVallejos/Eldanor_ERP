@@ -1,15 +1,19 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { useSelector } from 'react-redux'
 import { toast } from 'sonner'
 import { api } from '@/api/client'
 import { normalizeApiError } from '@/api/errors'
 import Button from '@/components/ui/Button'
+import BulkImportButton from '@/components/ui/BulkImportButton'
 import { buttonVariants } from '@/components/ui/buttonVariants'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
+import TablePagination from '@/components/ui/TablePagination'
 import { useTableSorting } from '@/lib/tableSorting'
 import { cn } from '@/lib/utils'
 import { downloadExcelFile } from '@/modules/shared/exports/downloadExcelFile'
 import { downloadSimpleTablePdf } from '@/modules/shared/exports/downloadSimpleTablePdf'
+import { selectCurrentUser } from '@/modules/auth/authSlice'
 
 function normalizeListResponse(data) {
   if (Array.isArray(data)) {
@@ -46,10 +50,12 @@ function getTodaySuffix() {
 }
 
 function ClientesListPage() {
+  const currentUser = useSelector(selectCurrentUser)
   const [clientes, setClientes] = useState([])
   const [contactos, setContactos] = useState([])
   const [status, setStatus] = useState('idle')
   const [search, setSearch] = useState('')
+  const [includeInactive, setIncludeInactive] = useState(false)
   const [editModalOpen, setEditModalOpen] = useState(false)
   const [savingEdit, setSavingEdit] = useState(false)
   const [deletingId, setDeletingId] = useState(null)
@@ -75,10 +81,12 @@ function ClientesListPage() {
   const loadData = async () => {
     setStatus('loading')
 
+    const params = canViewInactive && includeInactive ? { include_inactive: '1' } : undefined
+
     try {
       const [{ data: clientesData }, { data: contactosData }] = await Promise.all([
-        api.get('/clientes/', { suppressGlobalErrorToast: true }),
-        api.get('/contactos/', { suppressGlobalErrorToast: true }),
+        api.get('/clientes/', { params, suppressGlobalErrorToast: true }),
+        api.get('/contactos/', { params, suppressGlobalErrorToast: true }),
       ])
 
       setClientes(normalizeListResponse(clientesData))
@@ -90,13 +98,17 @@ function ClientesListPage() {
     }
   }
 
+  const userRole = String(currentUser?.rol || '').toUpperCase()
+  const canViewInactive = userRole === 'OWNER' || userRole === 'ADMIN'
+  const canBulkImport = userRole === 'ADMIN'
+
   useEffect(() => {
     const timeoutId = setTimeout(() => {
       void loadData()
     }, 0)
 
     return () => clearTimeout(timeoutId)
-  }, [])
+  }, [includeInactive, canViewInactive])
 
   const contactoById = useMemo(() => {
     const map = new Map()
@@ -122,11 +134,13 @@ function ClientesListPage() {
     })
   }, [clientes, contactoById, search])
 
-  const { sortedRows: sortedClientes, toggleSort, getSortIndicator } = useTableSorting(filteredClientes, {
+  const { paginatedRows: paginatedClientes, toggleSort, getSortIndicator, currentPage, totalPages, totalRows, pageSize, nextPage, prevPage } = useTableSorting(filteredClientes, {
     accessors: {
+      creado_en: (cliente) => cliente.creado_en,
       nombre: (cliente) => contactoById.get(String(cliente.contacto))?.nombre || '',
       rut: (cliente) => contactoById.get(String(cliente.contacto))?.rut || '',
       email: (cliente) => contactoById.get(String(cliente.contacto))?.email || '',
+      estado: (cliente) => (contactoById.get(String(cliente.contacto))?.activo ? 'Activo' : 'Inactivo'),
       telefono: (cliente) => {
         const contacto = contactoById.get(String(cliente.contacto))
         return contacto?.telefono || contacto?.celular || ''
@@ -134,6 +148,8 @@ function ClientesListPage() {
       limite_credito: (cliente) => Number(cliente?.limite_credito ?? 0),
       dias_credito: (cliente) => Number(cliente?.dias_credito ?? 0),
     },
+    initialKey: 'creado_en',
+    initialDirection: 'desc',
   })
 
   const openEditModal = (cliente) => {
@@ -312,6 +328,15 @@ function ClientesListPage() {
         <h2 className="text-2xl font-semibold">Clientes</h2>
 
         <div className="grid grid-cols-1 gap-2 sm:flex sm:items-center sm:justify-end sm:gap-2">
+          {canBulkImport ? (
+            <BulkImportButton
+              endpoint="/clientes/bulk_import/"
+              templateEndpoint="/clientes/bulk_template/"
+              onCompleted={() => {
+                void loadData()
+              }}
+            />
+          ) : null}
           <Button
             variant="outline"
             size="md"
@@ -366,6 +391,17 @@ function ClientesListPage() {
             </button>
           ) : null}
         </div>
+        {canViewInactive ? (
+          <label className="inline-flex items-center gap-2 text-sm text-muted-foreground">
+            <input
+              type="checkbox"
+              className="h-4 w-4"
+              checked={includeInactive}
+              onChange={(event) => setIncludeInactive(event.target.checked)}
+            />
+            Mostrar inactivos
+          </label>
+        ) : null}
         <p className="text-xs text-muted-foreground">
           Mostrando {filteredClientes.length} de {clientes.length} clientes
         </p>
@@ -381,6 +417,7 @@ function ClientesListPage() {
                 <th className="px-3 py-2 text-left font-medium"><button type="button" onClick={() => toggleSort('nombre')} className="inline-flex items-center gap-1 hover:text-primary">Nombre <span className="text-xs text-muted-foreground">{getSortIndicator('nombre')}</span></button></th>
                 <th className="px-3 py-2 text-left font-medium"><button type="button" onClick={() => toggleSort('rut')} className="inline-flex items-center gap-1 hover:text-primary">RUT <span className="text-xs text-muted-foreground">{getSortIndicator('rut')}</span></button></th>
                 <th className="px-3 py-2 text-left font-medium"><button type="button" onClick={() => toggleSort('email')} className="inline-flex items-center gap-1 hover:text-primary">Email <span className="text-xs text-muted-foreground">{getSortIndicator('email')}</span></button></th>
+                <th className="px-3 py-2 text-left font-medium"><button type="button" onClick={() => toggleSort('estado')} className="inline-flex items-center gap-1 hover:text-primary">Estado <span className="text-xs text-muted-foreground">{getSortIndicator('estado')}</span></button></th>
                 <th className="px-3 py-2 text-left font-medium"><button type="button" onClick={() => toggleSort('telefono')} className="inline-flex items-center gap-1 hover:text-primary">Telefono <span className="text-xs text-muted-foreground">{getSortIndicator('telefono')}</span></button></th>
                 <th className="px-3 py-2 text-left font-medium"><button type="button" onClick={() => toggleSort('limite_credito')} className="inline-flex items-center gap-1 hover:text-primary">Limite credito <span className="text-xs text-muted-foreground">{getSortIndicator('limite_credito')}</span></button></th>
                 <th className="px-3 py-2 text-left font-medium"><button type="button" onClick={() => toggleSort('dias_credito')} className="inline-flex items-center gap-1 hover:text-primary">Dias credito <span className="text-xs text-muted-foreground">{getSortIndicator('dias_credito')}</span></button></th>
@@ -390,12 +427,12 @@ function ClientesListPage() {
             <tbody>
               {filteredClientes.length === 0 ? (
                 <tr>
-                  <td className="px-3 py-3 text-muted-foreground" colSpan={7}>
+                  <td className="px-3 py-3 text-muted-foreground" colSpan={8}>
                     No hay clientes cargados.
                   </td>
                 </tr>
               ) : (
-                sortedClientes.map((cliente) => {
+                paginatedClientes.map((cliente) => {
                   const contacto = contactoById.get(String(cliente.contacto))
 
                   return (
@@ -403,6 +440,7 @@ function ClientesListPage() {
                       <td className="px-3 py-2">{contacto?.nombre || '-'}</td>
                       <td className="px-3 py-2">{contacto?.rut || '-'}</td>
                       <td className="px-3 py-2">{contacto?.email || '-'}</td>
+                      <td className="px-3 py-2">{contacto?.activo ? 'Activo' : 'Inactivo'}</td>
                       <td className="px-3 py-2">{contacto?.telefono || contacto?.celular || '-'}</td>
                       <td className="px-3 py-2">{formatMoney(cliente?.limite_credito ?? 0)}</td>
                       <td className="px-3 py-2">{cliente?.dias_credito ?? 0}</td>
@@ -435,6 +473,15 @@ function ClientesListPage() {
           </table>
         </div>
       )}
+
+      <TablePagination
+        currentPage={currentPage}
+        totalPages={totalPages}
+        totalRows={totalRows}
+        pageSize={pageSize}
+        onPrev={prevPage}
+        onNext={nextPage}
+      />
 
       {editModalOpen && (
         <div className="fixed inset-0 z-90 flex items-center justify-center bg-foreground/40 p-4">

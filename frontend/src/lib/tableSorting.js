@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 function normalizeSortValue(value) {
   if (value === null || value === undefined) {
@@ -28,8 +28,13 @@ function compareValues(left, right) {
   return String(a).localeCompare(String(b), 'es', { sensitivity: 'base', numeric: true })
 }
 
-export function useTableSorting(rows, { accessors = {}, initialKey = null, initialDirection = 'asc' } = {}) {
+export function useTableSorting(rows, { accessors = {}, initialKey = null, initialDirection = 'asc', pageSize = 20 } = {}) {
   const [sort, setSort] = useState({ key: initialKey, direction: initialDirection })
+  const [currentPage, setCurrentPage] = useState(1)
+
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [rows])
 
   const sortedRows = useMemo(() => {
     if (!sort.key) {
@@ -45,7 +50,17 @@ export function useTableSorting(rows, { accessors = {}, initialKey = null, initi
     return sorted
   }, [rows, sort, accessors])
 
+  const totalRows = sortedRows.length
+  const totalPages = Math.max(1, Math.ceil(totalRows / pageSize))
+  const clampedPage = Math.min(currentPage, totalPages)
+
+  const paginatedRows = useMemo(() => {
+    const start = (clampedPage - 1) * pageSize
+    return sortedRows.slice(start, start + pageSize)
+  }, [sortedRows, clampedPage, pageSize])
+
   const toggleSort = (key) => {
+    setCurrentPage(1)
     setSort((prev) => {
       if (prev.key !== key) {
         return { key, direction: 'asc' }
@@ -65,8 +80,15 @@ export function useTableSorting(rows, { accessors = {}, initialKey = null, initi
 
   return {
     sortedRows,
+    paginatedRows,
     sort,
     toggleSort,
     getSortIndicator,
+    currentPage: clampedPage,
+    totalPages,
+    totalRows,
+    pageSize,
+    nextPage: () => setCurrentPage((p) => Math.min(p + 1, totalPages)),
+    prevPage: () => setCurrentPage((p) => Math.max(p - 1, 1)),
   }
 }

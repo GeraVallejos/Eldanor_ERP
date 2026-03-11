@@ -6,6 +6,7 @@ import { normalizeApiError } from '@/api/errors'
 import Button from '@/components/ui/Button'
 import DocumentActionsDialog from '@/components/ui/DocumentActionsDialog'
 import { buttonVariants } from '@/components/ui/buttonVariants'
+import TablePagination from '@/components/ui/TablePagination'
 import { useTableSorting } from '@/lib/tableSorting'
 import { cn } from '@/lib/utils'
 import { downloadExcelFile } from '@/modules/shared/exports/downloadExcelFile'
@@ -36,9 +37,11 @@ function ComprasOrdenesListPage() {
   const navigate = useNavigate()
   const [status, setStatus] = useState('idle')
   const [ordenes, setOrdenes] = useState([])
+  const [documentos, setDocumentos] = useState([])
   const [proveedores, setProveedores] = useState([])
   const [contactos, setContactos] = useState([])
   const [search, setSearch] = useState('')
+  const [estadoFilter, setEstadoFilter] = useState('ACTIVAS')
   const [updatingId, setUpdatingId] = useState(null)
   const [actionDialogOpen, setActionDialogOpen] = useState(false)
   const [actionType, setActionType] = useState(null)
@@ -48,13 +51,15 @@ function ComprasOrdenesListPage() {
   const loadData = async () => {
     setStatus('loading')
     try {
-      const [{ data: ordenesData }, { data: proveedoresData }, { data: contactosData }] = await Promise.all([
+      const [{ data: ordenesData }, { data: documentosData }, { data: proveedoresData }, { data: contactosData }] = await Promise.all([
         api.get('/ordenes-compra/', { suppressGlobalErrorToast: true }),
+        api.get('/documentos-compra/', { suppressGlobalErrorToast: true }),
         api.get('/proveedores/', { suppressGlobalErrorToast: true }),
         api.get('/contactos/', { suppressGlobalErrorToast: true }),
       ])
 
       setOrdenes(normalizeListResponse(ordenesData))
+      setDocumentos(normalizeListResponse(documentosData))
       setProveedores(normalizeListResponse(proveedoresData))
       setContactos(normalizeListResponse(contactosData))
       setStatus('succeeded')
@@ -88,13 +93,46 @@ function ComprasOrdenesListPage() {
     return map
   }, [contactos])
 
+  const ultimoDocumentoByOrdenId = useMemo(() => {
+    const map = new Map()
+    documentos.forEach((doc) => {
+      if (!doc?.orden_compra) {
+        return
+      }
+
+      const key = String(doc.orden_compra)
+      const prev = map.get(key)
+      if (!prev) {
+        map.set(key, doc)
+        return
+      }
+
+      const prevTs = Date.parse(prev?.creado_en || '') || 0
+      const docTs = Date.parse(doc?.creado_en || '') || 0
+      if (docTs >= prevTs) {
+        map.set(key, doc)
+      }
+    })
+
+    return map
+  }, [documentos])
+
   const filteredOrdenes = useMemo(() => {
     const query = search.trim().toLowerCase()
-    if (!query) {
-      return ordenes
-    }
 
     return ordenes.filter((orden) => {
+      if (estadoFilter === 'ACTIVAS' && orden.estado === 'CANCELADA') {
+        return false
+      }
+
+      if (estadoFilter !== 'ACTIVAS' && estadoFilter !== 'ALL' && orden.estado !== estadoFilter) {
+        return false
+      }
+
+      if (!query) {
+        return true
+      }
+
       const proveedor = proveedorById.get(String(orden.proveedor))
       const contacto = contactoById.get(String(proveedor?.contacto))
       const numero = String(orden.numero || '').toLowerCase()
@@ -102,10 +140,11 @@ function ComprasOrdenesListPage() {
       const proveedorNombre = String(contacto?.nombre || '').toLowerCase()
       return numero.includes(query) || estado.includes(query) || proveedorNombre.includes(query)
     })
-  }, [ordenes, search, proveedorById, contactoById])
+  }, [ordenes, search, proveedorById, contactoById, estadoFilter])
 
-  const { sortedRows: sortedOrdenes, toggleSort, getSortIndicator } = useTableSorting(filteredOrdenes, {
+  const { paginatedRows: paginatedOrdenes, toggleSort, getSortIndicator, currentPage, totalPages, totalRows, pageSize, nextPage, prevPage } = useTableSorting(filteredOrdenes, {
     accessors: {
+      creado_en: (orden) => orden.creado_en,
       numero: (orden) => orden.numero,
       proveedor: (orden) => {
         const proveedor = proveedorById.get(String(orden.proveedor))
@@ -116,6 +155,9 @@ function ComprasOrdenesListPage() {
       estado: (orden) => orden.estado,
       total: (orden) => Number(orden.total || 0),
     },
+    pageSize: 10,
+    initialKey: 'creado_en',
+    initialDirection: 'desc',
   })
 
   const updateEstado = async (orden, action) => {
@@ -309,14 +351,33 @@ function ComprasOrdenesListPage() {
         </div>
       </div>
 
-      <div className="relative w-full md:max-w-sm">
-        <input
-          type="text"
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-          placeholder="Buscar por numero, proveedor o estado..."
-          className="w-full rounded-md border border-input bg-background px-3 py-2 pr-9 text-sm"
-        />
+      <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-end">
+        <div className="relative w-full sm:max-w-sm">
+          <input
+            type="text"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Buscar por numero, proveedor o estado..."
+            className="w-full rounded-md border border-input bg-background px-3 py-2 pr-9 text-sm"
+          />
+        </div>
+
+        <label className="w-full text-sm sm:max-w-xs">
+          Estado
+          <select
+            value={estadoFilter}
+            onChange={(event) => setEstadoFilter(event.target.value)}
+            className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
+          >
+            <option value="ACTIVAS">Activas</option>
+            <option value="ALL">Todas</option>
+            <option value="BORRADOR">Borrador</option>
+            <option value="ENVIADA">Enviada</option>
+            <option value="PARCIAL">Parcial</option>
+            <option value="RECIBIDA">Recibida</option>
+            <option value="CANCELADA">Cancelada</option>
+          </select>
+        </label>
       </div>
 
       {status === 'loading' ? <p className="text-sm text-muted-foreground">Cargando ordenes...</p> : null}
@@ -351,20 +412,22 @@ function ComprasOrdenesListPage() {
                     Total <span className="text-xs text-muted-foreground">{getSortIndicator('total')}</span>
                   </button>
                 </th>
+                <th className="px-3 py-2 text-left font-medium">Documentos asociados</th>
                 <th className="px-3 py-2 text-right font-medium">Acciones</th>
               </tr>
             </thead>
             <tbody>
               {filteredOrdenes.length === 0 ? (
                 <tr>
-                  <td className="px-3 py-3 text-muted-foreground" colSpan={6}>
+                  <td className="px-3 py-3 text-muted-foreground" colSpan={7}>
                     No hay ordenes de compra.
                   </td>
                 </tr>
               ) : (
-                sortedOrdenes.map((orden) => {
+                paginatedOrdenes.map((orden) => {
                   const proveedor = proveedorById.get(String(orden.proveedor))
                   const contacto = contactoById.get(String(proveedor?.contacto))
+                  const ultimoDocAsociado = ultimoDocumentoByOrdenId.get(String(orden.id))
 
                   return (
                     <tr key={orden.id} className="border-t border-border">
@@ -373,6 +436,23 @@ function ComprasOrdenesListPage() {
                       <td className="px-3 py-2">{orden.fecha_emision || '-'}</td>
                       <td className="px-3 py-2">{orden.estado || '-'}</td>
                       <td className="px-3 py-2">{formatMoney(orden.total)}</td>
+                      <td className="px-3 py-2">
+                        {!ultimoDocAsociado ? (
+                          <span className="text-muted-foreground">-</span>
+                        ) : (
+                          <Link
+                            to={`/compras/documentos/${ultimoDocAsociado.id}`}
+                            className="text-xs text-primary hover:underline"
+                          >
+                            {ultimoDocAsociado.tipo_documento === 'FACTURA_COMPRA' ? 'FAC' : 'GUIA'}
+                            {' '}
+                            {ultimoDocAsociado.serie ? `${ultimoDocAsociado.serie}-` : ''}
+                            {ultimoDocAsociado.folio || 'S/F'}
+                            {' '}
+                            ({ultimoDocAsociado.estado || '-'})
+                          </Link>
+                        )}
+                      </td>
                       <td className="px-3 py-2">
                         <div className="flex justify-end gap-2">
                           <Link
@@ -412,7 +492,7 @@ function ComprasOrdenesListPage() {
                             </Button>
                           ) : null}
 
-                          {orden.estado !== 'BORRADOR' && orden.estado !== 'CANCELADA' ? (
+                          {orden.estado !== 'BORRADOR' && orden.estado !== 'CANCELADA' && !orden.tiene_documentos_activos ? (
                             <Button
                               size="sm"
                               variant="outline"
@@ -455,6 +535,15 @@ function ComprasOrdenesListPage() {
           </table>
         </div>
       ) : null}
+
+      <TablePagination
+        currentPage={currentPage}
+        totalPages={totalPages}
+        totalRows={totalRows}
+        pageSize={pageSize}
+        onPrev={prevPage}
+        onNext={nextPage}
+      />
 
       <DocumentActionsDialog
         actionType={actionType}

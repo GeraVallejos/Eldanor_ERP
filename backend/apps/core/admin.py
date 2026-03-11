@@ -1,11 +1,19 @@
 from django.contrib import admin
+from django.contrib import messages
 from django.contrib.auth.admin import UserAdmin
 from django.contrib.auth import get_user_model
 from django.contrib.auth.forms import UserChangeForm, UserCreationForm
 from django.core.exceptions import ValidationError
+from django.core.exceptions import PermissionDenied
+from django.http import HttpResponse
+from django.http import HttpResponseRedirect
+from django.template.response import TemplateResponse
+from django.urls import path, reverse
 from django import forms
+from apps.core.exceptions import AppError
 from .models import Empresa, UserEmpresa, RolUsuario
 from .tenant import set_current_empresa, set_current_user
+from apps.inventario.models import Bodega
 
 User = get_user_model()
 
@@ -70,6 +78,150 @@ class UserEmpresaInline(admin.TabularInline):
 
     def has_delete_permission(self, request, obj=None):
         return request.user.is_superuser
+
+
+class BodegaInline(admin.TabularInline):
+    model = Bodega
+    extra = 1
+    fields = ('nombre', 'activa')
+    verbose_name = 'Bodega'
+    verbose_name_plural = 'Bodegas'
+
+    def formfield_for_dbfield(self, db_field, request, **kwargs):
+        formfield = super().formfield_for_dbfield(db_field, request, **kwargs)
+        if db_field.name == 'nombre' and formfield and formfield.widget:
+            formfield.widget.attrs.setdefault('placeholder', 'Principal')
+            formfield.help_text = 'Sugerencia: Principal'
+        return formfield
+
+    def has_view_or_change_permission(self, request, obj=None):
+        return request.user.is_superuser
+
+    def has_add_permission(self, request, obj=None):
+        return request.user.is_superuser
+
+    def has_delete_permission(self, request, obj=None):
+        return request.user.is_superuser
+
+
+class BulkImportUploadForm(forms.Form):
+    file = forms.FileField(help_text='Formato permitido: CSV o XLSX (max 2 MB).')
+
+
+class BulkImportAdminMixin:
+    bulk_import_title = 'Carga masiva'
+
+    def get_bulk_import_url_name(self):
+        opts = self.model._meta
+        return f'admin:{opts.app_label}_{opts.model_name}_bulk_import'
+
+    def get_bulk_import_url(self):
+        return reverse(self.get_bulk_import_url_name())
+
+    def get_bulk_template_url_name(self):
+        opts = self.model._meta
+        return f'admin:{opts.app_label}_{opts.model_name}_bulk_template'
+
+    def get_bulk_template_url(self):
+        return reverse(self.get_bulk_template_url_name())
+
+    def get_bulk_import_button_label(self):
+        return self.bulk_import_title
+
+    def get_urls(self):
+        urls = super().get_urls()
+        opts = self.model._meta
+        custom_urls = [
+            path(
+                'bulk-import/',
+                self.admin_site.admin_view(self.bulk_import_view),
+                name=f'{opts.app_label}_{opts.model_name}_bulk_import',
+            ),
+            path(
+                'bulk-template/',
+                self.admin_site.admin_view(self.bulk_template_view),
+                name=f'{opts.app_label}_{opts.model_name}_bulk_template',
+            ),
+        ]
+        return custom_urls + urls
+
+    def changelist_view(self, request, extra_context=None):
+        extra_context = extra_context or {}
+        extra_context['bulk_import_url'] = self.get_bulk_import_url()
+        extra_context['bulk_template_url'] = self.get_bulk_template_url()
+        extra_context['bulk_import_button_label'] = self.get_bulk_import_button_label()
+        return super().changelist_view(request, extra_context=extra_context)
+
+    def bulk_template_view(self, request):
+        if not self.has_change_permission(request):
+            raise PermissionDenied
+
+        content, filename = self.handle_bulk_template(request)
+        response = HttpResponse(
+            content,
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        )
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        return response
+
+    def bulk_import_view(self, request):
+        if not self.has_change_permission(request):
+            raise PermissionDenied
+
+        if request.method == 'POST':
+            form = BulkImportUploadForm(request.POST, request.FILES)
+            if form.is_valid():
+                try:
+                    result = self.handle_bulk_import(request, form.cleaned_data['file'])
+                except AppError as exc:
+                    messages.error(request, str(exc))
+                    return HttpResponseRedirect(request.path)
+
+                created = result.get('created', 0)
+                updated = result.get('updated', 0)
+                successful_rows = result.get('successful_rows', created + updated)
+                errors = result.get('errors') or []
+
+                if successful_rows > 0:
+                    messages.success(
+                        request,
+                        f'Carga finalizada: {created} creados, {updated} actualizados.',
+                    )
+
+                if errors:
+                    first_error = errors[0]
+                    error_text = (
+                        f'Se detectaron {len(errors)} errores. '
+                        f'Primera fila con error (linea {first_error.get("line", "-")}): '
+                        f'{first_error.get("detail", "Error desconocido")}'
+                    )
+                    if successful_rows > 0:
+                        messages.warning(request, error_text)
+                    else:
+                        messages.error(request, error_text)
+
+                if successful_rows == 0 and not errors:
+                    messages.info(request, 'El archivo no contenia filas para procesar.')
+
+                return HttpResponseRedirect(reverse(f'admin:{self.model._meta.app_label}_{self.model._meta.model_name}_changelist'))
+        else:
+            form = BulkImportUploadForm()
+
+        context = {
+            **self.admin_site.each_context(request),
+            'opts': self.model._meta,
+            'form': form,
+            'title': f'{self.bulk_import_title} - {self.model._meta.verbose_name_plural}',
+            'back_url': reverse(f'admin:{self.model._meta.app_label}_{self.model._meta.model_name}_changelist'),
+            'bulk_template_url': self.get_bulk_template_url(),
+        }
+        return TemplateResponse(request, 'admin/bulk_import_form.html', context)
+
+    def handle_bulk_import(self, request, uploaded_file):
+        raise NotImplementedError('Debe implementar handle_bulk_import en el ModelAdmin.')
+
+    def handle_bulk_template(self, request):
+        raise NotImplementedError('Debe implementar handle_bulk_template en el ModelAdmin.')
 
 class TenantAdminMixin:
     def _resolve_empresa_for_user(self, user):
@@ -326,6 +478,20 @@ class EmpresaAdmin(TenantAdminMixin, admin.ModelAdmin):
     # es solo para que el Superuser gestione suscripciones.
     list_display = ("nombre", "rut", "plan", "activa")
     search_fields = ("nombre", "rut")
+    inlines = [BodegaInline]
+
+    def save_related(self, request, form, formsets, change):
+        super().save_related(request, form, formsets, change)
+        empresa = form.instance
+
+        # Garantiza onboarding: si no se cargaron bodegas, crea una Principal activa.
+        if empresa and not Bodega.all_objects.filter(empresa=empresa).exists():
+            Bodega.all_objects.create(
+                empresa=empresa,
+                creado_por=request.user,
+                nombre='Principal',
+                activa=True,
+            )
 
     def has_module_permission(self, request):
         # Solo el Superuser ve el módulo "Empresas" en el panel lateral

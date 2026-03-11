@@ -183,7 +183,7 @@ function LoginPage() {
                                 {isSubmitting ? (
                                     <>
                                         <Loader2 className="h-5 w-5 animate-spin text-amber-200" />
-                                        <span>Conectando con el Consejo...</span>
+                                        <span>Conectando</span>
                                     </>
                                 ) : (
                                     <>

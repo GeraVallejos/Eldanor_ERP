@@ -1,10 +1,17 @@
 from django.contrib import admin
-from  apps.core.admin import TenantAdminMixin
+from apps.core.admin import BulkImportAdminMixin, TenantAdminMixin
+from apps.core.tenant import set_current_empresa, set_current_user
 from .models.contacto import Contacto
 from .models.cliente import Cliente
 from .models.proveedor import Proveedor
 from .models.direccion import Direccion
 from .models.cuentaBancaria import CuentaBancaria
+from .services.bulk_import_service import (
+    import_clientes,
+    import_proveedores,
+    build_clientes_bulk_template,
+    build_proveedores_bulk_template,
+)
 
 # --- Inlines ---
 
@@ -38,7 +45,9 @@ class ContactoAdmin(TenantAdminMixin, admin.ModelAdmin):
 
 
 @admin.register(Cliente)
-class ClienteAdmin(TenantAdminMixin, admin.ModelAdmin):
+class ClienteAdmin(BulkImportAdminMixin, TenantAdminMixin, admin.ModelAdmin):
+    change_list_template = 'admin/bulk_import_change_list.html'
+    bulk_import_title = 'Carga masiva clientes'
     list_display = ('get_nombre', 'get_rut', 'limite_credito', 'dias_credito')
     search_fields = ('contacto__nombre', 'contacto__rut')
     
@@ -48,8 +57,23 @@ class ClienteAdmin(TenantAdminMixin, admin.ModelAdmin):
     get_nombre.short_description = 'Nombre'
     get_rut.short_description = 'RUT'
 
+    def handle_bulk_import(self, request, uploaded_file):
+        empresa = self._resolve_empresa_for_user(request.user)
+        set_current_user(request.user)
+        set_current_empresa(empresa)
+        return import_clientes(uploaded_file=uploaded_file, user=request.user, empresa=empresa)
+
+    def handle_bulk_template(self, request):
+        empresa = self._resolve_empresa_for_user(request.user)
+        set_current_user(request.user)
+        set_current_empresa(empresa)
+        content = build_clientes_bulk_template(user=request.user, empresa=empresa)
+        return content, 'plantilla_clientes.xlsx'
+
 @admin.register(Proveedor)
-class ProveedorAdmin(TenantAdminMixin, admin.ModelAdmin):
+class ProveedorAdmin(BulkImportAdminMixin, TenantAdminMixin, admin.ModelAdmin):
+    change_list_template = 'admin/bulk_import_change_list.html'
+    bulk_import_title = 'Carga masiva proveedores'
     list_display = ('get_nombre', 'get_rut', 'giro', 'dias_credito')
     search_fields = ('contacto__nombre', 'contacto__rut')
     
@@ -58,3 +82,16 @@ class ProveedorAdmin(TenantAdminMixin, admin.ModelAdmin):
     def get_rut(self, obj): return obj.contacto.rut
     get_nombre.short_description = 'Nombre'
     get_rut.short_description = 'RUT'
+
+    def handle_bulk_import(self, request, uploaded_file):
+        empresa = self._resolve_empresa_for_user(request.user)
+        set_current_user(request.user)
+        set_current_empresa(empresa)
+        return import_proveedores(uploaded_file=uploaded_file, user=request.user, empresa=empresa)
+
+    def handle_bulk_template(self, request):
+        empresa = self._resolve_empresa_for_user(request.user)
+        set_current_user(request.user)
+        set_current_empresa(empresa)
+        content = build_proveedores_bulk_template(user=request.user, empresa=empresa)
+        return content, 'plantilla_proveedores.xlsx'

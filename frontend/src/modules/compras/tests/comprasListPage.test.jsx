@@ -28,6 +28,7 @@ describe('compras/ListPage', () => {
           { id: 'oc-2', proveedor: 'p-2', numero: 'OC-002', estado: 'ENVIADA', fecha_emision: '2026-03-10', total: 25000 },
         ]),
       ),
+      http.get('*/documentos-compra/', async () => HttpResponse.json([])),
       http.get('*/proveedores/', async () =>
         HttpResponse.json([
           { id: 'p-1', contacto: 'c-1' },
@@ -60,6 +61,7 @@ describe('compras/ListPage', () => {
           { id: 'oc-1', proveedor: 'p-1', numero: 'OC-001', estado: 'BORRADOR', fecha_emision: '2026-03-10', total: 10000 },
         ]),
       ),
+      http.get('*/documentos-compra/', async () => HttpResponse.json([])),
       http.get('*/proveedores/', async () => HttpResponse.json([{ id: 'p-1', contacto: 'c-1' }])),
       http.get('*/contactos/', async () => HttpResponse.json([{ id: 'c-1', nombre: 'Proveedor Norte' }])),
       http.post('*/ordenes-compra/oc-1/anular/', async () => HttpResponse.json({ id: 'oc-1', estado: 'CANCELADA' })),

@@ -19,6 +19,18 @@ const NAV_MODULES = [
         to: '/productos',
         enabled: true,
       },
+      {
+        id: 'productos-categorias',
+        label: 'Categorias',
+        to: '/productos/categorias',
+        enabled: true,
+      },
+      {
+        id: 'productos-impuestos',
+        label: 'Impuestos',
+        to: '/productos/impuestos',
+        enabled: true,
+      },
     ],
   },
   {

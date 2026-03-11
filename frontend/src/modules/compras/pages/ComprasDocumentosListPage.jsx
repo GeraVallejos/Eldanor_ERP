@@ -7,6 +7,7 @@ import Button from '@/components/ui/Button'
 import DocumentActionsDialog from '@/components/ui/DocumentActionsDialog'
 import ReasonDialog from '@/components/ui/ReasonDialog'
 import { buttonVariants } from '@/components/ui/buttonVariants'
+import TablePagination from '@/components/ui/TablePagination'
 import { useTableSorting } from '@/lib/tableSorting'
 import { cn } from '@/lib/utils'
 import { downloadExcelFile } from '@/modules/shared/exports/downloadExcelFile'
@@ -41,7 +42,7 @@ function ComprasDocumentosListPage() {
   const [proveedores, setProveedores] = useState([])
   const [contactos, setContactos] = useState([])
   const [search, setSearch] = useState('')
-  const [estadoFilter, setEstadoFilter] = useState('ALL')
+  const [estadoFilter, setEstadoFilter] = useState('ACTIVOS')
   const [tipoFilter, setTipoFilter] = useState('ALL')
   const [updatingId, setUpdatingId] = useState(null)
   const [reasonDialogDoc, setReasonDialogDoc] = useState(null)
@@ -131,7 +132,11 @@ function ComprasDocumentosListPage() {
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase()
     return documentos.filter((doc) => {
-      if (estadoFilter !== 'ALL' && doc.estado !== estadoFilter) {
+      if (estadoFilter === 'ACTIVOS' && doc.estado === 'ANULADO') {
+        return false
+      }
+
+      if (estadoFilter !== 'ALL' && estadoFilter !== 'ACTIVOS' && doc.estado !== estadoFilter) {
         return false
       }
       if (tipoFilter !== 'ALL' && doc.tipo_documento !== tipoFilter) {
@@ -153,8 +158,9 @@ function ComprasDocumentosListPage() {
     })
   }, [documentos, search, estadoFilter, tipoFilter, proveedorById, contactoById])
 
-  const { sortedRows: sortedDocumentos, toggleSort, getSortIndicator } = useTableSorting(filtered, {
+  const { paginatedRows: paginatedDocumentos, toggleSort, getSortIndicator, currentPage, totalPages, totalRows, pageSize, nextPage, prevPage } = useTableSorting(filtered, {
     accessors: {
+      creado_en: (doc) => doc.creado_en,
       tipo: (doc) => TIPO_LABELS[doc.tipo_documento] || doc.tipo_documento,
       folio: (doc) => doc.folio,
       proveedor: (doc) => {
@@ -166,6 +172,9 @@ function ComprasDocumentosListPage() {
       estado: (doc) => ESTADO_LABELS[doc.estado] || doc.estado,
       total: (doc) => Number(doc.total || 0),
     },
+    pageSize: 10,
+    initialKey: 'creado_en',
+    initialDirection: 'desc',
   })
 
   const handleAccion = async (doc, accion) => {
@@ -324,6 +333,7 @@ function ComprasDocumentosListPage() {
             onChange={(e) => setEstadoFilter(e.target.value)}
             className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
           >
+            <option value="ACTIVOS">Activos</option>
             <option value="ALL">Todos</option>
             <option value="BORRADOR">Borrador</option>
             <option value="CONFIRMADO">Confirmado</option>
@@ -393,7 +403,7 @@ function ComprasDocumentosListPage() {
                   </td>
                 </tr>
               ) : (
-                sortedDocumentos.map((doc) => {
+                paginatedDocumentos.map((doc) => {
                   const prov = proveedorById.get(String(doc.proveedor))
                   const ctc = contactoById.get(String(prov?.contacto))
                   const isBusy = updatingId === doc.id
@@ -444,9 +454,9 @@ function ComprasDocumentosListPage() {
                                 {isBusy ? 'Procesando...' : 'Duplicar'}
                               </Button>
                               <Button
-                                variant="destructive"
+                                variant="outline"
                                 size="sm"
-                                className="text-xs"
+                                className="h-8 border-destructive/40 px-3 text-xs text-destructive hover:bg-destructive/10"
                                 disabled={isBusy}
                                 onClick={() => openActionDialog(doc, 'anular')}
                               >
@@ -474,9 +484,9 @@ function ComprasDocumentosListPage() {
                                 {isBusy ? 'Procesando...' : 'Duplicar'}
                               </Button>
                               <Button
-                                variant="destructive"
+                                variant="outline"
                                 size="sm"
-                                className="text-xs"
+                                className="h-8 border-destructive/40 px-3 text-xs text-destructive hover:bg-destructive/10"
                                 disabled={isBusy}
                                 onClick={() => openActionDialog(doc, 'anular')}
                               >
@@ -494,6 +504,15 @@ function ComprasDocumentosListPage() {
           </table>
         </div>
       ) : null}
+
+      <TablePagination
+        currentPage={currentPage}
+        totalPages={totalPages}
+        totalRows={totalRows}
+        pageSize={pageSize}
+        onPrev={prevPage}
+        onNext={nextPage}
+      />
 
       {status === 'failed' ? (
         <p className="text-sm text-destructive">Error al cargar los documentos de compra.</p>

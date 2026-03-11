@@ -19,6 +19,8 @@ import ComprasDocumentosDetailPage from '@/modules/compras/pages/ComprasDocument
 import InventarioKardexPage from '@/modules/inventario/pages/InventarioKardexPage'
 import InventarioResumenPage from '@/modules/inventario/pages/InventarioResumenPage'
 import ProductosCreatePage from '@/modules/productos/pages/ProductosCreatePage'
+import ProductosCategoriasPage from '@/modules/productos/pages/ProductosCategoriasPage'
+import ProductosImpuestosPage from '@/modules/productos/pages/ProductosImpuestosPage'
 import ProductosListPage from '@/modules/productos/pages/ProductosListPage'
 import NotFoundPage from '@/modules/shared/pages/NotFoundPage'
 
@@ -41,6 +43,8 @@ const router = createBrowserRouter([
           { path: 'presupuestos/:id/editar', element: <PresupuestosEditPage /> },
           { path: 'productos', element: <ProductosListPage /> },
           { path: 'productos/nuevo', element: <ProductosCreatePage /> },
+          { path: 'productos/categorias', element: <ProductosCategoriasPage /> },
+          { path: 'productos/impuestos', element: <ProductosImpuestosPage /> },
           { path: 'compras/ordenes', element: <ComprasOrdenesListPage /> },
           { path: 'compras/ordenes/nuevo', element: <ComprasOrdenesCreatePage /> },
           { path: 'compras/ordenes/:id', element: <ComprasOrdenesDetailPage /> },

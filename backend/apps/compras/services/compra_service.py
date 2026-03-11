@@ -91,6 +91,12 @@ class OrdenCompraService:
         if not orden:
             raise ResourceNotFoundError("Orden de compra no encontrada.")
 
+        if DocumentoCompraProveedor.all_objects.filter(
+            empresa=empresa,
+            orden_compra=orden,
+        ).exclude(estado=EstadoDocumentoCompra.ANULADO).exists():
+            raise ConflictError("No se puede corregir una orden con documentos de compra activos asociados.")
+
         motivo_normalizado = (motivo or "").strip()
         if not motivo_normalizado:
             raise BusinessRuleError("Debe indicar un motivo de correccion.")

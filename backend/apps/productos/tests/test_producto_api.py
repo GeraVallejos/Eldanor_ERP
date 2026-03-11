@@ -10,6 +10,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from apps.compras.models import DocumentoCompraProveedor, DocumentoCompraProveedorItem
 from apps.contactos.models import Contacto, Proveedor
 from apps.core.models import UserEmpresa
+from apps.inventario.models import StockProducto
 from apps.productos.models import Producto
 
 
@@ -56,6 +57,31 @@ def proveedor(db, empresa):
 
 @pytest.mark.django_db
 class TestProductoApi:
+    def test_crear_producto_sincroniza_stock_para_resumen(self, api_client, owner_usuario, empresa):
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
+
+        resp = api_client.post(
+            reverse("producto-list"),
+            {
+                "nombre": "Producto Front Resumen",
+                "sku": "PFR-001",
+                "tipo": "PRODUCTO",
+                "precio_referencia": "10000",
+                "precio_costo": "7000",
+                "maneja_inventario": True,
+                "stock_actual": "5",
+                "activo": True,
+            },
+            format="json",
+        )
+
+        assert resp.status_code == status.HTTP_201_CREATED, resp.data
+
+        producto = Producto.all_objects.get(id=resp.data["id"])
+        stock = StockProducto.all_objects.filter(empresa=empresa, producto=producto).first()
+        assert stock is not None
+        assert Decimal(str(stock.stock)) == Decimal("5")
+
     def test_listado_productos_oculta_inactivos_por_defecto(self, api_client, owner_usuario, empresa):
         api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
 

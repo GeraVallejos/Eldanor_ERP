@@ -11,6 +11,7 @@ from apps.compras.models import (
 
 class OrdenCompraSerializer(serializers.ModelSerializer):
     tiene_documentos = serializers.SerializerMethodField()
+    tiene_documentos_activos = serializers.SerializerMethodField()
 
     class Meta:
         model = OrdenCompra
@@ -20,6 +21,9 @@ class OrdenCompraSerializer(serializers.ModelSerializer):
 
     def get_tiene_documentos(self, obj):
         return obj.documentos_compra.exists()
+
+    def get_tiene_documentos_activos(self, obj):
+        return obj.documentos_compra.exclude(estado=EstadoDocumentoCompra.ANULADO).exists()
 
 
 class OrdenCompraItemSerializer(serializers.ModelSerializer):
