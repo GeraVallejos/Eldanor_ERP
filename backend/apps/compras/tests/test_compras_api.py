@@ -142,7 +142,9 @@ class TestComprasApi:
             documento_tipo="GUIA_RECEPCION",
         ).exists()
 
-    def test_confirmar_factura_genera_movimiento_inventario(self, api_client, owner_usuario, proveedor, empresa):
+    def test_confirmar_factura_sin_guia_previa_mueve_inventario(self, api_client, owner_usuario, proveedor, empresa):
+        # Chile: muchos proveedores emiten solo factura (sin guia de despacho).
+        # En ese caso la factura actua como documento de entrada y debe mover inventario.
         api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
 
         producto = Producto.objects.create(
@@ -190,11 +192,15 @@ class TestComprasApi:
             format="json",
         )
         assert confirmar_resp.status_code == status.HTTP_200_OK
+        assert confirmar_resp.data["estado"] == "CONFIRMADO"
+        # Sin guia ni recepcion previa: la factura SI mueve inventario
         assert MovimientoInventario.all_objects.filter(
             empresa=empresa,
             producto=producto,
             documento_tipo="FACTURA_COMPRA",
         ).exists()
+        producto.refresh_from_db()
+        assert producto.stock_actual == Decimal("3.00")
 
     def test_permite_multiples_documentos_para_misma_oc(self, api_client, owner_usuario, proveedor, empresa):
         api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")

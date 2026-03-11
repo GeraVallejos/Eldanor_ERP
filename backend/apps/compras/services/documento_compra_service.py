@@ -223,18 +223,28 @@ class DocumentoCompraService:
             if item.precio_unitario < 0:
                 raise BusinessRuleError("El precio unitario no puede ser negativo.")
 
-            InventarioService.registrar_movimiento(
-                producto_id=item.producto_id,
-                bodega_id=bodega_id,
-                tipo=TipoMovimiento.ENTRADA,
-                cantidad=item.cantidad,
-                referencia=f"GUIA {documento.folio}",
-                empresa=empresa,
-                usuario=usuario,
-                costo_unitario=item.precio_unitario,
-                documento_tipo=TipoDocumentoReferencia.GUIA_RECEPCION,
-                documento_id=documento.id,
-            )
+        # Solo mover inventario si NO hay una recepción confirmada vinculada.
+        # Si la recepción ya movió el stock físico, la guía es solo un documento de trazabilidad.
+        recepcion_vinculada = documento.recepcion_compra
+        ya_recibido = (
+            recepcion_vinculada is not None
+            and recepcion_vinculada.estado == EstadoRecepcion.CONFIRMADA
+        )
+
+        if not ya_recibido:
+            for item in items:
+                InventarioService.registrar_movimiento(
+                    producto_id=item.producto_id,
+                    bodega_id=bodega_id,
+                    tipo=TipoMovimiento.ENTRADA,
+                    cantidad=item.cantidad,
+                    referencia=f"GUIA {documento.folio}",
+                    empresa=empresa,
+                    usuario=usuario,
+                    costo_unitario=item.precio_unitario,
+                    documento_tipo=TipoDocumentoReferencia.GUIA_RECEPCION,
+                    documento_id=documento.id,
+                )
 
         documento.estado = EstadoDocumentoCompra.CONFIRMADO
         documento.save(update_fields=["estado"])
@@ -274,18 +284,43 @@ class DocumentoCompraService:
             if item.precio_unitario < 0:
                 raise BusinessRuleError("El precio unitario no puede ser negativo.")
 
-            InventarioService.registrar_movimiento(
-                producto_id=item.producto_id,
-                bodega_id=bodega_id,
-                tipo=TipoMovimiento.ENTRADA,
-                cantidad=item.cantidad,
-                referencia=f"FACTURA {documento.folio}",
+        # Determinar si ya existe una entrada física previa para esta compra.
+        # En Chile muchos proveedores solo emiten factura (sin guía ni recepción).
+        # En ese caso la factura ES el documento de entrada y debe mover inventario.
+        #
+        # La factura NO mueve stock si:
+        #   (a) hay una RecepcionCompra confirmada vinculada (ya movió stock), o
+        #   (b) hay una GuíaRecepción confirmada vinculada a la misma OC (ya movió stock).
+        recepcion_vinculada = documento.recepcion_compra
+        ya_recibido_por_recepcion = (
+            recepcion_vinculada is not None
+            and recepcion_vinculada.estado == EstadoRecepcion.CONFIRMADA
+        )
+
+        ya_recibido_por_guia = False
+        if documento.orden_compra:
+            ya_recibido_por_guia = DocumentoCompraProveedor.all_objects.filter(
                 empresa=empresa,
-                usuario=usuario,
-                costo_unitario=item.precio_unitario,
-                documento_tipo=TipoDocumentoReferencia.FACTURA_COMPRA,
-                documento_id=documento.id,
-            )
+                orden_compra=documento.orden_compra,
+                tipo_documento=TipoDocumentoCompra.GUIA_RECEPCION,
+                estado=EstadoDocumentoCompra.CONFIRMADO,
+            ).exists()
+
+        if not ya_recibido_por_recepcion and not ya_recibido_por_guia:
+            # Sin entrada física previa: la factura actúa como documento de ingreso.
+            for item in items:
+                InventarioService.registrar_movimiento(
+                    producto_id=item.producto_id,
+                    bodega_id=bodega_id,
+                    tipo=TipoMovimiento.ENTRADA,
+                    cantidad=item.cantidad,
+                    referencia=f"FACTURA {documento.folio}",
+                    empresa=empresa,
+                    usuario=usuario,
+                    costo_unitario=item.precio_unitario,
+                    documento_tipo=TipoDocumentoReferencia.FACTURA_COMPRA,
+                    documento_id=documento.id,
+                )
 
         documento.estado = EstadoDocumentoCompra.CONFIRMADO
         documento.save(update_fields=["estado"])

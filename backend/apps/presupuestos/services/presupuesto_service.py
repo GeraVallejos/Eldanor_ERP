@@ -36,38 +36,6 @@ class PresupuestoService:
 
         return max_numero is not None and presupuesto.numero == max_numero
 
-    @staticmethod
-    def _revertir_inventario(presupuesto, usuario):
-
-        referencia = f"PRESUPUESTO-{presupuesto.numero}"
-
-        movimientos = MovimientoInventario.all_objects.filter(
-            empresa=presupuesto.empresa,
-            referencia=referencia
-        )
-
-        for movimiento in movimientos:
-
-            tipo_reverso = (
-                TipoMovimiento.ENTRADA
-                if movimiento.tipo == TipoMovimiento.SALIDA
-                else TipoMovimiento.SALIDA
-            )
-
-            InventarioService.registrar_movimiento(
-                producto_id=movimiento.producto.id,
-                bodega_id=movimiento.bodega_id,
-                tipo=tipo_reverso,
-                cantidad=movimiento.cantidad,
-                referencia=f"REVERSO-{referencia}",
-                empresa=presupuesto.empresa,
-                usuario=usuario,
-                documento_tipo=TipoDocumentoReferencia.PRESUPUESTO,
-                documento_id=presupuesto.id,
-            )
-
-        movimientos.delete()
-
     # ===============================
     # Públicos
     # ===============================

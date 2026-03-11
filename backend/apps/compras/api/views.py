@@ -103,6 +103,7 @@ class OrdenCompraViewSet(TenantViewSetMixin, ModelViewSet):
         )
         return Response({"numero": numero}, status=status.HTTP_200_OK)
 
+    @action(detail=True, methods=["post"])
     def enviar(self, request, pk=None):
         orden = OrdenCompraService.enviar_orden(orden_id=pk, empresa=request.user.empresa_activa)
         serializer = self.get_serializer(orden)
