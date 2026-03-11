@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.db import models
 
 from apps.compras.models.orden_compra import OrdenCompra
@@ -24,6 +26,21 @@ class OrdenCompraItem(DocumentoItemBase):
         indexes = [
             models.Index(fields=["empresa", "orden_compra"]),
         ]
+
+    def save(self, *args, **kwargs):
+        cantidad = Decimal(self.cantidad or 0)
+        precio = Decimal(self.precio_unitario or 0)
+        subtotal = (cantidad * precio).quantize(Decimal("0.01"))
+
+        tasa = Decimal("0")
+        if self.impuesto_id and getattr(self.impuesto, "porcentaje", None) is not None:
+            tasa = Decimal(self.impuesto.porcentaje)
+
+        impuesto_monto = (subtotal * tasa / Decimal("100")).quantize(Decimal("0.01"))
+        self.subtotal = subtotal
+        self.total = (subtotal + impuesto_monto).quantize(Decimal("0.01"))
+
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return self.descripcion

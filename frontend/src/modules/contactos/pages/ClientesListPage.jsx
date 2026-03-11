@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useSelector } from 'react-redux'
 import { toast } from 'sonner'
@@ -78,7 +78,11 @@ function ClientesListPage() {
     segmento: '',
   })
 
-  const loadData = async () => {
+  const userRole = String(currentUser?.rol || '').toUpperCase()
+  const canViewInactive = userRole === 'OWNER' || userRole === 'ADMIN'
+  const canBulkImport = userRole === 'ADMIN'
+
+  const loadData = useCallback(async () => {
     setStatus('loading')
 
     const params = canViewInactive && includeInactive ? { include_inactive: '1' } : undefined
@@ -96,11 +100,7 @@ function ClientesListPage() {
       setStatus('failed')
       toast.error(normalizeApiError(error, { fallback: 'No se pudieron cargar los clientes.' }))
     }
-  }
-
-  const userRole = String(currentUser?.rol || '').toUpperCase()
-  const canViewInactive = userRole === 'OWNER' || userRole === 'ADMIN'
-  const canBulkImport = userRole === 'ADMIN'
+  }, [canViewInactive, includeInactive])
 
   useEffect(() => {
     const timeoutId = setTimeout(() => {
@@ -108,7 +108,7 @@ function ClientesListPage() {
     }, 0)
 
     return () => clearTimeout(timeoutId)
-  }, [includeInactive, canViewInactive])
+  }, [loadData])
 
   const contactoById = useMemo(() => {
     const map = new Map()

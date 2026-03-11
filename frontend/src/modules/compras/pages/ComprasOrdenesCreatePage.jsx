@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { api } from '@/api/client'
@@ -54,7 +54,7 @@ function ComprasOrdenesCreatePage() {
   })
   const [items, setItems] = useState([createEmptyItem()])
 
-  const loadInitialData = async () => {
+  const loadInitialData = useCallback(async () => {
     setLoadingInitial(true)
     try {
       const [
@@ -142,7 +142,7 @@ function ComprasOrdenesCreatePage() {
     } finally {
       setLoadingInitial(false)
     }
-  }
+  }, [isEditMode, navigate, ordenId, precargarDe])
 
   useEffect(() => {
     const timeoutId = setTimeout(() => {
@@ -150,7 +150,7 @@ function ComprasOrdenesCreatePage() {
     }, 0)
 
     return () => clearTimeout(timeoutId)
-  }, [isEditMode, ordenId])
+  }, [loadInitialData])
 
   const contactoById = useMemo(() => {
     const map = new Map()

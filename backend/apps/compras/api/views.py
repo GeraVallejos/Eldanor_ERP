@@ -12,6 +12,8 @@ from apps.compras.api.serializer import (
     DocumentoCompraProveedorSerializer,
     OrdenCompraItemSerializer,
     OrdenCompraSerializer,
+    RecepcionCompraItemSerializer,
+    RecepcionCompraSerializer,
 )
 from apps.compras.models import (
     DocumentoCompraProveedor,
@@ -19,8 +21,11 @@ from apps.compras.models import (
     EstadoDocumentoCompra,
     OrdenCompra,
     OrdenCompraItem,
+    EstadoRecepcion,
+    RecepcionCompra,
+    RecepcionCompraItem,
 )
-from apps.compras.services import DocumentoCompraService, OrdenCompraService
+from apps.compras.services import DocumentoCompraService, OrdenCompraService, RecepcionCompraService
 from apps.core.exceptions import AuthorizationError, ConflictError
 from apps.core.mixins import TenantViewSetMixin
 from apps.core.permisos.constantes_permisos import Acciones, Modulos
@@ -78,6 +83,7 @@ class OrdenCompraViewSet(TenantViewSetMixin, ModelViewSet):
                     numero=numero_siguiente,
                     empresa=self.request.user.empresa_activa,
                     creado_por=self.request.user,
+                    estado="BORRADOR",
                 )
                 return
             except (IntegrityError, DjangoValidationError, DRFValidationError) as exc:
@@ -163,17 +169,21 @@ class OrdenCompraItemViewSet(TenantViewSetMixin, ModelViewSet):
         orden = self._get_orden_from_request_or_instance()
         if orden:
             OrdenCompraService.validar_orden_editable(orden=orden)
-        serializer.save()
+        item = serializer.save()
+        OrdenCompraService.recalcular_totales(orden=item.orden_compra)
 
     def perform_update(self, serializer):
         self._set_tenant_context()
         OrdenCompraService.validar_orden_editable(orden=self.get_object().orden_compra)
-        serializer.save()
+        item = serializer.save()
+        OrdenCompraService.recalcular_totales(orden=item.orden_compra)
 
     def perform_destroy(self, instance):
         self._set_tenant_context()
         OrdenCompraService.validar_orden_editable(orden=instance.orden_compra)
+        orden = instance.orden_compra
         instance.delete()
+        OrdenCompraService.recalcular_totales(orden=orden)
 
 
 class DocumentoCompraProveedorViewSet(TenantViewSetMixin, ModelViewSet):
@@ -202,8 +212,9 @@ class DocumentoCompraProveedorViewSet(TenantViewSetMixin, ModelViewSet):
 
     def perform_create(self, serializer):
         self._set_tenant_context()
-        instance = serializer.save()
+        instance = serializer.save(estado=EstadoDocumentoCompra.BORRADOR)
         DocumentoCompraService.avanzar_orden_si_borrador(documento=instance)
+        DocumentoCompraService.recalcular_totales(documento=instance)
 
     def perform_destroy(self, instance):
         self._set_tenant_context()
@@ -300,7 +311,8 @@ class DocumentoCompraProveedorItemViewSet(TenantViewSetMixin, ModelViewSet):
             raise AuthorizationError("No tiene permisos sobre el documento seleccionado.")
         if documento.estado != EstadoDocumentoCompra.BORRADOR:
             raise ConflictError("Solo se pueden agregar items en documentos en borrador.")
-        serializer.save()
+        item = serializer.save()
+        DocumentoCompraService.recalcular_totales(documento=item.documento)
 
     def perform_update(self, serializer):
         self._set_tenant_context()
@@ -310,10 +322,83 @@ class DocumentoCompraProveedorItemViewSet(TenantViewSetMixin, ModelViewSet):
             raise AuthorizationError("No tiene permisos sobre el documento seleccionado.")
         if documento.estado != EstadoDocumentoCompra.BORRADOR:
             raise ConflictError("Solo se pueden editar items en documentos en borrador.")
-        serializer.save()
+        item = serializer.save()
+        DocumentoCompraService.recalcular_totales(documento=item.documento)
 
     def perform_destroy(self, instance):
         self._set_tenant_context()
         if instance.documento.estado != EstadoDocumentoCompra.BORRADOR:
             raise ConflictError("Solo se pueden eliminar items en documentos en borrador.")
+        documento = instance.documento
+        instance.delete()
+        DocumentoCompraService.recalcular_totales(documento=documento)
+
+
+class RecepcionCompraViewSet(TenantViewSetMixin, ModelViewSet):
+    model = RecepcionCompra
+    serializer_class = RecepcionCompraSerializer
+    permission_classes = [IsAuthenticated, TieneRelacionActiva, TienePermisoModuloAccion]
+    permission_modulo = Modulos.COMPRAS
+    permission_action_map = {
+        "list": Acciones.VER,
+        "retrieve": Acciones.VER,
+        "create": Acciones.CREAR,
+        "update": Acciones.EDITAR,
+        "partial_update": Acciones.EDITAR,
+        "destroy": Acciones.BORRAR,
+        "confirmar": Acciones.APROBAR,
+    }
+
+    def perform_create(self, serializer):
+        self._set_tenant_context()
+        serializer.save(estado=EstadoRecepcion.BORRADOR)
+
+    @action(detail=True, methods=["post"])
+    def confirmar(self, request, pk=None):
+        recepcion = RecepcionCompraService.confirmar_recepcion(
+            recepcion_id=pk,
+            empresa=request.user.empresa_activa,
+            usuario=request.user,
+            bodega_id=request.data.get("bodega_id"),
+        )
+        serializer = self.get_serializer(recepcion)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+class RecepcionCompraItemViewSet(TenantViewSetMixin, ModelViewSet):
+    model = RecepcionCompraItem
+    serializer_class = RecepcionCompraItemSerializer
+    permission_classes = [IsAuthenticated, TieneRelacionActiva, TienePermisoModuloAccion]
+    permission_modulo = Modulos.COMPRAS
+    permission_action_map = {
+        "list": Acciones.VER,
+        "retrieve": Acciones.VER,
+        "create": Acciones.CREAR,
+        "update": Acciones.EDITAR,
+        "partial_update": Acciones.EDITAR,
+        "destroy": Acciones.BORRAR,
+    }
+
+    def perform_create(self, serializer):
+        self._set_tenant_context()
+        recepcion = serializer.validated_data["recepcion"]
+        if recepcion.estado != EstadoRecepcion.BORRADOR:
+            raise ConflictError("Solo se pueden agregar items en recepciones en borrador.")
+        orden_item = serializer.validated_data.get("orden_item")
+        if recepcion.orden_compra_id and not orden_item:
+            raise ConflictError("Debe indicar orden_item cuando la recepcion esta asociada a una OC.")
+        if orden_item and recepcion.orden_compra_id and orden_item.orden_compra_id != recepcion.orden_compra_id:
+            raise ConflictError("El orden_item no pertenece a la OC de la recepcion.")
+        serializer.save()
+
+    def perform_update(self, serializer):
+        self._set_tenant_context()
+        if serializer.instance.recepcion.estado != EstadoRecepcion.BORRADOR:
+            raise ConflictError("Solo se pueden editar items en recepciones en borrador.")
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        self._set_tenant_context()
+        if instance.recepcion.estado != EstadoRecepcion.BORRADOR:
+            raise ConflictError("Solo se pueden eliminar items en recepciones en borrador.")
         instance.delete()

@@ -33,7 +33,11 @@ export function useTableSorting(rows, { accessors = {}, initialKey = null, initi
   const [currentPage, setCurrentPage] = useState(1)
 
   useEffect(() => {
-    setCurrentPage(1)
+    const timeoutId = setTimeout(() => {
+      setCurrentPage(1)
+    }, 0)
+
+    return () => clearTimeout(timeoutId)
   }, [rows])
 
   const sortedRows = useMemo(() => {

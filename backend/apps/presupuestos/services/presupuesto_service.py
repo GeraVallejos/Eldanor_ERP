@@ -1,12 +1,9 @@
 from django.db import transaction
 from django.db.models import Max
 from apps.core.exceptions import AuthorizationError, BusinessRuleError
-from apps.documentos.models import TipoDocumentoReferencia
 from apps.presupuestos.models import EstadoPresupuesto
-from apps.inventario.models import MovimientoInventario, TipoMovimiento
 from apps.core.services.secuencia_service import SecuenciaService
 from apps.presupuestos.models import Presupuesto, PresupuestoItem, PresupuestoHistorial
-from apps.inventario.services.inventario_service import InventarioService
 from apps.core.permisos.constantes_permisos import Acciones, Modulos
 
 
@@ -130,24 +127,10 @@ class PresupuestoService:
         presupuesto.estado = EstadoPresupuesto.APROBADO
         cambios = presupuesto.get_dirty_fields() 
 
-        # 4. Procesar inventario
-        for item in PresupuestoService._items_queryset(presupuesto):
-            if item.producto and item.producto.maneja_inventario:
-                InventarioService.registrar_movimiento(
-                    producto_id=item.producto.id,
-                    tipo=TipoMovimiento.SALIDA,
-                    cantidad=item.cantidad,
-                    referencia=f"PRESUPUESTO-{presupuesto.numero}",
-                    empresa=empresa,
-                    usuario=usuario,
-                    documento_tipo=TipoDocumentoReferencia.PRESUPUESTO,
-                    documento_id=presupuesto.id,
-                )
-
-        # 5. Guardar presupuesto
+        # 4. Guardar presupuesto
         presupuesto.save(update_fields=["estado"])
 
-        # 6. Registrar historial detallado
+        # 5. Registrar historial detallado
         PresupuestoService.registrar_historial(
             presupuesto, usuario, estado_anterior, EstadoPresupuesto.APROBADO, cambios
         )
@@ -232,10 +215,6 @@ class PresupuestoService:
                 f"Solo se pueden anular presupuestos en estado borrador, enviado o aprobado. Estado actual: {presupuesto.estado}"
             )
 
-        # Si estaba aprobado pudo impactar inventario.
-        if presupuesto.estado == EstadoPresupuesto.APROBADO:
-            PresupuestoService._revertir_inventario(presupuesto, usuario)
-
         estado_anterior = presupuesto.estado
         presupuesto.estado = EstadoPresupuesto.ANULADO
         presupuesto.save(update_fields=["estado"])
@@ -258,14 +237,9 @@ class PresupuestoService:
         if not usuario.tiene_permiso(Modulos.PRESUPUESTOS, Acciones.BORRAR, empresa):
             raise AuthorizationError("No tiene permisos para eliminar presupuestos")
 
-        # SEGURIDAD DE INVENTARIO
-        if presupuesto.estado == EstadoPresupuesto.APROBADO:
-            # Si el ERP permite borrar algo aprobado (solo el último folio),
-            # DEBEMOS devolver la mercadería al estante.
-            if not PresupuestoService._es_ultimo_folio(presupuesto):
-                  raise BusinessRuleError("No se puede eliminar un presupuesto aprobado que no sea el último. Debe anularlo.")
-            
-            PresupuestoService._revertir_inventario(presupuesto, usuario)
+        # Seguridad de folios: si esta aprobado solo se permite borrar el ultimo para trazabilidad.
+        if presupuesto.estado == EstadoPresupuesto.APROBADO and not PresupuestoService._es_ultimo_folio(presupuesto):
+            raise BusinessRuleError("No se puede eliminar un presupuesto aprobado que no sea el último. Debe anularlo.")
 
         # Registro de auditoría final antes de desaparecer
         PresupuestoService.registrar_historial(

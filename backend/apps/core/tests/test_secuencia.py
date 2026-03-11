@@ -32,5 +32,5 @@ def test_secuencia_incrementa():
         empresa, "PRESUPUESTO"
     )
 
-    assert numero1 == 1
-    assert numero2 == 2
+    assert numero1 == "00001"
+    assert numero2 == "00002"

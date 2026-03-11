@@ -159,7 +159,7 @@ REST_FRAMEWORK = {
 # =========================================================
 
 SIMPLE_JWT = {
-    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=600),
+    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=15),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=1),
     "ROTATE_REFRESH_TOKENS": True,
     "BLACKLIST_AFTER_ROTATION": True,
@@ -169,9 +169,31 @@ SIMPLE_JWT = {
 AUTH_COOKIE_ACCESS_NAME = config("AUTH_COOKIE_ACCESS_NAME", default="erp_access")
 AUTH_COOKIE_REFRESH_NAME = config("AUTH_COOKIE_REFRESH_NAME", default="erp_refresh")
 AUTH_COOKIE_SECURE = config("AUTH_COOKIE_SECURE", default=not DEBUG, cast=bool)
-AUTH_COOKIE_SAMESITE = config("AUTH_COOKIE_SAMESITE", default="Lax")
+AUTH_COOKIE_SAMESITE = config("AUTH_COOKIE_SAMESITE", default="Strict")
 AUTH_COOKIE_DOMAIN = config("AUTH_COOKIE_DOMAIN", default=None)
 AUTH_COOKIE_PATH = config("AUTH_COOKIE_PATH", default="/")
+
+# Cookies/session security for production
+SESSION_COOKIE_SECURE = config("SESSION_COOKIE_SECURE", default=not DEBUG, cast=bool)
+CSRF_COOKIE_SECURE = config("CSRF_COOKIE_SECURE", default=not DEBUG, cast=bool)
+CSRF_TRUSTED_ORIGINS = [
+    origin for origin in config("CSRF_TRUSTED_ORIGINS", default="").split(",") if origin
+]
+
+# Transport/security hardening (safe defaults for production)
+SECURE_SSL_REDIRECT = config("SECURE_SSL_REDIRECT", default=not DEBUG, cast=bool)
+SECURE_HSTS_SECONDS = config("SECURE_HSTS_SECONDS", default=0 if DEBUG else 31536000, cast=int)
+SECURE_HSTS_INCLUDE_SUBDOMAINS = config("SECURE_HSTS_INCLUDE_SUBDOMAINS", default=not DEBUG, cast=bool)
+SECURE_HSTS_PRELOAD = config("SECURE_HSTS_PRELOAD", default=not DEBUG, cast=bool)
+SECURE_PROXY_SSL_HEADER = (
+    tuple(config("SECURE_PROXY_SSL_HEADER", cast=lambda v: tuple(x.strip() for x in v.split(","))))
+    if config("SECURE_PROXY_SSL_HEADER", default="").strip()
+    else None
+)
+
+# ERP purchase controls (3-way match tolerances)
+ERP_OC_QTY_TOLERANCE_PCT = config("ERP_OC_QTY_TOLERANCE_PCT", default=0, cast=int)
+ERP_OC_PRICE_TOLERANCE_PCT = config("ERP_OC_PRICE_TOLERANCE_PCT", default=0, cast=int)
 
 # =========================================================
 # CORS

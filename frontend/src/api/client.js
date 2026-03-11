@@ -2,6 +2,45 @@ import axios from 'axios'
 import { API_BASE_URL } from '@/config/env'
 import { notifyGlobalApiError } from '@/api/errors'
 
+function getCookieValue(name) {
+  if (typeof document === 'undefined' || !document.cookie) {
+    return null
+  }
+
+  const encodedName = `${encodeURIComponent(name)}=`
+  const found = document.cookie
+    .split(';')
+    .map((entry) => entry.trim())
+    .find((entry) => entry.startsWith(encodedName))
+
+  if (!found) {
+    return null
+  }
+
+  return decodeURIComponent(found.slice(encodedName.length))
+}
+
+function withCsrfHeader(config) {
+  const method = String(config?.method || 'get').toUpperCase()
+  const isUnsafe = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)
+  if (!isUnsafe) {
+    return config
+  }
+
+  const csrfToken = getCookieValue('csrftoken')
+  if (!csrfToken) {
+    return config
+  }
+
+  return {
+    ...config,
+    headers: {
+      ...(config?.headers || {}),
+      'X-CSRFToken': csrfToken,
+    },
+  }
+}
+
 export const api = axios.create({
   baseURL: API_BASE_URL,
   timeout: 10000,
@@ -15,7 +54,8 @@ const refreshApi = axios.create({
 })
 
 export function setupApiInterceptors({ onAuthFailed }) {
-  const requestInterceptor = api.interceptors.request.use((config) => config)
+  const requestInterceptor = api.interceptors.request.use(withCsrfHeader)
+  const refreshRequestInterceptor = refreshApi.interceptors.request.use(withCsrfHeader)
 
   const responseInterceptor = api.interceptors.response.use(
     (response) => response,
@@ -59,6 +99,7 @@ export function setupApiInterceptors({ onAuthFailed }) {
 
   return () => {
     api.interceptors.request.eject(requestInterceptor)
+    refreshApi.interceptors.request.eject(refreshRequestInterceptor)
     api.interceptors.response.eject(responseInterceptor)
   }
 }

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { api } from '@/api/client'
@@ -193,7 +193,7 @@ function ComprasDocumentosCreatePage() {
     setForm((prev) => ({ ...prev, [field]: value }))
   }
 
-  const applyOrdenCompraToForm = async (ordenCompraId) => {
+  const applyOrdenCompraToForm = useCallback(async (ordenCompraId) => {
     const nextId = String(ordenCompraId || '')
     setForm((prev) => ({ ...prev, orden_compra: nextId }))
 
@@ -232,7 +232,7 @@ function ComprasDocumentosCreatePage() {
     } catch {
       toast.error('No se pudieron cargar los items de la orden de compra seleccionada.')
     }
-  }
+  }, [ordenesCompra])
 
   useEffect(() => {
     if (isEditMode || prefillAppliedRef.current) {
@@ -246,7 +246,7 @@ function ComprasDocumentosCreatePage() {
 
     prefillAppliedRef.current = true
     void applyOrdenCompraToForm(ordenPrefillId)
-  }, [isEditMode, searchParams, ordenesCompra])
+  }, [isEditMode, searchParams, ordenesCompra, applyOrdenCompraToForm])
 
   const handleItemChange = (index, field, value) => {
     setItems((prev) => {

@@ -1,7 +1,6 @@
 import pytest
 from decimal import Decimal
 from django.core.exceptions import ValidationError as DjangoValidationError
-from apps.core.exceptions import BusinessRuleError
 from django.test import RequestFactory
 from apps.presupuestos.services.presupuesto_service import PresupuestoService
 from apps.productos.models import Producto
@@ -65,7 +64,7 @@ class TestPresupuestoService:
 
     # ------------------------------------------------------
 
-    def test_aprobar_presupuesto_descuenta_stock(self, usuario_admin, empresa, cliente):
+    def test_aprobar_presupuesto_no_descuenta_stock(self, usuario_admin, empresa, cliente):
 
         set_current_empresa(empresa)
         set_current_user(usuario_admin)
@@ -98,11 +97,11 @@ class TestPresupuestoService:
         )
 
         producto.refresh_from_db()
-        assert producto.stock_actual == Decimal("8.00")
+        assert producto.stock_actual == Decimal("10.00")
 
     # ------------------------------------------------------
 
-    def test_anular_presupuesto_revierte_stock(self, usuario_admin, empresa, cliente):
+    def test_anular_presupuesto_no_modifica_stock(self, usuario_admin, empresa, cliente):
 
         set_current_empresa(empresa)
         set_current_user(usuario_admin)
@@ -131,7 +130,7 @@ class TestPresupuestoService:
         PresupuestoService.aprobar_presupuesto(presupuesto.id, empresa, usuario_admin)
 
         producto.refresh_from_db()
-        assert producto.stock_actual == Decimal("7.00")
+        assert producto.stock_actual == Decimal("10.00")
 
         PresupuestoService.anular_presupuesto(presupuesto.id, empresa, usuario_admin)
 
@@ -140,7 +139,7 @@ class TestPresupuestoService:
 
     # ------------------------------------------------------
 
-    def test_error_stock_insuficiente_no_aprueba_presupuesto(self, usuario_admin, empresa, cliente):
+    def test_stock_insuficiente_no_bloquea_aprobacion_presupuesto(self, usuario_admin, empresa, cliente):
 
         set_current_empresa(empresa)
         set_current_user(usuario_admin)
@@ -166,15 +165,14 @@ class TestPresupuestoService:
             precio_unitario=Decimal("100.00"),
         )
 
-        with pytest.raises(BusinessRuleError):
-            PresupuestoService.aprobar_presupuesto(
-                presupuesto.id,
-                empresa,
-                usuario_admin
-            )
+        PresupuestoService.aprobar_presupuesto(
+            presupuesto.id,
+            empresa,
+            usuario_admin
+        )
 
         presupuesto.refresh_from_db()
-        assert presupuesto.estado == EstadoPresupuesto.BORRADOR
+        assert presupuesto.estado == EstadoPresupuesto.APROBADO
 
         producto.refresh_from_db()
         assert producto.stock_actual == Decimal("1.00")
@@ -255,4 +253,4 @@ class TestPresupuestoService:
         )
 
         producto.refresh_from_db()
-        assert producto.stock_actual == Decimal("8.00")
+        assert producto.stock_actual == Decimal("10.00")

@@ -1,5 +1,6 @@
 from django.conf import settings
 import mimetypes
+from django.middleware.csrf import get_token
 from django.utils.module_loading import import_string
 from django.http import HttpResponse
 from io import BytesIO
@@ -11,7 +12,7 @@ from rest_framework import status
 from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
 from rest_framework_simplejwt.settings import api_settings
-from apps.core.models import UserEmpresa
+from apps.core.models import Empresa, UserEmpresa
 from apps.core.api.serializer import (
     AplicarPlantillaSerializer,
     CambiarEmpresaActivaSerializer,
@@ -76,6 +77,12 @@ def _clear_auth_cookies(response):
     )
 
 
+def _ensure_csrf_cookie(request, response):
+    # Generate and attach csrf cookie so SPA can send X-CSRFToken on unsafe methods.
+    get_token(request)
+    return response
+
+
 def _serialize_user(user, request=None):
     empresa = getattr(user, "empresa_activa", None)
     empresa_logo = None
@@ -98,7 +105,10 @@ def _serialize_user(user, request=None):
             .first()
         )
 
-    if relacion_activa:
+    if user.is_superuser:
+        rol = "SUPERUSER"
+        permisos = ["*"]
+    elif relacion_activa:
         rol = relacion_activa.rol
         permisos = permisos_efectivos_relacion(relacion_activa)
 
@@ -131,12 +141,14 @@ class EmpresasUsuarioView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        relaciones = UserEmpresa.objects.filter(
-            user=request.user,
-            activo=True
-        ).select_related("empresa")
-
-        empresas = [rel.empresa for rel in relaciones]
+        if request.user.is_superuser:
+            empresas = list(Empresa.objects.order_by("nombre"))
+        else:
+            relaciones = UserEmpresa.objects.filter(
+                user=request.user,
+                activo=True
+            ).select_related("empresa")
+            empresas = [rel.empresa for rel in relaciones]
 
         serializer = EmpresaUsuarioSerializer(
             empresas,
@@ -156,19 +168,29 @@ class CambiarEmpresaActivaView(APIView):
 
         empresa_id = serializer.validated_data["empresa_id"]
 
-        relacion = UserEmpresa.objects.filter(
-            user=request.user,
-            empresa_id=empresa_id,
-            activo=True
-        ).first()
+        if request.user.is_superuser:
+            empresa = Empresa.objects.filter(id=empresa_id).first()
+            if not empresa:
+                return Response(
+                    {"detail": "Empresa no encontrada."},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+            request.user.empresa_activa = empresa
+        else:
+            relacion = UserEmpresa.objects.filter(
+                user=request.user,
+                empresa_id=empresa_id,
+                activo=True
+            ).first()
 
-        if not relacion:
-            return Response(
-                {"detail": "No tienes acceso a esta empresa."},
-                status=status.HTTP_403_FORBIDDEN
-            )
+            if not relacion:
+                return Response(
+                    {"detail": "No tienes acceso a esta empresa."},
+                    status=status.HTTP_403_FORBIDDEN
+                )
 
-        request.user.empresa_activa = relacion.empresa
+            request.user.empresa_activa = relacion.empresa
+
         request.user.save(update_fields=["empresa_activa"])
 
         return Response(
@@ -487,7 +509,7 @@ class CustomTokenObtainPairView(TokenObtainPairView):
         if access_token:
             _set_auth_cookies(response, access_token, refresh_token)
 
-        return response
+        return _ensure_csrf_cookie(request, response)
 
 
 class CustomTokenRefreshView(APIView):
@@ -513,17 +535,18 @@ class CustomTokenRefreshView(APIView):
         data = serializer.validated_data
         response = Response({"detail": "Sesion renovada."}, status=status.HTTP_200_OK)
         _set_auth_cookies(response, data.get("access"), data.get("refresh"))
-        return response
+        return _ensure_csrf_cookie(request, response)
 
 
 class MeView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        return Response(
+        response = Response(
             {"user": _serialize_user(request.user, request=request)},
             status=status.HTTP_200_OK,
         )
+        return _ensure_csrf_cookie(request, response)
 
 
 class LogoutView(APIView):

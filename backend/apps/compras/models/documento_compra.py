@@ -94,11 +94,6 @@ class DocumentoCompraProveedor(BaseModel):
                 condition=Q(uuid_externo__isnull=False),
                 name="unique_uuid_externo_por_empresa",
             ),
-            models.UniqueConstraint(
-                fields=["empresa", "orden_compra"],
-                condition=Q(orden_compra__isnull=False) & ~Q(estado=EstadoDocumentoCompra.ANULADO),
-                name="unique_doc_compra_activo_por_oc",
-            ),
         ]
         indexes = [
             models.Index(fields=["empresa", "proveedor"]),

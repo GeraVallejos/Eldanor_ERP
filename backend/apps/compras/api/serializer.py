@@ -4,8 +4,11 @@ from apps.compras.models import (
     DocumentoCompraProveedor,
     DocumentoCompraProveedorItem,
     EstadoDocumentoCompra,
+    EstadoRecepcion,
     OrdenCompra,
     OrdenCompraItem,
+    RecepcionCompra,
+    RecepcionCompraItem,
 )
 
 
@@ -16,7 +19,7 @@ class OrdenCompraSerializer(serializers.ModelSerializer):
     class Meta:
         model = OrdenCompra
         fields = "__all__"
-        read_only_fields = ("id", "empresa", "creado_por", "creado_en", "actualizado_en", "numero")
+        read_only_fields = ("id", "empresa", "creado_por", "creado_en", "actualizado_en", "numero", "estado")
         validators = []
 
     def get_tiene_documentos(self, obj):
@@ -50,30 +53,30 @@ class DocumentoCompraProveedorSerializer(serializers.ModelSerializer):
                 {"orden_compra": "La orden de compra seleccionada no pertenece al proveedor indicado."}
             )
 
-        if empresa and orden_compra and estado != EstadoDocumentoCompra.ANULADO:
-            existentes = DocumentoCompraProveedor.all_objects.filter(
-                empresa=empresa,
-                orden_compra=orden_compra,
-            ).exclude(estado=EstadoDocumentoCompra.ANULADO)
-
-            if self.instance:
-                existentes = existentes.exclude(pk=self.instance.pk)
-
-            if existentes.exists():
-                raise serializers.ValidationError(
-                    {"orden_compra": "La orden de compra ya fue utilizada en otro documento activo."}
-                )
-
         return attrs
 
     class Meta:
         model = DocumentoCompraProveedor
         fields = "__all__"
-        read_only_fields = ("id", "empresa", "creado_por", "creado_en", "actualizado_en")
+        read_only_fields = ("id", "empresa", "creado_por", "creado_en", "actualizado_en", "estado")
 
 
 class DocumentoCompraProveedorItemSerializer(serializers.ModelSerializer):
     class Meta:
         model = DocumentoCompraProveedorItem
+        fields = "__all__"
+        read_only_fields = ("id", "empresa", "creado_por", "creado_en", "actualizado_en")
+
+
+class RecepcionCompraSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = RecepcionCompra
+        fields = "__all__"
+        read_only_fields = ("id", "empresa", "creado_por", "creado_en", "actualizado_en", "estado")
+
+
+class RecepcionCompraItemSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = RecepcionCompraItem
         fields = "__all__"
         read_only_fields = ("id", "empresa", "creado_por", "creado_en", "actualizado_en")

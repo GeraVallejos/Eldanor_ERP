@@ -1,6 +1,7 @@
 from django.db import transaction
 from django.db.models import Sum
 from django.utils import timezone
+from decimal import Decimal
 
 from apps.compras.models import (
     DocumentoCompraProveedor,
@@ -21,6 +22,26 @@ from apps.inventario.services.inventario_service import InventarioService
 
 
 class OrdenCompraService:
+    @staticmethod
+    def recalcular_totales(*, orden):
+        resumen = OrdenCompraItem.all_objects.filter(
+            empresa=orden.empresa,
+            orden_compra=orden,
+        ).aggregate(
+            subtotal=Sum("subtotal"),
+            total=Sum("total"),
+        )
+
+        subtotal = (resumen.get("subtotal") or Decimal("0")).quantize(Decimal("0.01"))
+        total = (resumen.get("total") or Decimal("0")).quantize(Decimal("0.01"))
+        impuestos = (total - subtotal).quantize(Decimal("0.01"))
+
+        OrdenCompra.all_objects.filter(id=orden.id).update(
+            subtotal=subtotal,
+            impuestos=impuestos,
+            total=total,
+        )
+
     @staticmethod
     def validar_orden_editable(*, orden):
         if orden.estado != EstadoOrdenCompra.BORRADOR:
