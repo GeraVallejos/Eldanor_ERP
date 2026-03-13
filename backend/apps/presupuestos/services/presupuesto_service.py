@@ -1,6 +1,8 @@
 from django.db import transaction
 from django.db.models import Max
 from apps.core.exceptions import AuthorizationError, BusinessRuleError
+from apps.auditoria.services import AuditoriaService
+from apps.auditoria.models import AuditSeverity
 from apps.presupuestos.models import EstadoPresupuesto
 from apps.core.services.secuencia_service import SecuenciaService
 from apps.presupuestos.models import Presupuesto, PresupuestoItem, PresupuestoHistorial
@@ -335,4 +337,26 @@ class PresupuestoService:
             payload=payload,
             usuario=usuario,
             dedup_key=f"presupuesto-historial:{historial.id}",
+        )
+
+        accion_auditoria = {
+            EstadoPresupuesto.APROBADO: Acciones.APROBAR,
+            EstadoPresupuesto.ANULADO: Acciones.ANULAR,
+        }.get(estado_nuevo, Acciones.EDITAR)
+
+        AuditoriaService.registrar_evento(
+            empresa=presupuesto.empresa,
+            usuario=usuario,
+            module_code=Modulos.PRESUPUESTOS,
+            action_code=accion_auditoria,
+            event_type=f"PRESUPUESTO_ESTADO_{str(estado_nuevo).upper()}",
+            entity_type="PRESUPUESTO",
+            entity_id=str(presupuesto.id),
+            summary=f"Presupuesto {presupuesto.numero} cambio de {estado_anterior} a {estado_nuevo}.",
+            severity=AuditSeverity.INFO,
+            changes=cambios or {},
+            payload=payload,
+            meta={"source": "PresupuestoService.registrar_historial", "historial_id": str(historial.id)},
+            source="PresupuestoService.registrar_historial",
+            idempotency_key=f"audit:presupuesto-historial:{historial.id}",
         )

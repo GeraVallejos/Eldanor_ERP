@@ -6,6 +6,8 @@ import { normalizeApiError } from '@/api/errors'
 import Button from '@/components/ui/Button'
 import { buttonVariants } from '@/components/ui/buttonVariants'
 import { getChileDateSuffix } from '@/lib/dateTimeFormat'
+import { toIntegerString } from '@/lib/numberFormat'
+import { useNormalizedFormItems } from '@/hooks/useNormalizedFormItems'
 import { cn } from '@/lib/utils'
 
 function normalizeListResponse(data) {
@@ -54,6 +56,7 @@ function ComprasOrdenesCreatePage() {
     observaciones: '',
   })
   const [items, setItems] = useState([createEmptyItem()])
+  const { normalizeFieldValue, normalizeItemFields, normalizeItemsCollection } = useNormalizedFormItems()
 
   const loadInitialData = useCallback(async () => {
     setLoadingInitial(true)
@@ -109,8 +112,10 @@ function ComprasOrdenesCreatePage() {
             ? scopedItems.map((item) => ({
                 producto: String(item.producto || ''),
                 descripcion: item.descripcion || '',
-                cantidad: String(item.cantidad || '1'),
-                precio_unitario: String(item.precio_unitario || '0'),
+                ...normalizeItemFields({
+                  cantidad: item.cantidad || '1',
+                  precio_unitario: item.precio_unitario || '0',
+                }),
                 impuesto: item.impuesto ? String(item.impuesto) : '',
               }))
             : [createEmptyItem()],
@@ -128,7 +133,17 @@ function ComprasOrdenesCreatePage() {
             fecha_entrega: precargarDe.fecha_entrega || '',
             observaciones: precargarDe.observaciones || '',
           })
-          setItems(precargarDe.items?.length > 0 ? precargarDe.items : [createEmptyItem()])
+          setItems(
+            precargarDe.items?.length > 0
+              ? normalizeItemsCollection(precargarDe.items).map((item) => ({
+                  ...item,
+                  ...normalizeItemFields({
+                    cantidad: item.cantidad,
+                    precio_unitario: item.precio_unitario,
+                  }),
+                }))
+              : [createEmptyItem()],
+          )
         }
       }
     } catch (error) {
@@ -143,7 +158,7 @@ function ComprasOrdenesCreatePage() {
     } finally {
       setLoadingInitial(false)
     }
-  }, [isEditMode, navigate, ordenId, precargarDe])
+  }, [isEditMode, navigate, ordenId, precargarDe, normalizeItemFields, normalizeItemsCollection])
 
   useEffect(() => {
     const timeoutId = setTimeout(() => {
@@ -182,13 +197,16 @@ function ComprasOrdenesCreatePage() {
   const updateItemField = (index, key, value) => {
     setItems((prev) => {
       const next = [...prev]
-      const row = { ...next[index], [key]: value }
+      const row = {
+        ...next[index],
+        [key]: normalizeFieldValue(key, value),
+      }
 
       if (key === 'producto') {
         const selected = productos.find((producto) => String(producto.id) === String(value))
         if (selected) {
           row.descripcion = selected.nombre || ''
-          row.precio_unitario = String(Math.round(Number(selected.precio_referencia || 0)))
+          row.precio_unitario = toIntegerString(selected.precio_referencia || 0)
           row.impuesto = selected.impuesto ? String(selected.impuesto) : ''
         }
       }
@@ -434,9 +452,8 @@ function ComprasOrdenesCreatePage() {
               <label className="text-xs">
                 Cantidad
                 <input
-                  type="number"
-                  min="0.01"
-                  step="0.01"
+                  type="text"
+                  inputMode="decimal"
                   className="mt-1 w-full rounded-md border border-input bg-background px-2 py-1.5 text-sm"
                   value={item.cantidad}
                   onChange={(event) => updateItemField(index, 'cantidad', event.target.value)}
@@ -447,9 +464,8 @@ function ComprasOrdenesCreatePage() {
               <label className="text-xs">
                 Precio unitario
                 <input
-                  type="number"
-                  min="0"
-                  step="1"
+                  type="text"
+                  inputMode="numeric"
                   className="mt-1 w-full rounded-md border border-input bg-background px-2 py-1.5 text-sm"
                   value={item.precio_unitario}
                   onChange={(event) => updateItemField(index, 'precio_unitario', event.target.value)}

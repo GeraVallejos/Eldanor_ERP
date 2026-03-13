@@ -8,6 +8,7 @@ from apps.core.models import BaseModel
 class TipoDocumentoCompra(models.TextChoices):
     GUIA_RECEPCION = "GUIA_RECEPCION", "Guía de recepción"
     FACTURA_COMPRA = "FACTURA_COMPRA", "Factura de compra"
+    BOLETA_COMPRA = "BOLETA_COMPRA", "Boleta de compra"
 
 
 class EstadoDocumentoCompra(models.TextChoices):
@@ -94,8 +95,9 @@ class DocumentoCompraProveedor(BaseModel):
 
     corregido_en = models.DateTimeField(null=True, blank=True)
 
-    # Flag técnico para unicidad compatible con MySQL (sin constraints condicionales).
-    bloquea_duplicado = models.BooleanField(default=True, editable=False)
+    # Flag tecnico para unicidad compatible con MySQL (sin constraints condicionales).
+    # True: participa en unicidad "activa"; NULL: historico (anulado/corregido), no bloquea.
+    bloquea_duplicado = models.BooleanField(default=True, editable=False, null=True)
 
     # Auditoría de ciclo de vida
     confirmado_por = models.ForeignKey(

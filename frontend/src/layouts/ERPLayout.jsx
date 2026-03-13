@@ -34,6 +34,7 @@ function ERPLayout() {
   }, [dispatch, user])
 
   const handleLogout = () => {
+    sessionStorage.setItem('auth:manualLogout', '1')
     dispatch(logoutUser())
   }
 

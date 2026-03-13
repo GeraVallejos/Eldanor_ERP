@@ -23,9 +23,56 @@ from apps.documentos.models import TipoDocumentoReferencia
 from apps.inventario.models import MovimientoInventario
 from apps.inventario.models import TipoMovimiento
 from apps.inventario.services.inventario_service import InventarioService
+from apps.auditoria.services import AuditoriaService
+from apps.auditoria.models import AuditSeverity
+from apps.core.permisos.constantes_permisos import Modulos, Acciones
 
 
 class DocumentoCompraService:
+    @staticmethod
+    def _build_payload_documento(documento):
+        """Arma payload base de trazabilidad para eventos de documentos de compra."""
+        return {
+            "model": "DocumentoCompraProveedor",
+            "empresa_id": str(getattr(documento, "empresa_id", "") or ""),
+            "tipo_documento": str(getattr(documento, "tipo_documento", "") or ""),
+            "folio": str(getattr(documento, "folio", "") or ""),
+            "serie": str(getattr(documento, "serie", "") or ""),
+            "estado": str(getattr(documento, "estado", "") or ""),
+            "orden_compra_id": str(getattr(documento, "orden_compra_id", "") or ""),
+            "recepcion_compra_id": str(getattr(documento, "recepcion_compra_id", "") or ""),
+        }
+
+    @staticmethod
+    def _registrar_auditoria_documento(*, documento, usuario, accion, event_type, summary, changes=None, payload=None, severity=AuditSeverity.INFO):
+        """Registra auditoria central para eventos relevantes del ciclo de documentos de compra."""
+        payload_base = DocumentoCompraService._build_payload_documento(documento)
+        payload_evento = {
+            **payload_base,
+            **(payload or {}),
+        }
+
+        AuditoriaService.registrar_evento(
+            empresa=documento.empresa,
+            usuario=usuario,
+            module_code=Modulos.COMPRAS,
+            action_code=accion,
+            event_type=event_type,
+            entity_type="DOCUMENTO_COMPRA",
+            entity_id=str(documento.id),
+            summary=summary,
+            severity=severity,
+            changes=changes or {},
+            payload=payload_evento,
+            meta={
+                "source": "DocumentoCompraService",
+                "documento_tipo": str(documento.tipo_documento),
+                "folio": documento.folio,
+            },
+            source="DocumentoCompraService",
+            idempotency_key=f"audit:documento-compra:{documento.id}:{event_type}",
+        )
+
     @staticmethod
     def _pct_config(value):
         try:
@@ -398,6 +445,15 @@ class DocumentoCompraService:
         documento.confirmado_en = timezone.now()
         documento.save(update_fields=["estado", "confirmado_por", "confirmado_en"])
         DocumentoCompraService._actualizar_estado_orden(empresa=empresa, orden_compra=documento.orden_compra)
+
+        DocumentoCompraService._registrar_auditoria_documento(
+            documento=documento,
+            usuario=usuario,
+            accion=Acciones.APROBAR,
+            event_type="COMPRA_GUIA_CONFIRMADA",
+            summary=f"Guia de compra {documento.folio} confirmada.",
+            changes={"estado": [EstadoDocumentoCompra.BORRADOR, EstadoDocumentoCompra.CONFIRMADO]},
+        )
         return documento
 
     @staticmethod
@@ -406,11 +462,11 @@ class DocumentoCompraService:
         documento = (
             DocumentoCompraProveedor.all_objects
             .select_for_update()
-            .filter(id=documento_id, empresa=empresa, tipo_documento=TipoDocumentoCompra.FACTURA_COMPRA)
+            .filter(id=documento_id, empresa=empresa, tipo_documento__in=[TipoDocumentoCompra.FACTURA_COMPRA, TipoDocumentoCompra.BOLETA_COMPRA])
             .first()
         )
         if not documento:
-            raise ResourceNotFoundError("Factura de compra no encontrada.")
+            raise ResourceNotFoundError("Documento tributario de compra no encontrado.")
 
         if documento.estado == EstadoDocumentoCompra.ANULADO:
             raise ConflictError("El documento está anulado.")
@@ -436,12 +492,24 @@ class DocumentoCompraService:
 
         # En tránsito: se confirma el documento tributario, pero sin entrada al stock disponible.
         # No se actualiza el estado de la OC porque aún no hay físico en bodega.
+        etiqueta_doc = "Boleta" if documento.tipo_documento == TipoDocumentoCompra.BOLETA_COMPRA else "Factura"
+        prefijo_doc = "BOLETA" if documento.tipo_documento == TipoDocumentoCompra.BOLETA_COMPRA else "FACTURA"
+
         if en_transito:
             documento.estado = EstadoDocumentoCompra.CONFIRMADO
             documento.confirmado_por = usuario
             documento.confirmado_en = timezone.now()
             documento.save(update_fields=["estado", "confirmado_por", "confirmado_en"])
             CarteraService.registrar_cxp_desde_documento_compra(documento=documento, usuario=usuario)
+
+            DocumentoCompraService._registrar_auditoria_documento(
+                documento=documento,
+                usuario=usuario,
+                accion=Acciones.APROBAR,
+                event_type="COMPRA_FACTURA_CONFIRMADA_TRANSITO",
+                summary=f"{etiqueta_doc} de compra {documento.folio} confirmada en transito.",
+                changes={"estado": [EstadoDocumentoCompra.BORRADOR, EstadoDocumentoCompra.CONFIRMADO]},
+            )
             return documento
 
         # Determinar si ya existe una entrada física previa para esta compra.
@@ -460,7 +528,7 @@ class DocumentoCompraService:
                 empresa=empresa,
                 usuario=usuario,
                 bodega_id=bodega_id,
-                referencia=f"FACTURA {documento.folio}",
+                referencia=f"{prefijo_doc} {documento.folio}",
                 documento_tipo=TipoDocumentoReferencia.FACTURA_COMPRA,
             )
 
@@ -472,6 +540,15 @@ class DocumentoCompraService:
 
         # Vincula impacto financiero para tesoreria/cartera futura.
         CarteraService.registrar_cxp_desde_documento_compra(documento=documento, usuario=usuario)
+
+        DocumentoCompraService._registrar_auditoria_documento(
+            documento=documento,
+            usuario=usuario,
+            accion=Acciones.APROBAR,
+            event_type="COMPRA_FACTURA_CONFIRMADA",
+            summary=f"{etiqueta_doc} de compra {documento.folio} confirmada.",
+            changes={"estado": [EstadoDocumentoCompra.BORRADOR, EstadoDocumentoCompra.CONFIRMADO]},
+        )
         return documento
 
     @staticmethod
@@ -489,10 +566,12 @@ class DocumentoCompraService:
         if documento.estado == EstadoDocumentoCompra.ANULADO:
             return documento
 
+        estado_anterior = documento.estado
+
         # Documentos confirmados generan movimiento compensatorio al anularse
         if (
             documento.estado == EstadoDocumentoCompra.CONFIRMADO
-            and documento.tipo_documento in {TipoDocumentoCompra.GUIA_RECEPCION, TipoDocumentoCompra.FACTURA_COMPRA}
+            and documento.tipo_documento in {TipoDocumentoCompra.GUIA_RECEPCION, TipoDocumentoCompra.FACTURA_COMPRA, TipoDocumentoCompra.BOLETA_COMPRA}
         ):
             items = list(
                 DocumentoCompraProveedorItem.all_objects
@@ -504,7 +583,13 @@ class DocumentoCompraService:
                 if documento.tipo_documento == TipoDocumentoCompra.GUIA_RECEPCION
                 else TipoDocumentoReferencia.FACTURA_COMPRA
             )
-            prefijo = "GUIA" if documento.tipo_documento == TipoDocumentoCompra.GUIA_RECEPCION else "FACTURA"
+            prefijo = (
+                "GUIA"
+                if documento.tipo_documento == TipoDocumentoCompra.GUIA_RECEPCION
+                else "BOLETA"
+                if documento.tipo_documento == TipoDocumentoCompra.BOLETA_COMPRA
+                else "FACTURA"
+            )
             tiene_movimientos_previos = MovimientoInventario.all_objects.filter(
                 empresa=empresa,
                 documento_tipo=doc_tipo_referencia,
@@ -526,7 +611,8 @@ class DocumentoCompraService:
                     )
 
         documento.estado = EstadoDocumentoCompra.ANULADO
-        documento.bloquea_duplicado = False
+        # NULL evita colisionar entre historicos anulados manteniendo la unicidad activa en True.
+        documento.bloquea_duplicado = None
         documento.anulado_por = usuario
         documento.anulado_en = timezone.now()
         documento.save(update_fields=["estado", "bloquea_duplicado", "anulado_por", "anulado_en"])
@@ -536,6 +622,18 @@ class DocumentoCompraService:
             cuenta_por_pagar.estado = EstadoCuenta.ANULADA
             cuenta_por_pagar.saldo = Decimal("0")
             cuenta_por_pagar.save(update_fields=["estado", "saldo"])
+
+        DocumentoCompraService._actualizar_estado_orden(empresa=empresa, orden_compra=documento.orden_compra)
+
+        DocumentoCompraService._registrar_auditoria_documento(
+            documento=documento,
+            usuario=usuario,
+            accion=Acciones.ANULAR,
+            event_type="COMPRA_DOCUMENTO_ANULADO",
+            summary=f"Documento de compra {documento.folio} anulado.",
+            changes={"estado": [estado_anterior, EstadoDocumentoCompra.ANULADO]},
+            severity=AuditSeverity.WARNING,
+        )
 
         return documento
 
@@ -605,6 +703,15 @@ class DocumentoCompraService:
                 recepcion_item=item.recepcion_item,
             )
 
+        DocumentoCompraService._registrar_auditoria_documento(
+            documento=clon,
+            usuario=usuario,
+            accion=Acciones.EDITAR,
+            event_type="COMPRA_DOCUMENTO_CORREGIDO",
+            summary=f"Documento de compra {documento.folio} corregido y clonado en borrador.",
+            payload={"documento_origen_id": str(documento.id), "motivo": motivo_normalizado},
+        )
+
         return clon
 
     @staticmethod
@@ -663,5 +770,14 @@ class DocumentoCompraService:
                 subtotal=item.subtotal,
                 recepcion_item=item.recepcion_item,
             )
+
+        DocumentoCompraService._registrar_auditoria_documento(
+            documento=clon,
+            usuario=usuario,
+            accion=Acciones.CREAR,
+            event_type="COMPRA_DOCUMENTO_DUPLICADO",
+            summary=f"Documento de compra {documento.folio} duplicado en folio {clon.folio}.",
+            payload={"documento_origen_id": str(documento.id)},
+        )
 
         return clon

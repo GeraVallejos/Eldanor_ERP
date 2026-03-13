@@ -6,6 +6,8 @@ import { normalizeApiError } from '@/api/errors'
 import Button from '@/components/ui/Button'
 import SearchableSelect from '@/components/ui/SearchableSelect'
 import { getChileDateSuffix } from '@/lib/dateTimeFormat'
+import { formatCurrencyCLP, formatSmartNumber, toIntegerString } from '@/lib/numberFormat'
+import { useNormalizedFormItems } from '@/hooks/useNormalizedFormItems'
 import { getProductosCatalog } from '@/modules/productos/services/productosCatalogCache'
 
 function normalizeListResponse(data) {
@@ -50,6 +52,7 @@ function ComprasRecepcionesCreatePage() {
   })
 
   const [items, setItems] = useState([{ ...EMPTY_ITEM }])
+  const { normalizeFieldValue, normalizeItemFields } = useNormalizedFormItems()
 
   // Dialogo de confirmacion
   const [confirmOpen, setConfirmOpen] = useState(false)
@@ -99,8 +102,10 @@ function ComprasRecepcionesCreatePage() {
                 _id: it.id,
                 producto: String(it.producto || ''),
                 orden_item: it.orden_item ? String(it.orden_item) : '',
-                cantidad: String(it.cantidad || '1'),
-                precio_unitario: String(it.precio_unitario || '0'),
+                ...normalizeItemFields({
+                  cantidad: it.cantidad || '1',
+                  precio_unitario: it.precio_unitario || '0',
+                }),
               }))
             : [{ ...EMPTY_ITEM }],
         )
@@ -131,7 +136,7 @@ function ComprasRecepcionesCreatePage() {
     } finally {
       setLoadingInitial(false)
     }
-  }, [isEditMode, prefillOrdenCompraId, recepcionId])
+  }, [isEditMode, prefillOrdenCompraId, recepcionId, normalizeItemFields])
 
   useEffect(() => {
     const id = setTimeout(() => { void loadInitialData() }, 0)
@@ -184,7 +189,7 @@ function ComprasRecepcionesCreatePage() {
       const prod = productoById.get(String(it.producto))
       return {
         value: String(it.id),
-        label: `${prod?.nombre || 'Producto'} - cant: ${it.cantidad} @ $${Math.round(Number(it.precio_unitario || 0)).toLocaleString('es-CL')}`,
+        label: `${prod?.nombre || 'Producto'} - cant: ${formatSmartNumber(it.cantidad, { maximumFractionDigits: 2 })} @ ${formatCurrencyCLP(it.precio_unitario || 0)}`,
       }
     })
   }, [ocItems, productoById])
@@ -211,19 +216,22 @@ function ComprasRecepcionesCreatePage() {
   const handleItemChange = (index, field, value) => {
     setItems((prev) => {
       const next = [...prev]
-      const row = { ...next[index], [field]: value }
+      const row = {
+        ...next[index],
+        [field]: normalizeFieldValue(field, value),
+      }
 
       // Al seleccionar orden_item, auto-completar producto y precio
       if (field === 'orden_item' && value) {
         const ocItem = ocItems.find((it) => String(it.id) === String(value))
         if (ocItem) {
           row.producto = String(ocItem.producto || '')
-          row.precio_unitario = String(ocItem.precio_unitario || '0')
+          row.precio_unitario = toIntegerString(ocItem.precio_unitario || '0')
         }
       } else if (field === 'producto' && value && !row.orden_item) {
         const prod = productoById.get(String(value))
         if (prod) {
-          row.precio_unitario = String(Math.round(Number(prod.precio_referencia || 0)))
+          row.precio_unitario = toIntegerString(prod.precio_referencia || 0)
         }
       }
 
@@ -444,12 +452,11 @@ function ComprasRecepcionesCreatePage() {
                       </td>
                       <td className="px-3 py-1 text-right">
                         {isReadOnly ? (
-                          <span>{Number(item.cantidad).toLocaleString('es-CL')}</span>
+                          <span>{formatSmartNumber(item.cantidad, { maximumFractionDigits: 2 })}</span>
                         ) : (
                           <input
-                            type="number"
-                            min="0.01"
-                            step="0.01"
+                            type="text"
+                            inputMode="decimal"
                             value={item.cantidad}
                             onChange={(e) => handleItemChange(index, 'cantidad', e.target.value)}
                             className="w-24 rounded-md border border-input bg-background px-2 py-1 text-sm text-right"
@@ -458,12 +465,11 @@ function ComprasRecepcionesCreatePage() {
                       </td>
                       <td className="px-3 py-1 text-right">
                         {isReadOnly ? (
-                          <span>{Math.round(Number(item.precio_unitario)).toLocaleString('es-CL')}</span>
+                          <span>{formatCurrencyCLP(item.precio_unitario || 0)}</span>
                         ) : (
                           <input
-                            type="number"
-                            min="0"
-                            step="1"
+                            type="text"
+                            inputMode="numeric"
                             value={item.precio_unitario}
                             onChange={(e) => handleItemChange(index, 'precio_unitario', e.target.value)}
                             className="w-28 rounded-md border border-input bg-background px-2 py-1 text-sm text-right"

@@ -39,6 +39,7 @@ function SearchableSelect({
     [options, value],
   )
 
+
   useEffect(() => {
     const onPointerDown = (event) => {
       const isInsideInput = containerRef.current?.contains(event.target)
@@ -126,6 +127,10 @@ function SearchableSelect({
           disabled={disabled}
           className={`w-full rounded-md border border-input bg-background px-3 py-2 pr-8 text-sm ${inputClassName}`}
           onFocus={() => {
+            // Si no hay opcion seleccionada, limpia la query residual para que el campo abra limpio
+            if (!selectedOption) {
+              setQuery('')
+            }
             setOpen(true)
             setCursor(-1)
           }}

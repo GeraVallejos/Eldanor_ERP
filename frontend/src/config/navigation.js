@@ -4,6 +4,7 @@ import {
   Handshake,
   PackagePlus,
   ShoppingBag,
+  ShieldCheck,
 } from 'lucide-react'
 
 const NAV_MODULES = [
@@ -84,6 +85,21 @@ const NAV_MODULES = [
         id: 'inventario-resumen',
         label: 'Resumen valorizado',
         to: '/inventario/resumen',
+        enabled: true,
+      },
+    ],
+  },
+  {
+    id: 'auditoria',
+    label: 'Auditoria',
+    icon: ShieldCheck,
+    enabled: true,
+    requiredPermissions: ['AUDITORIA.VER'],
+    children: [
+      {
+        id: 'auditoria-eventos',
+        label: 'Eventos',
+        to: '/auditoria/eventos',
         enabled: true,
       },
     ],

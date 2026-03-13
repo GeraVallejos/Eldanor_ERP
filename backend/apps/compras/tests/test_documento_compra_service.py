@@ -3,7 +3,14 @@ from decimal import Decimal
 
 import pytest
 
-from apps.compras.models import DocumentoCompraProveedor, DocumentoCompraProveedorItem, EstadoDocumentoCompra
+from apps.compras.models import (
+    DocumentoCompraProveedor,
+    DocumentoCompraProveedorItem,
+    EstadoDocumentoCompra,
+    EstadoOrdenCompra,
+    OrdenCompra,
+    OrdenCompraItem,
+)
 from apps.compras.services import DocumentoCompraService
 from apps.contactos.models import Contacto, Proveedor
 from apps.core.exceptions import BusinessRuleError, ConflictError, ResourceNotFoundError
@@ -228,6 +235,57 @@ class TestDocumentoCompraService:
         assert producto_factura.stock_actual == Decimal("1")
         assert CuentaPorPagar.all_objects.filter(empresa=empresa, documento_compra=factura).exists()
 
+    def test_confirmar_boleta_compra(self, empresa, owner_usuario, proveedor):
+        boleta = DocumentoCompraProveedor.objects.create(
+            empresa=empresa,
+            creado_por=owner_usuario,
+            tipo_documento="BOLETA_COMPRA",
+            proveedor=proveedor,
+            folio="BOL-001",
+            fecha_emision=date.today(),
+            fecha_recepcion=date.today(),
+            subtotal_neto=Decimal("6000"),
+            impuestos=Decimal("1140"),
+            total=Decimal("7140"),
+        )
+
+        producto_boleta = Producto.objects.create(
+            empresa=empresa,
+            creado_por=owner_usuario,
+            nombre="Producto Boleta",
+            sku="PB-001",
+            stock_actual=Decimal("0.00"),
+            maneja_inventario=True,
+            precio_referencia=Decimal("6000"),
+        )
+
+        DocumentoCompraProveedorItem.objects.create(
+            empresa=empresa,
+            creado_por=owner_usuario,
+            documento=boleta,
+            producto=producto_boleta,
+            cantidad=Decimal("1"),
+            precio_unitario=Decimal("6000"),
+            subtotal=Decimal("6000"),
+        )
+
+        doc = DocumentoCompraService.confirmar_factura(
+            documento_id=boleta.id,
+            empresa=empresa,
+            usuario=owner_usuario,
+        )
+
+        assert doc.estado == EstadoDocumentoCompra.CONFIRMADO
+        assert MovimientoInventario.all_objects.filter(
+            empresa=empresa,
+            producto=producto_boleta,
+            documento_tipo="FACTURA_COMPRA",
+            documento_id=boleta.id,
+        ).exists()
+        producto_boleta.refresh_from_db()
+        assert producto_boleta.stock_actual == Decimal("1")
+        assert CuentaPorPagar.all_objects.filter(empresa=empresa, documento_compra=boleta).exists()
+
     def test_anular_factura_confirmada_genera_movimiento_compensatorio(self, empresa, owner_usuario, proveedor):
         factura = DocumentoCompraProveedor.objects.create(
             empresa=empresa,
@@ -288,6 +346,78 @@ class TestDocumentoCompraService:
         cxp = CuentaPorPagar.all_objects.get(empresa=empresa, documento_compra=factura)
         assert cxp.estado == "ANULADA"
         assert cxp.saldo == Decimal("0")
+
+    def test_anular_factura_confirmada_reabre_oc_recibida(self, empresa, owner_usuario, proveedor):
+        orden = OrdenCompra.objects.create(
+            empresa=empresa,
+            creado_por=owner_usuario,
+            numero="OC-REAP-001",
+            proveedor=proveedor,
+            estado=EstadoOrdenCompra.ENVIADA,
+            fecha_emision=date.today(),
+        )
+
+        producto_oc = Producto.objects.create(
+            empresa=empresa,
+            creado_por=owner_usuario,
+            nombre="Producto Reapertura OC",
+            sku="PROC-001",
+            stock_actual=Decimal("0.00"),
+            maneja_inventario=True,
+            precio_referencia=Decimal("5000"),
+        )
+
+        OrdenCompraItem.objects.create(
+            empresa=empresa,
+            creado_por=owner_usuario,
+            orden_compra=orden,
+            producto=producto_oc,
+            descripcion="Item OC reapertura",
+            cantidad=Decimal("2"),
+            precio_unitario=Decimal("5000"),
+            subtotal=Decimal("10000"),
+        )
+
+        factura = DocumentoCompraProveedor.objects.create(
+            empresa=empresa,
+            creado_por=owner_usuario,
+            tipo_documento="FACTURA_COMPRA",
+            proveedor=proveedor,
+            orden_compra=orden,
+            folio="FAC-REAP-001",
+            fecha_emision=date.today(),
+            fecha_recepcion=date.today(),
+            subtotal_neto=Decimal("10000"),
+            impuestos=Decimal("1900"),
+            total=Decimal("11900"),
+        )
+
+        DocumentoCompraProveedorItem.objects.create(
+            empresa=empresa,
+            creado_por=owner_usuario,
+            documento=factura,
+            producto=producto_oc,
+            cantidad=Decimal("2"),
+            precio_unitario=Decimal("5000"),
+            subtotal=Decimal("10000"),
+        )
+
+        DocumentoCompraService.confirmar_factura(
+            documento_id=factura.id,
+            empresa=empresa,
+            usuario=owner_usuario,
+        )
+        orden.refresh_from_db()
+        assert orden.estado == EstadoOrdenCompra.RECIBIDA
+
+        DocumentoCompraService.anular_documento(
+            documento_id=factura.id,
+            empresa=empresa,
+            usuario=owner_usuario,
+        )
+
+        orden.refresh_from_db()
+        assert orden.estado == EstadoOrdenCompra.ENVIADA
 
     def test_reingreso_factura_mismo_folio_tras_anulacion_no_colisiona_cxp(self, empresa, owner_usuario, proveedor):
         producto = Producto.objects.create(
@@ -388,6 +518,55 @@ class TestDocumentoCompraService:
             documento_tipo="GUIA_RECEPCION",
             documento_id=guia_borrador.id,
         ).exists()
+
+    def test_anular_segundo_documento_mismo_folio_no_colisiona_unicidad(self, empresa, owner_usuario, proveedor):
+        doc_1 = DocumentoCompraProveedor.objects.create(
+            empresa=empresa,
+            creado_por=owner_usuario,
+            tipo_documento="FACTURA_COMPRA",
+            proveedor=proveedor,
+            folio="FAC-ANU-001",
+            serie="",
+            fecha_emision=date.today(),
+            fecha_recepcion=date.today(),
+            subtotal_neto=Decimal("1000"),
+            impuestos=Decimal("190"),
+            total=Decimal("1190"),
+        )
+
+        DocumentoCompraService.anular_documento(
+            documento_id=doc_1.id,
+            empresa=empresa,
+            usuario=owner_usuario,
+        )
+
+        doc_2 = DocumentoCompraProveedor.objects.create(
+            empresa=empresa,
+            creado_por=owner_usuario,
+            tipo_documento="FACTURA_COMPRA",
+            proveedor=proveedor,
+            folio="FAC-ANU-001",
+            serie="",
+            fecha_emision=date.today(),
+            fecha_recepcion=date.today(),
+            subtotal_neto=Decimal("2000"),
+            impuestos=Decimal("380"),
+            total=Decimal("2380"),
+        )
+
+        anulado_2 = DocumentoCompraService.anular_documento(
+            documento_id=doc_2.id,
+            empresa=empresa,
+            usuario=owner_usuario,
+        )
+
+        doc_1.refresh_from_db()
+        doc_2.refresh_from_db()
+
+        assert doc_1.estado == EstadoDocumentoCompra.ANULADO
+        assert doc_2.estado == EstadoDocumentoCompra.ANULADO
+        assert doc_1.bloquea_duplicado is None
+        assert anulado_2.bloquea_duplicado is None
 
     def test_corregir_documento_confirmado_anula_y_clona_en_borrador(self, empresa, owner_usuario, proveedor):
         factura = DocumentoCompraProveedor.objects.create(

@@ -10,8 +10,11 @@ from apps.inventario.models.stock_serie import EstadoSerie, StockSerie
 from apps.productos.models.producto import Producto
 from apps.core.services.domain_event_service import DomainEventService
 from apps.core.services.outbox_service import OutboxService
+from apps.auditoria.services import AuditoriaService
+from apps.auditoria.models import AuditSeverity
 from apps.inventario.models.movimiento import MovimientoInventario, TipoMovimiento
 from apps.inventario.models.stock_producto import StockProducto
+from apps.core.permisos.constantes_permisos import Modulos, Acciones
 
 
 class InventarioService:
@@ -610,6 +613,22 @@ class InventarioService:
             payload=payload,
             usuario=usuario,
             dedup_key=f"inventario-mov:{movimiento.id}",
+        )
+
+        AuditoriaService.registrar_evento(
+            empresa=empresa,
+            usuario=usuario,
+            module_code=Modulos.INVENTARIO,
+            action_code=Acciones.EDITAR,
+            event_type="INVENTARIO_MOVIMIENTO_REGISTRADO",
+            entity_type="MOVIMIENTO_INVENTARIO",
+            entity_id=str(movimiento.id),
+            summary=f"Movimiento {tipo} registrado para producto {producto.nombre}.",
+            severity=AuditSeverity.INFO,
+            payload=payload,
+            meta={"source": "InventarioService.registrar_movimiento"},
+            source="InventarioService.registrar_movimiento",
+            idempotency_key=f"audit:inventario-mov:{movimiento.id}",
         )
 
         return movimiento

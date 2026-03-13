@@ -41,6 +41,7 @@ INSTALLED_APPS = [
     'apps.compras.apps.ComprasConfig',
     'apps.documentos.apps.DocumentosConfig',
     'apps.inventario.apps.InventarioConfig',
+    'apps.auditoria.apps.AuditoriaConfig',
 ]
 
 # =========================================================

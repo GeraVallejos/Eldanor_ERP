@@ -6,6 +6,8 @@ import { normalizeApiError } from '@/api/errors'
 import Button from '@/components/ui/Button'
 import SearchableSelect from '@/components/ui/SearchableSelect'
 import { getChileDateSuffix } from '@/lib/dateTimeFormat'
+import { formatCurrencyCLP, normalizeNumericInputByField, toIntegerString, toQuantityString } from '@/lib/numberFormat'
+import { useNormalizedFormItems } from '@/hooks/useNormalizedFormItems'
 import { getProductosCatalog } from '@/modules/productos/services/productosCatalogCache'
 
 function normalizeListResponse(data) {
@@ -49,7 +51,7 @@ function ComprasDocumentosCreatePage() {
   const [loadingEdit, setLoadingEdit] = useState(isEditMode)
 
   const [form, setForm] = useState({
-    tipo_documento: 'GUIA_RECEPCION',
+    tipo_documento: 'FACTURA_COMPRA',
     proveedor: '',
     orden_compra: '',
     folio: '',
@@ -60,6 +62,13 @@ function ComprasDocumentosCreatePage() {
   })
 
   const [items, setItems] = useState([{ ...EMPTY_ITEM }])
+  const { normalizeFieldValue } = useNormalizedFormItems({
+    normalizers: {
+      cantidad: toQuantityString,
+      precio_unitario: toIntegerString,
+      descuento: (value) => normalizeNumericInputByField('descuento', value),
+    },
+  })
 
   useEffect(() => {
     const loadBase = async () => {
@@ -111,8 +120,8 @@ function ComprasDocumentosCreatePage() {
                 _id: it.id,
                 producto: String(it.producto || ''),
                 descripcion: it.descripcion || '',
-                cantidad: String(it.cantidad || 1),
-                precio_unitario: String(it.precio_unitario || 0),
+                cantidad: toQuantityString(it.cantidad || 1),
+                precio_unitario: toIntegerString(it.precio_unitario || 0),
                 descuento: String(it.descuento || 0),
                 subtotal: String(it.subtotal || 0),
               }))
@@ -223,8 +232,8 @@ function ComprasDocumentosCreatePage() {
           ocItems.map((item) => ({
             producto: String(item.producto || ''),
             descripcion: item.descripcion || '',
-            cantidad: String(item.cantidad || '1'),
-            precio_unitario: String(item.precio_unitario || '0'),
+            cantidad: toQuantityString(item.cantidad || '1'),
+            precio_unitario: toIntegerString(item.precio_unitario || '0'),
             descuento: '0',
             subtotal: String(Math.round(Number(item.subtotal || 0))),
           })),
@@ -252,15 +261,15 @@ function ComprasDocumentosCreatePage() {
   const handleItemChange = (index, field, value) => {
     setItems((prev) => {
       const next = [...prev]
-      next[index] = { ...next[index], [field]: value }
+      const normalizedValue = normalizeFieldValue(field, value)
+      next[index] = { ...next[index], [field]: normalizedValue }
 
       if (field === 'producto') {
         const selected = productoById.get(String(value))
         if (selected) {
           next[index].descripcion = selected.nombre || next[index].descripcion
-          if (!Number(next[index].precio_unitario || 0)) {
-            next[index].precio_unitario = String(Math.round(Number(selected.precio_referencia || 0)))
-          }
+          // Para consistencia operacional, al seleccionar producto se propone el precio ERP por defecto.
+          next[index].precio_unitario = toIntegerString(selected.precio_referencia || 0)
           next[index].subtotal = String(calcSubtotal(next[index]))
         }
       }
@@ -378,8 +387,9 @@ function ComprasDocumentosCreatePage() {
                 onChange={(e) => handleFormChange('tipo_documento', e.target.value)}
                 className="rounded-md border border-input bg-background px-3 py-2 text-sm"
               >
-                <option value="GUIA_RECEPCION">Guía de recepción</option>
                 <option value="FACTURA_COMPRA">Factura de compra</option>
+                <option value="BOLETA_COMPRA">Boleta de compra</option>
+                <option value="GUIA_RECEPCION">Guía de recepción</option>
               </select>
             </div>
 
@@ -429,17 +439,6 @@ function ComprasDocumentosCreatePage() {
             </div>
 
             <div className="flex flex-col gap-1">
-              <label className="text-sm font-medium">Serie (opcional)</label>
-              <input
-                type="text"
-                value={form.serie}
-                onChange={(e) => handleFormChange('serie', e.target.value)}
-                placeholder="Ej: A"
-                className="rounded-md border border-input bg-background px-3 py-2 text-sm"
-              />
-            </div>
-
-            <div className="flex flex-col gap-1">
               <label className="text-sm font-medium">Fecha de emisión</label>
               <input
                 type="date"
@@ -467,7 +466,7 @@ function ComprasDocumentosCreatePage() {
             <textarea
               value={form.observaciones}
               onChange={(e) => handleFormChange('observaciones', e.target.value)}
-              rows={2}
+              rows={1}
               className="rounded-md border border-input bg-background px-3 py-2 text-sm"
               placeholder="Observaciones opcionales..."
             />
@@ -516,9 +515,8 @@ function ComprasDocumentosCreatePage() {
                     </td>
                     <td className="px-2 py-1">
                       <input
-                        type="number"
-                        min="0.01"
-                        step="0.01"
+                        type="text"
+                        inputMode="decimal"
                         value={item.cantidad}
                         onChange={(e) => handleItemChange(index, 'cantidad', e.target.value)}
                         className="w-full rounded border border-input bg-background px-2 py-1 text-sm text-right"
@@ -526,9 +524,8 @@ function ComprasDocumentosCreatePage() {
                     </td>
                     <td className="px-2 py-1">
                       <input
-                        type="number"
-                        min="0"
-                        step="1"
+                        type="text"
+                        inputMode="numeric"
                         value={item.precio_unitario}
                         onChange={(e) => handleItemChange(index, 'precio_unitario', e.target.value)}
                         className="w-full rounded border border-input bg-background px-2 py-1 text-sm text-right"
@@ -575,15 +572,15 @@ function ComprasDocumentosCreatePage() {
           <div className="w-full max-w-xs space-y-1 rounded-md border border-border bg-card p-4 text-sm">
             <div className="flex justify-between">
               <span className="text-muted-foreground">Subtotal neto</span>
-              <span>{subtotalNeto.toLocaleString('es-CL')}</span>
+              <span>{formatCurrencyCLP(subtotalNeto)}</span>
             </div>
             <div className="flex justify-between">
               <span className="text-muted-foreground">IVA (19%)</span>
-              <span>{Math.round(subtotalNeto * 0.19).toLocaleString('es-CL')}</span>
+              <span>{formatCurrencyCLP(Math.round(subtotalNeto * 0.19))}</span>
             </div>
             <div className="flex justify-between font-semibold border-t border-border pt-1">
               <span>Total</span>
-              <span>{Math.round(subtotalNeto * 1.19).toLocaleString('es-CL')}</span>
+              <span>{formatCurrencyCLP(Math.round(subtotalNeto * 1.19))}</span>
             </div>
           </div>
         </div>

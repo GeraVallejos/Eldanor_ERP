@@ -62,7 +62,19 @@ function LoginPage() {
         try {
             await dispatch(login(values)).unwrap()
 
-            const nextPath = location.state?.from?.pathname || '/productos'
+            const submittedEmail = String(values.email || '').trim().toLowerCase()
+            const wasManualLogout = sessionStorage.getItem('auth:manualLogout') === '1'
+            const previousLoginEmail = String(sessionStorage.getItem('auth:lastLoginEmail') || '').trim().toLowerCase()
+            sessionStorage.removeItem('auth:manualLogout')
+
+            sessionStorage.setItem('auth:lastLoginEmail', submittedEmail)
+
+            const sameUserAfterAutoExpire = Boolean(previousLoginEmail) && previousLoginEmail === submittedEmail
+
+            const nextPath = wasManualLogout || !sameUserAfterAutoExpire
+                ? '/productos'
+                : location.state?.from?.pathname || '/productos'
+
             navigate(nextPath, { replace: true })
         } catch {
             // El error de autenticación se muestra desde Redux state.

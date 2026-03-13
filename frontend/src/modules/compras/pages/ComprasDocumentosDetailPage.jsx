@@ -16,6 +16,7 @@ import { downloadSimpleTablePdf } from '@/modules/shared/exports/downloadSimpleT
 const TIPO_LABELS = {
   GUIA_RECEPCION: 'Guia de recepcion',
   FACTURA_COMPRA: 'Factura de compra',
+  BOLETA_COMPRA: 'Boleta de compra',
 }
 
 const ESTADO_LABELS = {

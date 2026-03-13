@@ -8,7 +8,7 @@ import DocumentActionsDialog from '@/components/ui/DocumentActionsDialog'
 import ExportMenuButton from '@/components/ui/ExportMenuButton'
 import { buttonVariants } from '@/components/ui/buttonVariants'
 import { formatDateChile, getChileDateSuffix } from '@/lib/dateTimeFormat'
-import { formatCurrencyCLP } from '@/lib/numberFormat'
+import { formatCurrencyCLP, normalizeObjectNumericFields } from '@/lib/numberFormat'
 import TablePagination from '@/components/ui/TablePagination'
 import { useTableSorting } from '@/lib/tableSorting'
 import { cn } from '@/lib/utils'
@@ -251,8 +251,10 @@ function ComprasOrdenesListPage() {
               items: scopedItems.map((item) => ({
                 producto: String(item.producto || ''),
                 descripcion: item.descripcion || '',
-                cantidad: String(item.cantidad || '1'),
-                precio_unitario: String(item.precio_unitario || '0'),
+                ...normalizeObjectNumericFields({
+                  cantidad: item.cantidad || '1',
+                  precio_unitario: item.precio_unitario || '0',
+                }),
                 impuesto: item.impuesto ? String(item.impuesto) : '',
               })),
             },
@@ -437,7 +439,11 @@ function ComprasOrdenesListPage() {
                             to={`/compras/documentos/${ultimoDocAsociado.id}`}
                             className="text-xs text-primary hover:underline"
                           >
-                            {ultimoDocAsociado.tipo_documento === 'FACTURA_COMPRA' ? 'FAC' : 'GUIA'}
+                            {ultimoDocAsociado.tipo_documento === 'FACTURA_COMPRA'
+                              ? 'FAC'
+                              : ultimoDocAsociado.tipo_documento === 'BOLETA_COMPRA'
+                              ? 'BOL'
+                              : 'GUIA'}
                             {' '}
                             {ultimoDocAsociado.serie ? `${ultimoDocAsociado.serie}-` : ''}
                             {ultimoDocAsociado.folio || 'S/F'}

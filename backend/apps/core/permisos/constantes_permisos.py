@@ -7,6 +7,8 @@ class Modulos:
     PRESUPUESTOS = "PRESUPUESTOS"
     PRODUCTOS = "PRODUCTOS"
     CONTACTOS = "CONTACTOS"
+    AUDITORIA = "AUDITORIA"
+    INVENTARIO = "INVENTARIO"
     ADMINISTRACION = "ADMINISTRACION"
     VENTAS = "VENTAS"
     FACTURACION = "FACTURACION"
@@ -45,11 +47,20 @@ PERMISOS_CATALOGO = {
         Acciones.EDITAR,
         Acciones.BORRAR,
     ],
+    Modulos.INVENTARIO: [
+        Acciones.VER,
+        Acciones.CREAR,
+        Acciones.EDITAR,
+        Acciones.BORRAR,
+    ],
     Modulos.CONTACTOS: [
         Acciones.VER,
         Acciones.CREAR,
         Acciones.EDITAR,
         Acciones.BORRAR,
+    ],
+    Modulos.AUDITORIA: [
+        Acciones.VER,
     ],
     Modulos.ADMINISTRACION: [
         Acciones.VER,

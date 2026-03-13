@@ -19,6 +19,7 @@ import { downloadSimpleTablePdf } from '@/modules/shared/exports/downloadSimpleT
 const TIPO_LABELS = {
   GUIA_RECEPCION: 'Guía de recepción',
   FACTURA_COMPRA: 'Factura de compra',
+  BOLETA_COMPRA: 'Boleta de compra',
 }
 
 const ESTADO_LABELS = {
@@ -361,6 +362,7 @@ function ComprasDocumentosListPage() {
           >
             <option value="ALL">Todos</option>
             <option value="FACTURA_COMPRA">Solo facturas</option>
+            <option value="BOLETA_COMPRA">Solo boletas</option>
             <option value="GUIA_RECEPCION">Solo guías</option>
           </select>
         </label>
@@ -452,7 +454,7 @@ function ComprasDocumentosListPage() {
                                 className="text-xs"
                                 disabled={isBusy}
                                 onClick={() => {
-                                  if (doc.tipo_documento === 'FACTURA_COMPRA') {
+                                  if (doc.tipo_documento === 'FACTURA_COMPRA' || doc.tipo_documento === 'BOLETA_COMPRA') {
                                     openFacturaConfirmDialog(doc)
                                     return
                                   }
@@ -567,9 +569,11 @@ function ComprasDocumentosListPage() {
       {facturaConfirmDoc ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
           <div className="w-full max-w-lg rounded-lg bg-background p-6 shadow-xl space-y-4">
-            <h3 className="text-lg font-semibold">Confirmar factura de compra</h3>
+            <h3 className="text-lg font-semibold">
+              Confirmar {facturaConfirmDoc.tipo_documento === 'BOLETA_COMPRA' ? 'boleta' : 'factura'} de compra
+            </h3>
             <p className="text-sm text-muted-foreground">
-              Define como impactara inventario la factura {facturaConfirmDoc.folio || '-'}. Si ya hubo ingreso fisico por GD/recepcion,
+              Define como impactara inventario el documento {facturaConfirmDoc.folio || '-'}. Si ya hubo ingreso fisico por GD/recepcion,
               el sistema solo movera pendiente para evitar duplicados.
             </p>
 
@@ -616,7 +620,7 @@ function ComprasDocumentosListPage() {
                   closeFacturaConfirmDialog()
                 }}
               >
-                {updatingId === facturaConfirmDoc.id ? 'Procesando...' : 'Confirmar factura'}
+                {updatingId === facturaConfirmDoc.id ? 'Procesando...' : 'Confirmar documento'}
               </Button>
             </div>
           </div>

@@ -3,6 +3,9 @@ from decimal import Decimal, InvalidOperation
 from apps.contactos.models import Cliente, Contacto, Proveedor
 from apps.contactos.models.contacto import TipoContacto
 from apps.core.exceptions import AuthorizationError, BusinessRuleError
+from apps.auditoria.models import AuditSeverity
+from apps.auditoria.services import AuditoriaService
+from apps.core.permisos.constantes_permisos import Acciones, Modulos
 from apps.core.roles import RolUsuario
 from apps.core.services.csv_import import parse_csv_upload
 from apps.core.services.xlsx_template import build_xlsx_template
@@ -95,6 +98,35 @@ def _ensure_admin_user(user, empresa):
             "Solo el administrador de la empresa puede ejecutar carga masiva.",
             error_code="BULK_IMPORT_ADMIN_ONLY",
         )
+
+
+def _registrar_auditoria_importacion(*, empresa, user, entity_type, summary, payload):
+    """Registra un resumen de carga masiva para trazabilidad operativa de contactos."""
+    created = int(payload.get("created") or 0)
+    updated = int(payload.get("updated") or 0)
+    errors = int(payload.get("errors") or 0)
+    total_rows = int(payload.get("total_rows") or 0)
+    successful_rows = int(payload.get("successful_rows") or 0)
+
+    AuditoriaService.registrar_evento(
+        empresa=empresa,
+        usuario=user,
+        module_code=Modulos.CONTACTOS,
+        action_code=Acciones.CREAR,
+        event_type="CONTACTOS_BULK_IMPORT",
+        entity_type=entity_type,
+        summary=summary,
+        severity=AuditSeverity.INFO,
+        changes={
+            "registros_creados": [0, created],
+            "registros_actualizados": [0, updated],
+            "filas_con_error": [0, errors],
+            "filas_totales": [0, total_rows],
+            "filas_exitosas": [0, successful_rows],
+        },
+        payload=payload,
+        source="contactos.bulk_import_service",
+    )
 
 
 def _find_or_create_contacto(row, *, empresa, user):
@@ -195,13 +227,29 @@ def import_clientes(*, uploaded_file, user, empresa):
                 }
             )
 
-    return {
+    result = {
         "created": created,
         "updated": updated,
         "errors": errors,
         "total_rows": len(rows),
         "successful_rows": created + updated,
     }
+
+    _registrar_auditoria_importacion(
+        empresa=empresa,
+        user=user,
+        entity_type="CLIENTE",
+        summary="Carga masiva de clientes ejecutada.",
+        payload={
+            "created": created,
+            "updated": updated,
+            "errors": len(errors),
+            "total_rows": len(rows),
+            "successful_rows": created + updated,
+        },
+    )
+
+    return result
 
 
 def import_proveedores(*, uploaded_file, user, empresa):
@@ -249,13 +297,29 @@ def import_proveedores(*, uploaded_file, user, empresa):
                 }
             )
 
-    return {
+    result = {
         "created": created,
         "updated": updated,
         "errors": errors,
         "total_rows": len(rows),
         "successful_rows": created + updated,
     }
+
+    _registrar_auditoria_importacion(
+        empresa=empresa,
+        user=user,
+        entity_type="PROVEEDOR",
+        summary="Carga masiva de proveedores ejecutada.",
+        payload={
+            "created": created,
+            "updated": updated,
+            "errors": len(errors),
+            "total_rows": len(rows),
+            "successful_rows": created + updated,
+        },
+    )
+
+    return result
 
 
 def build_clientes_bulk_template(*, user, empresa):

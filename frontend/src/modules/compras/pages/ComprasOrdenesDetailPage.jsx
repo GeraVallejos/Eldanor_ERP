@@ -341,7 +341,13 @@ function ComprasOrdenesDetailPage() {
                 to={`/compras/documentos/${doc.id}`}
                 className="inline-flex items-center gap-2 text-sm text-primary hover:underline"
               >
-                <span>{doc.tipo_documento === 'FACTURA_COMPRA' ? 'Factura' : 'Guía'}</span>
+                <span>
+                  {doc.tipo_documento === 'FACTURA_COMPRA'
+                    ? 'Factura'
+                    : doc.tipo_documento === 'BOLETA_COMPRA'
+                    ? 'Boleta'
+                    : 'Guía'}
+                </span>
                 <span>
                   {doc.serie ? `${doc.serie}-` : ''}
                   {doc.folio || 'S/F'}

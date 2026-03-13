@@ -25,6 +25,8 @@ from apps.compras.models import (
     RecepcionCompra,
     RecepcionCompraItem,
 )
+from apps.auditoria.models import AuditSeverity
+from apps.auditoria.services import AuditoriaService
 from apps.compras.services import DocumentoCompraService, OrdenCompraService, RecepcionCompraService
 from apps.core.exceptions import AuthorizationError, ConflictError
 from apps.core.mixins import TenantViewSetMixin
@@ -38,7 +40,68 @@ def _as_bool(value):
     return str(value).strip().lower() in {"1", "true", "t", "yes", "y", "si", "sí"}
 
 
-class OrdenCompraViewSet(TenantViewSetMixin, ModelViewSet):
+class ComprasAuditoriaMixin:
+    """Registra eventos de auditoria para operaciones CRUD del modulo Compras."""
+
+    @staticmethod
+    def _build_auditoria_meta(instance):
+        return {
+            "source": "compras.api.views",
+            "entity_model": instance.__class__.__name__,
+            "entity_pk": str(getattr(instance, "pk", "") or ""),
+        }
+
+    @staticmethod
+    def _choice_display(instance, field_name):
+        getter = getattr(instance, f"get_{field_name}_display", None)
+        if callable(getter):
+            return getter()
+        return None
+
+    def _build_auditoria_payload(self, instance):
+        payload = {
+            "model": instance.__class__.__name__,
+            "empresa_id": str(getattr(instance, "empresa_id", "") or ""),
+        }
+
+        if hasattr(instance, "numero") and getattr(instance, "numero", None) is not None:
+            payload["numero"] = str(instance.numero)
+        if hasattr(instance, "folio") and getattr(instance, "folio", None):
+            payload["folio"] = str(instance.folio)
+        if hasattr(instance, "serie") and getattr(instance, "serie", None):
+            payload["serie"] = str(instance.serie)
+        if hasattr(instance, "tipo_documento") and getattr(instance, "tipo_documento", None):
+            payload["tipo_documento"] = str(instance.tipo_documento)
+            tipo_label = self._choice_display(instance, "tipo_documento")
+            if tipo_label:
+                payload["tipo_documento_label"] = tipo_label
+        if hasattr(instance, "estado") and getattr(instance, "estado", None):
+            payload["estado"] = str(instance.estado)
+            estado_label = self._choice_display(instance, "estado")
+            if estado_label:
+                payload["estado_label"] = estado_label
+
+        return payload
+
+    def _registrar_auditoria_compras(self, *, instance, action_code, event_type, summary, severity=AuditSeverity.INFO, changes=None):
+        AuditoriaService.registrar_evento(
+            empresa=instance.empresa,
+            usuario=self.request.user,
+            module_code=Modulos.COMPRAS,
+            action_code=action_code,
+            event_type=event_type,
+            entity_type=instance.__class__.__name__.upper(),
+            entity_id=str(instance.pk or ""),
+            summary=summary,
+            severity=severity,
+            changes=changes or {},
+            payload=self._build_auditoria_payload(instance),
+            meta=self._build_auditoria_meta(instance),
+            source="compras.api.views",
+        )
+
+
+class OrdenCompraViewSet(ComprasAuditoriaMixin, TenantViewSetMixin, ModelViewSet):
     model = OrdenCompra
     serializer_class = OrdenCompraSerializer
     permission_classes = [IsAuthenticated, TieneRelacionActiva, TienePermisoModuloAccion]
@@ -73,6 +136,12 @@ class OrdenCompraViewSet(TenantViewSetMixin, ModelViewSet):
         self._set_tenant_context()
         OrdenCompraService.validar_orden_editable(orden=self.get_object())
         serializer.save()
+        self._registrar_auditoria_compras(
+            instance=serializer.instance,
+            action_code=Acciones.EDITAR,
+            event_type="OC_ACTUALIZADA",
+            summary=f"Orden de compra #{serializer.instance.numero} actualizada.",
+        )
 
     def perform_create(self, serializer):
         """Asigna numero secuencial y reintenta si encuentra uno ya ocupado."""
@@ -89,6 +158,12 @@ class OrdenCompraViewSet(TenantViewSetMixin, ModelViewSet):
                     creado_por=self.request.user,
                     estado="BORRADOR",
                 )
+                self._registrar_auditoria_compras(
+                    instance=serializer.instance,
+                    action_code=Acciones.CREAR,
+                    event_type="OC_CREADA",
+                    summary=f"Orden de compra #{serializer.instance.numero} creada.",
+                )
                 return
             except (IntegrityError, DjangoValidationError, DRFValidationError) as exc:
                 if self._is_numero_oc_unique_error(exc):
@@ -97,6 +172,28 @@ class OrdenCompraViewSet(TenantViewSetMixin, ModelViewSet):
 
         raise ConflictError(
             "No fue posible asignar un numero de orden disponible. Intente nuevamente."
+        )
+
+    def perform_destroy(self, instance):
+        summary = f"Orden de compra #{instance.numero} eliminada."
+        pk = instance.pk
+        empresa = instance.empresa
+        payload = self._build_auditoria_payload(instance)
+        meta = self._build_auditoria_meta(instance)
+        instance.delete()
+        AuditoriaService.registrar_evento(
+            empresa=empresa,
+            usuario=self.request.user,
+            module_code=Modulos.COMPRAS,
+            action_code=Acciones.BORRAR,
+            event_type="OC_ELIMINADA",
+            entity_type="ORDENCOMPRA",
+            entity_id=str(pk),
+            summary=summary,
+            severity=AuditSeverity.WARNING,
+            payload=payload,
+            meta=meta,
+            source="compras.api.views",
         )
 
     @action(detail=False, methods=["get"])
@@ -191,7 +288,7 @@ class OrdenCompraItemViewSet(TenantViewSetMixin, ModelViewSet):
         OrdenCompraService.recalcular_totales(orden=orden)
 
 
-class DocumentoCompraProveedorViewSet(TenantViewSetMixin, ModelViewSet):
+class DocumentoCompraProveedorViewSet(ComprasAuditoriaMixin, TenantViewSetMixin, ModelViewSet):
     model = DocumentoCompraProveedor
     serializer_class = DocumentoCompraProveedorSerializer
     permission_classes = [IsAuthenticated, TieneRelacionActiva, TienePermisoModuloAccion]
@@ -214,17 +311,47 @@ class DocumentoCompraProveedorViewSet(TenantViewSetMixin, ModelViewSet):
         self._set_tenant_context()
         DocumentoCompraService.validar_documento_editable(documento=self.get_object())
         serializer.save()
+        self._registrar_auditoria_compras(
+            instance=serializer.instance,
+            action_code=Acciones.EDITAR,
+            event_type="DOCUMENTO_COMPRA_ACTUALIZADO",
+            summary="Documento de compra actualizado.",
+        )
 
     def perform_create(self, serializer):
         self._set_tenant_context()
         instance = serializer.save(estado=EstadoDocumentoCompra.BORRADOR)
         DocumentoCompraService.avanzar_orden_si_borrador(documento=instance)
         DocumentoCompraService.recalcular_totales(documento=instance)
+        self._registrar_auditoria_compras(
+            instance=instance,
+            action_code=Acciones.CREAR,
+            event_type="DOCUMENTO_COMPRA_CREADO",
+            summary="Documento de compra creado.",
+        )
 
     def perform_destroy(self, instance):
         self._set_tenant_context()
         DocumentoCompraService.validar_documento_editable(documento=instance)
+        pk = instance.pk
+        empresa = instance.empresa
+        payload = self._build_auditoria_payload(instance)
+        meta = self._build_auditoria_meta(instance)
         instance.delete()
+        AuditoriaService.registrar_evento(
+            empresa=empresa,
+            usuario=self.request.user,
+            module_code=Modulos.COMPRAS,
+            action_code=Acciones.BORRAR,
+            event_type="DOCUMENTO_COMPRA_ELIMINADO",
+            entity_type="DOCUMENTOCOMPRAPROVEEDOR",
+            entity_id=str(pk),
+            summary="Documento de compra eliminado.",
+            severity=AuditSeverity.WARNING,
+            payload=payload,
+            meta=meta,
+            source="compras.api.views",
+        )
 
     @action(detail=True, methods=["post"])
     def confirmar_guia(self, request, pk=None):
@@ -343,7 +470,7 @@ class DocumentoCompraProveedorItemViewSet(TenantViewSetMixin, ModelViewSet):
         DocumentoCompraService.recalcular_totales(documento=documento)
 
 
-class RecepcionCompraViewSet(TenantViewSetMixin, ModelViewSet):
+class RecepcionCompraViewSet(ComprasAuditoriaMixin, TenantViewSetMixin, ModelViewSet):
     model = RecepcionCompra
     serializer_class = RecepcionCompraSerializer
     permission_classes = [IsAuthenticated, TieneRelacionActiva, TienePermisoModuloAccion]
@@ -361,6 +488,44 @@ class RecepcionCompraViewSet(TenantViewSetMixin, ModelViewSet):
     def perform_create(self, serializer):
         self._set_tenant_context()
         serializer.save(estado=EstadoRecepcion.BORRADOR)
+        self._registrar_auditoria_compras(
+            instance=serializer.instance,
+            action_code=Acciones.CREAR,
+            event_type="RECEPCION_CREADA",
+            summary="Recepcion de compra creada.",
+        )
+
+    def perform_update(self, serializer):
+        self._set_tenant_context()
+        serializer.save()
+        self._registrar_auditoria_compras(
+            instance=serializer.instance,
+            action_code=Acciones.EDITAR,
+            event_type="RECEPCION_ACTUALIZADA",
+            summary="Recepcion de compra actualizada.",
+        )
+
+    def perform_destroy(self, instance):
+        self._set_tenant_context()
+        pk = instance.pk
+        empresa = instance.empresa
+        payload = self._build_auditoria_payload(instance)
+        meta = self._build_auditoria_meta(instance)
+        instance.delete()
+        AuditoriaService.registrar_evento(
+            empresa=empresa,
+            usuario=self.request.user,
+            module_code=Modulos.COMPRAS,
+            action_code=Acciones.BORRAR,
+            event_type="RECEPCION_ELIMINADA",
+            entity_type="RECEPCIONCOMPRA",
+            entity_id=str(pk),
+            summary="Recepcion de compra eliminada.",
+            severity=AuditSeverity.WARNING,
+            payload=payload,
+            meta=meta,
+            source="compras.api.views",
+        )
 
     @action(detail=True, methods=["post"])
     def confirmar(self, request, pk=None):
