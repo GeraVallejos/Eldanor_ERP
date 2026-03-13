@@ -4,7 +4,7 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from django.test import RequestFactory
 from apps.presupuestos.services.presupuesto_service import PresupuestoService
 from apps.productos.models import Producto
-from apps.presupuestos.models import PresupuestoItem, EstadoPresupuesto
+from apps.presupuestos.models import Presupuesto, PresupuestoItem, EstadoPresupuesto
 from apps.core.models import UserEmpresa
 from apps.contactos.models.cliente import Cliente
 from apps.contactos.models.contacto import Contacto
@@ -254,3 +254,22 @@ class TestPresupuestoService:
 
         producto.refresh_from_db()
         assert producto.stock_actual == Decimal("10.00")
+
+    def test_eliminar_presupuesto_aplica_baja_logica(self, usuario_admin, empresa, cliente):
+        set_current_empresa(empresa)
+        set_current_user(usuario_admin)
+
+        presupuesto = PresupuestoService.crear_presupuesto(
+            data={"cliente": cliente, "fecha": "2026-01-01"},
+            empresa=empresa,
+            usuario=usuario_admin,
+        )
+
+        PresupuestoService.eliminar_presupuesto(
+            presupuesto_id=presupuesto.id,
+            empresa=empresa,
+            usuario=usuario_admin,
+        )
+
+        presupuesto_refrescado = Presupuesto.all_objects.get(id=presupuesto.id)
+        assert presupuesto_refrescado.estado == EstadoPresupuesto.ANULADO

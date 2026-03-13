@@ -32,6 +32,45 @@ def owner_usuario(db, empresa):
 
 @pytest.mark.django_db
 class TestInventarioApi:
+    def test_resumen_incluye_reservado_y_disponible(self, api_client, owner_usuario, empresa):
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
+
+        producto = Producto.objects.create(
+            empresa=empresa,
+            nombre="Producto Resumen Reserva",
+            sku="PRR-0001",
+            stock_actual=Decimal("0.00"),
+            maneja_inventario=True,
+            precio_referencia=Decimal("1800"),
+        )
+
+        InventarioService.registrar_movimiento(
+            producto_id=producto.id,
+            tipo="ENTRADA",
+            cantidad=Decimal("5.00"),
+            referencia="RESERVA-RESUMEN",
+            empresa=empresa,
+            usuario=owner_usuario,
+        )
+        InventarioService.reservar_stock(
+            producto_id=producto.id,
+            cantidad=Decimal("2.00"),
+            documento_tipo=TipoDocumentoReferencia.PRESUPUESTO,
+            documento_id="44444444-4444-4444-4444-444444444444",
+            empresa=empresa,
+            usuario=owner_usuario,
+        )
+
+        resp = api_client.get(reverse("stock-producto-resumen"), {"group_by": "producto"})
+
+        assert resp.status_code == status.HTTP_200_OK
+        assert Decimal(str(resp.data["totales"]["reservado_total"])) == Decimal("2")
+        assert Decimal(str(resp.data["totales"]["disponible_total"])) == Decimal("3")
+
+        row = next(item for item in resp.data["detalle"] if str(item["producto_id"]) == str(producto.id))
+        assert Decimal(str(row["reservado_total"])) == Decimal("2")
+        assert Decimal(str(row["disponible_total"])) == Decimal("3")
+
     def test_resumen_excluye_productos_inactivos(self, api_client, owner_usuario, empresa):
         api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
 

@@ -1,5 +1,4 @@
 from django.db import transaction
-from django.db.models import F
 from apps.core.models import SecuenciaDocumento
 
 
@@ -7,6 +6,7 @@ class SecuenciaService:
 
     @staticmethod
     def obtener_numero_siguiente_disponible(empresa, tipo_documento):
+        """Calcula el siguiente folio sin persistir el incremento."""
 
         secuencia, _ = (
             SecuenciaDocumento.all_objects
@@ -31,6 +31,7 @@ class SecuenciaService:
     @staticmethod
     @transaction.atomic
     def obtener_siguiente_numero(empresa, tipo_documento):
+        """Reserva y retorna el siguiente folio de forma atomica."""
 
         secuencia, _ = (
             SecuenciaDocumento.all_objects

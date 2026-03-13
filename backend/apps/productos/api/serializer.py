@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from apps.productos.models import Producto, Categoria, Impuesto
+from apps.productos.models import Categoria, Impuesto, ListaPrecio, ListaPrecioItem, Producto
 
 
 class ProductoSerializer(serializers.ModelSerializer):
@@ -25,6 +25,32 @@ class CategoriaSerializer(serializers.ModelSerializer):
 class ImpuestoSerializer(serializers.ModelSerializer):
     class Meta:
         model = Impuesto
+        fields = "__all__"
+        read_only_fields = (
+            "id",
+            "empresa",
+            "creado_en",
+            "actualizado_en",
+            "creado_por",
+        )
+
+
+class ListaPrecioSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ListaPrecio
+        fields = "__all__"
+        read_only_fields = (
+            "id",
+            "empresa",
+            "creado_en",
+            "actualizado_en",
+            "creado_por",
+        )
+
+
+class ListaPrecioItemSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ListaPrecioItem
         fields = "__all__"
         read_only_fields = (
             "id",

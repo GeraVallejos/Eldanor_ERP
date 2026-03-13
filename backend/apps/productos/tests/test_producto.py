@@ -2,6 +2,7 @@ import pytest
 from decimal import Decimal
 from django.core.exceptions import ValidationError
 from apps.productos.models import Producto, Categoria, TipoProducto
+from apps.core.models import Moneda
 from apps.core.tenant import set_current_empresa
 
 @pytest.mark.django_db
@@ -18,6 +19,7 @@ class TestProducto:
         )
         assert prod.sku == "M-001"
         assert prod.maneja_inventario is True
+        assert prod.moneda.codigo == "CLP"
 
     def test_regla_negocio_servicio(self, empresa):
         """Un servicio no debe manejar inventario ni tener stock aunque se le asigne"""
@@ -69,3 +71,20 @@ class TestProducto:
         with pytest.raises(ValidationError) as excinfo:
             prod.full_clean()
         assert "stock no puede ser negativo" in str(excinfo.value)
+
+    def test_producto_entero_no_acepta_stock_fraccionado(self, empresa):
+        set_current_empresa(empresa)
+        prod = Producto(
+            nombre="Producto Entero",
+            sku="ENT-1",
+            empresa=empresa,
+            stock_actual=Decimal("1.50"),
+            maneja_inventario=True,
+            permite_decimales=False,
+            precio_referencia=Decimal("1000"),
+        )
+
+        with pytest.raises(ValidationError) as excinfo:
+            prod.full_clean()
+
+        assert "stock_actual" in str(excinfo.value)

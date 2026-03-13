@@ -5,26 +5,38 @@ from django.utils.module_loading import import_string
 from django.http import HttpResponse
 from io import BytesIO
 from PIL import Image
+from rest_framework.authentication import CSRFCheck
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework import status
+from rest_framework.exceptions import PermissionDenied
+from rest_framework.decorators import action
+from rest_framework.viewsets import ModelViewSet
 from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
 from rest_framework_simplejwt.settings import api_settings
 from apps.core.models import Empresa, UserEmpresa
 from apps.core.api.serializer import (
     AplicarPlantillaSerializer,
+    AplicarPagoSerializer,
     CambiarEmpresaActivaSerializer,
+    ConvertirMontoSerializer,
+    CuentaPorCobrarSerializer,
+    CuentaPorPagarSerializer,
     EmpresaUsuarioSerializer,
     GestionPermisosSerializer,
+    TipoCambioSerializer,
     PlantillaPermisosSerializer,
     UsuarioEmpresaPermisosSerializer,
 )
 from apps.core.api.auth import CustomTokenObtainPairSerializer
 from apps.core.permisos.constantes_permisos import Acciones, Modulos
+from apps.core.mixins import TenantViewSetMixin
+from apps.core.models import CuentaPorCobrar, CuentaPorPagar, TipoCambio
 from apps.core.permisos.plantillaPermisos import PlantillaPermisos
 from apps.core.permisos.permisoModulo import PermisoModulo
+from apps.core.permisos.permissions import TienePermisoModuloAccion, TieneRelacionActiva
 from apps.core.permisos.services import (
     catalogo_permisos,
     permisos_efectivos_relacion,
@@ -32,6 +44,7 @@ from apps.core.permisos.services import (
     sincronizar_plantillas_base,
     validar_codigos_permisos,
 )
+from apps.core.services import CarteraService, TipoCambioService
 
 
 def _auth_cookie_kwargs(max_age):
@@ -81,6 +94,14 @@ def _ensure_csrf_cookie(request, response):
     # Generate and attach csrf cookie so SPA can send X-CSRFToken on unsafe methods.
     get_token(request)
     return response
+
+
+def _enforce_csrf(request):
+    check = CSRFCheck(lambda req: None)
+    check.process_request(request)
+    reason = check.process_view(request, None, (), {})
+    if reason:
+        raise PermissionDenied(f"CSRF Failed: {reason}")
 
 
 def _serialize_user(user, request=None):
@@ -516,13 +537,19 @@ class CustomTokenRefreshView(APIView):
     permission_classes = []
 
     def post(self, request):
-        refresh_token = request.data.get("refresh") or request.COOKIES.get(settings.AUTH_COOKIE_REFRESH_NAME)
+        refresh_in_body = request.data.get("refresh")
+        refresh_in_cookie = request.COOKIES.get(settings.AUTH_COOKIE_REFRESH_NAME)
+        refresh_token = refresh_in_body or refresh_in_cookie
 
         if not refresh_token:
             return Response(
                 {"detail": "Refresh token no proporcionado."},
                 status=status.HTTP_401_UNAUTHORIZED,
             )
+
+        # For browser cookie refresh, enforce CSRF on this unsafe endpoint.
+        if not refresh_in_body and refresh_in_cookie:
+            _enforce_csrf(request)
 
         serializer_class = import_string(api_settings.TOKEN_REFRESH_SERIALIZER)
         serializer = serializer_class(data={"refresh": refresh_token})
@@ -594,3 +621,96 @@ class EmpresaLogoView(APIView):
         response["Content-Disposition"] = 'inline; filename="empresa-logo.png"'
         response["Cache-Control"] = "private, max-age=300"
         return response
+
+
+class TipoCambioViewSet(TenantViewSetMixin, ModelViewSet):
+    model = TipoCambio
+    serializer_class = TipoCambioSerializer
+    permission_classes = [IsAuthenticated, TieneRelacionActiva, TienePermisoModuloAccion]
+    permission_modulo = Modulos.TESORERIA
+    permission_action_map = {
+        "list": Acciones.VER,
+        "retrieve": Acciones.VER,
+        "create": Acciones.CONCILIAR,
+        "update": Acciones.CONCILIAR,
+        "partial_update": Acciones.CONCILIAR,
+        "destroy": Acciones.CONCILIAR,
+        "convertir": Acciones.VER,
+    }
+
+    @action(detail=False, methods=["post"])
+    def convertir(self, request):
+        self._set_tenant_context()
+        serializer = ConvertirMontoSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        data = serializer.validated_data
+        monto = TipoCambioService.convertir_monto(
+            empresa=self.get_empresa(),
+            monto=data["monto"],
+            moneda_origen=data["moneda_origen"],
+            moneda_destino=data["moneda_destino"],
+            fecha=data.get("fecha"),
+            decimales=data.get("decimales", 2),
+        )
+        return Response({"monto_convertido": monto}, status=status.HTTP_200_OK)
+
+
+class CuentaPorCobrarViewSet(TenantViewSetMixin, ModelViewSet):
+    model = CuentaPorCobrar
+    serializer_class = CuentaPorCobrarSerializer
+    permission_classes = [IsAuthenticated, TieneRelacionActiva, TienePermisoModuloAccion]
+    permission_modulo = Modulos.TESORERIA
+    permission_action_map = {
+        "list": Acciones.VER,
+        "retrieve": Acciones.VER,
+        "create": Acciones.COBRAR,
+        "update": Acciones.COBRAR,
+        "partial_update": Acciones.COBRAR,
+        "destroy": Acciones.COBRAR,
+        "aplicar_pago": Acciones.COBRAR,
+    }
+
+    @action(detail=True, methods=["post"])
+    def aplicar_pago(self, request, pk=None):
+        self._set_tenant_context()
+        cuenta = self.get_object()
+        serializer = AplicarPagoSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        cuenta = CarteraService.aplicar_pago_cuenta(
+            cuenta=cuenta,
+            monto=serializer.validated_data["monto"],
+            fecha_pago=serializer.validated_data["fecha_pago"],
+        )
+        return Response(self.get_serializer(cuenta).data, status=status.HTTP_200_OK)
+
+
+class CuentaPorPagarViewSet(TenantViewSetMixin, ModelViewSet):
+    model = CuentaPorPagar
+    serializer_class = CuentaPorPagarSerializer
+    permission_classes = [IsAuthenticated, TieneRelacionActiva, TienePermisoModuloAccion]
+    permission_modulo = Modulos.TESORERIA
+    permission_action_map = {
+        "list": Acciones.VER,
+        "retrieve": Acciones.VER,
+        "create": Acciones.PAGAR,
+        "update": Acciones.PAGAR,
+        "partial_update": Acciones.PAGAR,
+        "destroy": Acciones.PAGAR,
+        "aplicar_pago": Acciones.PAGAR,
+    }
+
+    @action(detail=True, methods=["post"])
+    def aplicar_pago(self, request, pk=None):
+        self._set_tenant_context()
+        cuenta = self.get_object()
+        serializer = AplicarPagoSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        cuenta = CarteraService.aplicar_pago_cuenta(
+            cuenta=cuenta,
+            monto=serializer.validated_data["monto"],
+            fecha_pago=serializer.validated_data["fecha_pago"],
+        )
+        return Response(self.get_serializer(cuenta).data, status=status.HTTP_200_OK)

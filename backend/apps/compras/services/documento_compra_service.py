@@ -17,7 +17,7 @@ from apps.compras.models import (
 )
 from apps.core.exceptions import BusinessRuleError, ConflictError, ResourceNotFoundError
 from apps.core.models import TipoDocumento
-from apps.core.services import SecuenciaService
+from apps.core.services import CarteraService, SecuenciaService
 from apps.documentos.models import TipoDocumentoReferencia
 from apps.inventario.models import MovimientoInventario
 from apps.inventario.models import TipoMovimiento
@@ -324,6 +324,9 @@ class DocumentoCompraService:
 
         documento.estado = EstadoDocumentoCompra.CONFIRMADO
         documento.save(update_fields=["estado"])
+
+        # Vincula impacto financiero para tesoreria/cartera futura.
+        CarteraService.registrar_cxp_desde_documento_compra(documento=documento, usuario=usuario)
         return documento
 
     @staticmethod
@@ -378,7 +381,8 @@ class DocumentoCompraService:
                     )
 
         documento.estado = EstadoDocumentoCompra.ANULADO
-        documento.save(update_fields=["estado"])
+        documento.bloquea_duplicado = False
+        documento.save(update_fields=["estado", "bloquea_duplicado"])
         return documento
 
     @staticmethod

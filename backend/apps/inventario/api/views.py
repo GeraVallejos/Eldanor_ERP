@@ -19,7 +19,7 @@ from apps.inventario.api.serializer import (
     MovimientoInventarioSerializer,
     StockProductoSerializer,
 )
-from apps.inventario.models import Bodega, InventorySnapshot, MovimientoInventario, StockProducto
+from apps.inventario.models import Bodega, InventorySnapshot, MovimientoInventario, ReservaStock, StockProducto
 from apps.inventario.services.inventario_service import InventarioService
 from apps.productos.models import Producto
 
@@ -58,6 +58,7 @@ class StockProductoViewSet(TenantViewSetMixin, ModelViewSet):
     def resumen(self, request):
         queryset = self.get_queryset().filter(producto__activo=True)
         empresa = self.get_empresa()
+        reservas_qs = ReservaStock.all_objects.filter(empresa=empresa, producto__activo=True)
 
         producto_id = request.query_params.get("producto_id")
         bodega_id = request.query_params.get("bodega_id")
@@ -65,11 +66,15 @@ class StockProductoViewSet(TenantViewSetMixin, ModelViewSet):
 
         if producto_id:
             queryset = queryset.filter(producto_id=producto_id)
+            reservas_qs = reservas_qs.filter(producto_id=producto_id)
         if bodega_id:
             queryset = queryset.filter(bodega_id=bodega_id)
+            reservas_qs = reservas_qs.filter(bodega_id=bodega_id)
 
         total_stock = queryset.aggregate(total=Sum("stock"))["total"] or 0
         total_valor = queryset.aggregate(total=Sum("valor_stock"))["total"] or 0
+        total_reservado = reservas_qs.aggregate(total=Sum("cantidad"))["total"] or 0
+        total_disponible = total_stock - total_reservado
 
         if group_by == "producto":
             product_qs = Producto.all_objects.filter(empresa=empresa, activo=True)
@@ -96,6 +101,16 @@ class StockProductoViewSet(TenantViewSetMixin, ModelViewSet):
                 )
                 .order_by("nombre")
             )
+            reservas_por_producto = {
+                str(item["producto_id"]): item["reservado_total"]
+                for item in reservas_qs.values("producto_id").annotate(
+                    reservado_total=Coalesce(
+                        Sum("cantidad"),
+                        Value(0),
+                        output_field=DecimalField(max_digits=12, decimal_places=2),
+                    )
+                )
+            }
 
             detalle = [
                 {
@@ -103,16 +118,35 @@ class StockProductoViewSet(TenantViewSetMixin, ModelViewSet):
                     "producto__nombre": item["nombre"],
                     "producto__categoria__nombre": item.get("categoria__nombre") or "-",
                     "stock_total": item["stock_total"],
+                    "reservado_total": reservas_por_producto.get(str(item["id"]), 0),
+                    "disponible_total": item["stock_total"] - reservas_por_producto.get(str(item["id"]), 0),
                     "valor_total": item["valor_total"],
                 }
                 for item in detalle
             ]
         elif group_by == "bodega":
-            detalle = list(
+            reservas_por_bodega = {
+                str(item["bodega_id"]): item["reservado_total"]
+                for item in reservas_qs.values("bodega_id").annotate(
+                    reservado_total=Coalesce(
+                        Sum("cantidad"),
+                        Value(0),
+                        output_field=DecimalField(max_digits=12, decimal_places=2),
+                    )
+                )
+            }
+            detalle = [
+                {
+                    **item,
+                    "reservado_total": reservas_por_bodega.get(str(item["bodega_id"]), 0),
+                    "disponible_total": item["stock_total"] - reservas_por_bodega.get(str(item["bodega_id"]), 0),
+                }
+                for item in list(
                 queryset.values("bodega_id", "bodega__nombre")
                 .annotate(stock_total=Sum("stock"), valor_total=Sum("valor_stock"))
                 .order_by("bodega__nombre")
-            )
+                )
+            ]
         else:
             detalle = []
 
@@ -120,6 +154,8 @@ class StockProductoViewSet(TenantViewSetMixin, ModelViewSet):
             {
                 "totales": {
                     "stock_total": total_stock,
+                    "reservado_total": total_reservado,
+                    "disponible_total": total_disponible,
                     "valor_total": total_valor,
                 },
                 "group_by": group_by,

@@ -24,6 +24,27 @@ def validate_stock(tipo, maneja_inventario, stock_actual):
         raise ValidationError("El stock no puede ser negativo.")
 
 
+def validate_integer_quantity(value, field_name="cantidad"):
+    """
+    Valida que la cantidad no tenga fracciones cuando el producto no las soporta.
+    """
+    if value is None:
+        return
+
+    decimal_value = Decimal(value)
+    if decimal_value != decimal_value.quantize(Decimal("1")):
+        raise ValidationError(f"El campo {field_name} no admite cantidades fraccionadas.")
+
+
+def validate_traceability_config(*, usa_series, maneja_inventario, usa_vencimiento, usa_lotes):
+    """Valida consistencia de configuracion de trazabilidad de inventario."""
+    if usa_series and not maneja_inventario:
+        raise ValidationError({"usa_series": "Solo se pueden usar series en productos inventariables."})
+
+    if usa_vencimiento and not usa_lotes:
+        raise ValidationError({"usa_vencimiento": "El vencimiento requiere control por lotes."})
+
+
 def normalize_sku(sku):
     """
     Normaliza SKU eliminando espacios y convirtiendo a mayúsculas.

@@ -2,11 +2,12 @@ from decimal import Decimal, InvalidOperation
 import re
 
 from apps.core.exceptions import AuthorizationError, BusinessRuleError
+from apps.core.models import Moneda
 from apps.core.roles import RolUsuario
 from apps.core.services.csv_import import parse_csv_upload
 from apps.core.services.xlsx_template import build_xlsx_template
 from apps.inventario.models import Bodega, StockProducto
-from apps.productos.models import Categoria, Impuesto, Producto, TipoProducto
+from apps.productos.models import Categoria, Impuesto, Producto, TipoProducto, UnidadMedida
 from apps.productos.validators import normalize_sku
 
 
@@ -109,6 +110,28 @@ def _get_or_create_impuesto(*, impuesto_name, impuestos, empresa, user):
     return impuesto
 
 
+def _resolve_moneda(*, raw_value, monedas, empresa):
+    value = _normalize_name(raw_value)
+    if not value:
+        return None
+
+    moneda = monedas.get(value)
+    if moneda:
+        return moneda
+
+    moneda = Moneda.all_objects.filter(empresa=empresa, codigo__iexact=value).first()
+    if moneda:
+        monedas[value] = moneda
+        return moneda
+
+    moneda = Moneda.all_objects.filter(empresa=empresa, nombre__iexact=value).first()
+    if moneda:
+        monedas[value] = moneda
+        return moneda
+
+    raise BusinessRuleError(f"La moneda '{raw_value}' no existe para la empresa activa.")
+
+
 def _sync_stock_producto(*, producto, empresa, user, precio_costo):
     if not producto.maneja_inventario:
         return
@@ -208,6 +231,10 @@ def bulk_import_productos(*, uploaded_file, user, empresa):
         _normalize_name(impuesto.nombre): impuesto
         for impuesto in Impuesto.all_objects.filter(empresa=empresa)
     }
+    monedas = {}
+    for moneda in Moneda.all_objects.filter(empresa=empresa):
+        monedas[_normalize_name(moneda.codigo)] = moneda
+        monedas[_normalize_name(moneda.nombre)] = moneda
 
     created = 0
     updated = 0
@@ -215,6 +242,7 @@ def bulk_import_productos(*, uploaded_file, user, empresa):
 
     for line_number, row in rows:
         try:
+            existing = existing_products.get(normalize_sku(str(row.get("sku") or "").strip()))
             nombre = str(row.get("nombre") or "").strip()
             if not nombre:
                 raise BusinessRuleError("El nombre es obligatorio.")
@@ -248,15 +276,47 @@ def bulk_import_productos(*, uploaded_file, user, empresa):
                     user=user,
                 )
 
+            moneda = existing.moneda if existing else None
+            moneda_raw = row.get("moneda")
+            if str(moneda_raw or "").strip():
+                moneda = _resolve_moneda(
+                    raw_value=moneda_raw,
+                    monedas=monedas,
+                    empresa=empresa,
+                )
+
             precio_referencia = _to_decimal(row.get("precio_referencia"), default=Decimal("0"))
             precio_costo = _to_decimal(row.get("precio_costo"), default=Decimal("0"))
             stock_actual = _to_decimal(row.get("stock_actual"), default=Decimal("0"))
+            stock_minimo = _to_decimal(row.get("stock_minimo"), default=Decimal("0"))
             maneja_inventario = _to_bool(row.get("maneja_inventario"), default=True)
+            permite_decimales = _to_bool(
+                row.get("permite_decimales"),
+                default=getattr(existing, "permite_decimales", True),
+            )
+            usa_lotes = _to_bool(row.get("usa_lotes"), default=False)
+            usa_series = _to_bool(row.get("usa_series"), default=False)
+            usa_vencimiento = _to_bool(row.get("usa_vencimiento"), default=False)
             activo = _to_bool(row.get("activo"), default=True)
+
+            unidad_medida = str(
+                row.get("unidad_medida")
+                or getattr(existing, "unidad_medida", UnidadMedida.UNIDAD)
+            ).strip().upper()
+            if unidad_medida not in {choice for choice, _label in UnidadMedida.choices}:
+                raise BusinessRuleError("Unidad de medida invalida.")
 
             if tipo == TipoProducto.SERVICIO:
                 maneja_inventario = False
                 stock_actual = Decimal("0")
+                stock_minimo = Decimal("0")
+                usa_lotes = False
+                usa_series = False
+                usa_vencimiento = False
+
+            if usa_series:
+                usa_lotes = True
+                permite_decimales = False
 
             payload = {
                 "empresa": empresa,
@@ -267,14 +327,20 @@ def bulk_import_productos(*, uploaded_file, user, empresa):
                 "tipo": tipo,
                 "categoria": categoria,
                 "impuesto": impuesto,
+                "moneda": moneda,
                 "precio_referencia": precio_referencia,
                 "precio_costo": precio_costo,
+                "unidad_medida": unidad_medida,
+                "permite_decimales": permite_decimales,
                 "maneja_inventario": maneja_inventario,
                 "stock_actual": stock_actual,
+                "stock_minimo": stock_minimo,
+                "usa_lotes": usa_lotes,
+                "usa_series": usa_series,
+                "usa_vencimiento": usa_vencimiento,
                 "activo": activo,
             }
 
-            existing = existing_products.get(sku)
             if existing:
                 for key, value in payload.items():
                     setattr(existing, key, value)
@@ -325,10 +391,17 @@ def build_productos_bulk_template(*, user, empresa):
         "descripcion",
         "categoria",
         "impuesto",
+        "moneda",
         "precio_referencia",
         "precio_costo",
+        "unidad_medida",
+        "permite_decimales",
         "maneja_inventario",
         "stock_actual",
+        "stock_minimo",
+        "usa_lotes",
+        "usa_series",
+        "usa_vencimiento",
         "activo",
     ]
 
@@ -339,10 +412,17 @@ def build_productos_bulk_template(*, user, empresa):
         "Incluye maletin y brocas",
         "General",
         "IVA 19",
+        "CLP",
         "49990",
         "32000",
+        "UN",
+        "false",
         "true",
         "12",
+        "4",
+        "false",
+        "false",
+        "false",
         "true",
     ]
 
@@ -351,7 +431,9 @@ def build_productos_bulk_template(*, user, empresa):
         "Columnas obligatorias: nombre, sku.",
         "tipo permitido: PRODUCTO o SERVICIO.",
         "NO usar EMPRESA/PERSONA en esta plantilla.",
-        "maneja_inventario y activo: true/false.",
+        "moneda debe existir previamente en la empresa activa (ej: CLP, USD).",
+        "unidad_medida permitida: UN, KG, GR, LT, MT, M2, M3, CJ.",
+        "permite_decimales, maneja_inventario, usa_lotes, usa_series, usa_vencimiento y activo: true/false.",
         "Si tipo=SERVICIO, stock_actual se fuerza a 0 y maneja_inventario=false.",
         "categoria e impuesto se resolveran por nombre dentro de la empresa activa.",
         "sku identifica un producto existente para actualizarlo; si no existe, se crea.",

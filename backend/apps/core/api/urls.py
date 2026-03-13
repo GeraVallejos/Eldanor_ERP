@@ -1,7 +1,11 @@
+from rest_framework.routers import DefaultRouter
+
 from django.urls import path
 from apps.core.api.views import (
     AplicarPlantillaPermisosView,
     CambiarEmpresaActivaView,
+    CuentaPorCobrarViewSet,
+    CuentaPorPagarViewSet,
     LogoutView,
     MeView,
     CustomTokenRefreshView,
@@ -13,7 +17,14 @@ from apps.core.api.views import (
     MiembrosEmpresaPermisosView,
     GestionPermisosUsuarioEmpresaView,
     EmpresaLogoView,
+    TipoCambioViewSet,
 )
+
+
+router = DefaultRouter()
+router.register(r"tipos-cambio", TipoCambioViewSet, basename="tipo-cambio")
+router.register(r"cuentas-por-cobrar", CuentaPorCobrarViewSet, basename="cuenta-por-cobrar")
+router.register(r"cuentas-por-pagar", CuentaPorPagarViewSet, basename="cuenta-por-pagar")
 
 
 urlpatterns = [
@@ -30,4 +41,4 @@ urlpatterns = [
     path("permisos/plantillas/", PlantillasPermisosView.as_view(), name="permisos-plantillas"),
     path("permisos/plantillas/aplicar/", AplicarPlantillaPermisosView.as_view(), name="permisos-plantillas-aplicar"),
     path("permisos/plantillas/<str:codigo>/", PlantillaPermisosDetalleView.as_view(), name="permisos-plantillas-detalle"),
-]
+] + router.urls

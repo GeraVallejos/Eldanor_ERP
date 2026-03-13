@@ -8,6 +8,10 @@ class TipoDocumento(models.TextChoices):
     GUIA = "GUIA", "Guía"
     ORDEN_COMPRA = "ORDEN_COMPRA", "Orden de Compra"
     DOCUMENTO_COMPRA = "DOCUMENTO_COMPRA", "Documento de Compra"
+    PEDIDO_VENTA = "PEDIDO_VENTA", "Pedido de Venta"
+    FACTURA_VENTA = "FACTURA_VENTA", "Factura de Venta"
+    GUIA_DESPACHO = "GUIA_DESPACHO", "Guía de Despacho"
+    NOTA_CREDITO_VENTA = "NOTA_CREDITO_VENTA", "Nota de Crédito Venta"
 
 class SecuenciaDocumento(BaseModel):
 

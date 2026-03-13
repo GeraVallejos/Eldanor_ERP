@@ -43,6 +43,12 @@ class MovimientoInventario(DocumentoReferenciaMixin, BaseModel):
 
     valor_total = models.DecimalField(max_digits=14, decimal_places=2)
 
+    lote_codigo = models.CharField(max_length=80, blank=True)
+
+    fecha_vencimiento = models.DateField(null=True, blank=True)
+
+    series_codigos = models.JSONField(default=list, blank=True)
+
     documento_tipo = models.CharField(
         max_length=50,
         choices=TipoDocumentoReferencia.choices,
@@ -57,6 +63,7 @@ class MovimientoInventario(DocumentoReferenciaMixin, BaseModel):
         indexes = [
             models.Index(fields=["empresa", "producto"]),
             models.Index(fields=["empresa", "producto", "bodega"]),
+            models.Index(fields=["empresa", "lote_codigo"]),
             models.Index(fields=["empresa", "documento_tipo"]),
             models.Index(fields=["empresa", "creado_en"])
         ]

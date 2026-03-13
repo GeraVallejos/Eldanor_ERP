@@ -1,5 +1,4 @@
 from django.db import models
-from django.db.models import Q
 from django.conf import settings
 
 from apps.contactos.models import Proveedor
@@ -39,6 +38,14 @@ class DocumentoCompraProveedor(BaseModel):
     subtotal_neto = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     impuestos = models.DecimalField(max_digits=14, decimal_places=2, default=0)
     total = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+
+    moneda = models.ForeignKey(
+        "core.Moneda",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="documentos_compra",
+    )
 
     estado = models.CharField(
         max_length=20,
@@ -87,17 +94,24 @@ class DocumentoCompraProveedor(BaseModel):
 
     corregido_en = models.DateTimeField(null=True, blank=True)
 
+    # Flag técnico para unicidad compatible con MySQL (sin constraints condicionales).
+    bloquea_duplicado = models.BooleanField(default=True, editable=False)
+
     class Meta:
         constraints = [
             models.UniqueConstraint(
                 fields=["empresa", "uuid_externo"],
-                condition=Q(uuid_externo__isnull=False),
                 name="unique_uuid_externo_por_empresa",
+            ),
+            models.UniqueConstraint(
+                fields=["empresa", "proveedor", "tipo_documento", "folio", "serie", "bloquea_duplicado"],
+                name="uniq_doc_compra_emp_prov_tipo_folio_serie_activo",
             ),
         ]
         indexes = [
             models.Index(fields=["empresa", "proveedor"]),
             models.Index(fields=["empresa", "tipo_documento", "estado"]),
+            models.Index(fields=["empresa", "moneda"]),
             models.Index(fields=["empresa", "documento_origen"]),
         ]
 

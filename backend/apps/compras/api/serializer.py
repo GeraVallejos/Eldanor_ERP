@@ -53,12 +53,34 @@ class DocumentoCompraProveedorSerializer(serializers.ModelSerializer):
                 {"orden_compra": "La orden de compra seleccionada no pertenece al proveedor indicado."}
             )
 
+        tipo_documento = attrs.get("tipo_documento") or getattr(self.instance, "tipo_documento", None)
+        folio = attrs.get("folio") or getattr(self.instance, "folio", None)
+        serie = attrs.get("serie") if "serie" in attrs else getattr(self.instance, "serie", "")
+
+        if empresa and proveedor and tipo_documento and folio is not None:
+            duplicado = DocumentoCompraProveedor.all_objects.filter(
+                empresa=empresa,
+                proveedor=proveedor,
+                tipo_documento=tipo_documento,
+                folio=folio,
+                serie=serie or "",
+                bloquea_duplicado=True,
+            )
+            if self.instance:
+                duplicado = duplicado.exclude(pk=self.instance.pk)
+
+            if duplicado.exists():
+                raise serializers.ValidationError(
+                    {"folio": "Ya existe un documento con este folio/serie para el proveedor y tipo indicado."}
+                )
+
         return attrs
 
     class Meta:
         model = DocumentoCompraProveedor
         fields = "__all__"
         read_only_fields = ("id", "empresa", "creado_por", "creado_en", "actualizado_en", "estado")
+        validators = []
 
 
 class DocumentoCompraProveedorItemSerializer(serializers.ModelSerializer):

@@ -24,3 +24,9 @@ For app exceptions with text detail, API responses should include:
 - optional `meta`
 
 Field-level validation payloads (dict/list) should remain unchanged to preserve form UX.
+
+## Documentacion Tecnica En Servicios
+
+- Todo metodo nuevo en `apps/**/services/*.py` debe incluir docstring breve en espanol tecnico.
+- Si un flujo tiene reglas no obvias (idempotencia, concurrencia, lock, tolerancias), agregar un comentario corto en espanol antes del bloque.
+- Evitar comentarios redundantes; documentar solo decisiones de negocio o arquitectura.

@@ -791,3 +791,22 @@ class TestComprasApi:
 
         orden_actualizada = OrdenCompra.all_objects.get(id=orden_id)
         assert orden_actualizada.estado == "RECIBIDA"
+
+    def test_no_permite_documento_duplicado_por_proveedor_tipo_folio_serie(self, api_client, owner_usuario, proveedor):
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
+
+        payload = {
+            "tipo_documento": "FACTURA_COMPRA",
+            "proveedor": str(proveedor.id),
+            "folio": "FAC-DUP-001",
+            "serie": "A1",
+            "fecha_emision": str(date.today()),
+            "fecha_recepcion": str(date.today()),
+        }
+
+        first = api_client.post(reverse("documento-compra-list"), payload, format="json")
+        assert first.status_code == status.HTTP_201_CREATED, first.data
+
+        second = api_client.post(reverse("documento-compra-list"), payload, format="json")
+        assert second.status_code == status.HTTP_400_BAD_REQUEST
+        assert "folio" in second.data

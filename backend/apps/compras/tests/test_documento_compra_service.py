@@ -7,7 +7,7 @@ from apps.compras.models import DocumentoCompraProveedor, DocumentoCompraProveed
 from apps.compras.services import DocumentoCompraService
 from apps.contactos.models import Contacto, Proveedor
 from apps.core.exceptions import BusinessRuleError, ConflictError, ResourceNotFoundError
-from apps.core.models import UserEmpresa
+from apps.core.models import CuentaPorPagar, UserEmpresa
 from apps.inventario.models import MovimientoInventario
 from apps.inventario.models import StockProducto
 from apps.inventario.services.inventario_service import InventarioService
@@ -226,6 +226,7 @@ class TestDocumentoCompraService:
         ).exists()
         producto_factura.refresh_from_db()
         assert producto_factura.stock_actual == Decimal("1")
+        assert CuentaPorPagar.all_objects.filter(empresa=empresa, documento_compra=factura).exists()
 
     def test_anular_factura_confirmada_genera_movimiento_compensatorio(self, empresa, owner_usuario, proveedor):
         factura = DocumentoCompraProveedor.objects.create(

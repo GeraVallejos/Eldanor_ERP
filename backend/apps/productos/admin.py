@@ -31,10 +31,19 @@ class ProductoAdmin(BulkImportAdminMixin, TenantAdminMixin, admin.ModelAdmin):
             'fields': ('empresa', 'nombre', 'sku', 'tipo', 'categoria', 'activo')
         }),
         ('Precios e Impuestos', {
-            'fields': ('precio_referencia', 'precio_costo', 'impuesto')
+            'fields': ('moneda', 'precio_referencia', 'precio_costo', 'impuesto')
         }),
         ('Inventario', {
-            'fields': ('maneja_inventario', 'stock_actual')
+            'fields': (
+                'unidad_medida',
+                'permite_decimales',
+                'maneja_inventario',
+                'stock_actual',
+                'stock_minimo',
+                'usa_lotes',
+                'usa_series',
+                'usa_vencimiento',
+            )
         }),
     )
 

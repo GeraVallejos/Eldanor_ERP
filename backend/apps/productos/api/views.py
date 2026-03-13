@@ -1,4 +1,5 @@
 from decimal import Decimal
+from datetime import date
 
 from django.db.models.deletion import ProtectedError
 from rest_framework.viewsets import ModelViewSet
@@ -6,8 +7,14 @@ from rest_framework.viewsets import ModelViewSet
 from apps.core.exceptions import ConflictError
 from apps.inventario.models import Bodega, StockProducto
 from apps.core.roles import RolUsuario
-from apps.productos.models import Producto, Categoria, Impuesto
-from apps.productos.api.serializer import ImpuestoSerializer, ProductoSerializer, CategoriaSerializer
+from apps.productos.models import Categoria, Impuesto, ListaPrecio, ListaPrecioItem, Producto
+from apps.productos.api.serializer import (
+    CategoriaSerializer,
+    ImpuestoSerializer,
+    ListaPrecioItemSerializer,
+    ListaPrecioSerializer,
+    ProductoSerializer,
+)
 from apps.core.mixins import TenantViewSetMixin
 from apps.core.permisos.permissions import TieneRelacionActiva, TienePermisoModuloAccion
 from apps.core.permisos.constantes_permisos import Modulos, Acciones
@@ -16,8 +23,10 @@ from rest_framework.decorators import action
 from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.response import Response
 from django.http import HttpResponse
+from django.utils.dateparse import parse_date
 
 from apps.productos.services.bulk_import_service import bulk_import_productos, build_productos_bulk_template
+from apps.productos.services.precio_service import PrecioComercialService
 
 
 
@@ -141,6 +150,47 @@ class ProductoViewSet(TenantViewSetMixin, ModelViewSet ):
         response["Content-Disposition"] = 'attachment; filename="plantilla_productos.xlsx"'
         return response
 
+    @action(detail=True, methods=["get"], url_path="precio")
+    def precio(self, request, pk=None):
+        self._set_tenant_context()
+        producto = self.get_object()
+
+        cliente = None
+        cliente_id = request.query_params.get("cliente_id")
+        if cliente_id:
+            from apps.contactos.models import Cliente
+
+            cliente = Cliente.all_objects.filter(empresa=self.get_empresa(), id=cliente_id).first()
+
+        moneda_destino = None
+        moneda_codigo = request.query_params.get("moneda")
+        if moneda_codigo:
+            from apps.core.models import Moneda
+
+            moneda_destino = Moneda.all_objects.filter(
+                empresa=self.get_empresa(),
+                codigo=str(moneda_codigo).strip().upper(),
+            ).first()
+
+        fecha = parse_date(request.query_params.get("fecha") or "") or date.today()
+
+        resultado = PrecioComercialService.obtener_precio(
+            empresa=self.get_empresa(),
+            producto=producto,
+            cliente=cliente,
+            fecha=fecha,
+            moneda_destino=moneda_destino,
+        )
+        return Response(
+            {
+                "producto_id": str(producto.id),
+                "precio": resultado["precio"],
+                "moneda": getattr(resultado["moneda"], "codigo", None),
+                "fuente": resultado["fuente"],
+                "lista_id": str(resultado["lista"].id) if resultado["lista"] else None,
+            }
+        )
+
 
 class CategoriaViewSet(TenantViewSetMixin, ModelViewSet):
     model = Categoria
@@ -160,6 +210,36 @@ class CategoriaViewSet(TenantViewSetMixin, ModelViewSet):
 class ImpuestoViewSet(TenantViewSetMixin, ModelViewSet):
     model = Impuesto
     serializer_class = ImpuestoSerializer
+    permission_classes = [IsAuthenticated, TieneRelacionActiva, TienePermisoModuloAccion]
+    permission_modulo = Modulos.PRODUCTOS
+    permission_action_map = {
+        "list": Acciones.VER,
+        "retrieve": Acciones.VER,
+        "create": Acciones.CREAR,
+        "update": Acciones.EDITAR,
+        "partial_update": Acciones.EDITAR,
+        "destroy": Acciones.BORRAR,
+    }
+
+
+class ListaPrecioViewSet(TenantViewSetMixin, ModelViewSet):
+    model = ListaPrecio
+    serializer_class = ListaPrecioSerializer
+    permission_classes = [IsAuthenticated, TieneRelacionActiva, TienePermisoModuloAccion]
+    permission_modulo = Modulos.PRODUCTOS
+    permission_action_map = {
+        "list": Acciones.VER,
+        "retrieve": Acciones.VER,
+        "create": Acciones.CREAR,
+        "update": Acciones.EDITAR,
+        "partial_update": Acciones.EDITAR,
+        "destroy": Acciones.BORRAR,
+    }
+
+
+class ListaPrecioItemViewSet(TenantViewSetMixin, ModelViewSet):
+    model = ListaPrecioItem
+    serializer_class = ListaPrecioItemSerializer
     permission_classes = [IsAuthenticated, TieneRelacionActiva, TienePermisoModuloAccion]
     permission_modulo = Modulos.PRODUCTOS
     permission_action_map = {

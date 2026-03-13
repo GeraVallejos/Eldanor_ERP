@@ -1,5 +1,5 @@
 import pytest
-from apps.core.models import Empresa, ModelPrueba
+from apps.core.models import Empresa, ModelPrueba, Moneda
 from apps.core.tenant import set_current_empresa, get_current_empresa
 
 # Fixture para crear una empresa y dejarla activa
@@ -56,3 +56,13 @@ def test_all_objects_manager(db):
     objs_empresa1 = ModelPrueba.objects.all()
     assert obj1 in objs_empresa1
     assert obj2 not in objs_empresa1
+
+
+@pytest.mark.django_db
+def test_empresa_nueva_crea_catalogo_base_monedas(db):
+    empresa = Empresa.objects.create(nombre="Empresa Moneda", rut="33333333-3", email="moneda@test.com")
+
+    monedas = Moneda.all_objects.filter(empresa=empresa)
+
+    assert monedas.filter(codigo="CLP", es_base=True, activa=True).exists()
+    assert monedas.filter(codigo="USD", activa=True).exists()

@@ -198,7 +198,7 @@ class PresupuestoService:
     @staticmethod
     @transaction.atomic
     def eliminar_presupuesto(presupuesto_id, empresa, usuario):
-        # Eliminacion fisica (hard delete) controlada por reglas de negocio
+        # Eliminacion logica controlada por reglas de negocio (sin hard delete).
         presupuesto = Presupuesto.all_objects.select_for_update().get(pk=presupuesto_id, empresa=empresa)
 
         # Seguridad: Solo ciertos roles pueden eliminar
@@ -209,13 +209,34 @@ class PresupuestoService:
         if presupuesto.estado == EstadoPresupuesto.APROBADO and not PresupuestoService._es_ultimo_folio(presupuesto):
             raise BusinessRuleError("No se puede eliminar un presupuesto aprobado que no sea el último. Debe anularlo.")
 
-        # Registro de auditoría final antes de desaparecer
-        PresupuestoService.registrar_historial(
-            presupuesto, usuario, presupuesto.estado, "ELIMINADO", 
-            cambios={"sistema": "Registro marcado como eliminado"}
-        )
+        if presupuesto.estado == EstadoPresupuesto.ANULADO:
+            return
 
-        presupuesto.delete()  # Hard delete
+        if presupuesto.estado not in {
+            EstadoPresupuesto.BORRADOR,
+            EstadoPresupuesto.ENVIADO,
+            EstadoPresupuesto.RECHAZADO,
+            EstadoPresupuesto.APROBADO,
+        }:
+            raise BusinessRuleError(
+                f"No se puede eliminar lógicamente un presupuesto en estado {presupuesto.estado}."
+            )
+
+        estado_anterior = presupuesto.estado
+        presupuesto.estado = EstadoPresupuesto.ANULADO
+        presupuesto.save(update_fields=["estado"])
+
+        # Registro de auditoría de baja lógica.
+        PresupuestoService.registrar_historial(
+            presupuesto,
+            usuario,
+            estado_anterior,
+            EstadoPresupuesto.ANULADO,
+            cambios={
+                "sistema": "Baja logica solicitada desde destroy",
+                "estado": [estado_anterior, EstadoPresupuesto.ANULADO],
+            },
+        )
 
     @staticmethod
     @transaction.atomic
@@ -279,12 +300,39 @@ class PresupuestoService:
         Registro centralizado de historial con soporte para cambios detallados.
         """
         from apps.presupuestos.models import PresupuestoHistorial
+        from apps.core.services import DomainEventService, OutboxService
         
-        PresupuestoHistorial.objects.create(
+        historial = PresupuestoHistorial.objects.create(
             presupuesto=presupuesto,
             usuario=usuario,
             estado_anterior=estado_anterior,
             estado_nuevo=estado_nuevo,
             cambios=cambios,  # Aquí va el JSON del Mixin
             empresa=presupuesto.empresa
+        )
+
+        payload = {
+            "presupuesto_id": str(presupuesto.id),
+            "numero": presupuesto.numero,
+            "estado_anterior": estado_anterior,
+            "estado_nuevo": estado_nuevo,
+            "cambios": cambios or {},
+        }
+        DomainEventService.record_event(
+            empresa=presupuesto.empresa,
+            aggregate_type="PRESUPUESTO",
+            aggregate_id=presupuesto.id,
+            event_type=f"PRESUPUESTO_ESTADO_{str(estado_nuevo).upper()}",
+            payload=payload,
+            meta={"source": "PresupuestoService.registrar_historial"},
+            usuario=usuario,
+        )
+
+        OutboxService.enqueue(
+            empresa=presupuesto.empresa,
+            topic="presupuestos",
+            event_name="PRESUPUESTO_ESTADO_CAMBIADO",
+            payload=payload,
+            usuario=usuario,
+            dedup_key=f"presupuesto-historial:{historial.id}",
         )

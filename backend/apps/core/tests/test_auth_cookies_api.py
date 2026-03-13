@@ -39,13 +39,21 @@ class TestAuthCookiesAPI:
         assert response.data["user"]["email"] == usuario.email
 
     def test_refresh_usa_cookie_y_renueva_access_cookie(self, api_client, usuario):
-        api_client.post(
+        login_response = api_client.post(
             "/api/token/",
             {"email": usuario.email, "password": "pass1234"},
             format="json",
         )
 
-        response = api_client.post("/api/token/refresh/", {}, format="json")
+        csrf_token = login_response.cookies.get("csrftoken")
+        assert csrf_token is not None
+
+        response = api_client.post(
+            "/api/token/refresh/",
+            {},
+            format="json",
+            HTTP_X_CSRFTOKEN=csrf_token.value,
+        )
 
         assert response.status_code == status.HTTP_200_OK
         assert response.data["detail"] == "Sesion renovada."
