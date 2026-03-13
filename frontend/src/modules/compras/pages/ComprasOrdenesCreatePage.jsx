@@ -5,6 +5,7 @@ import { api } from '@/api/client'
 import { normalizeApiError } from '@/api/errors'
 import Button from '@/components/ui/Button'
 import { buttonVariants } from '@/components/ui/buttonVariants'
+import { getChileDateSuffix } from '@/lib/dateTimeFormat'
 import { cn } from '@/lib/utils'
 
 function normalizeListResponse(data) {
@@ -30,7 +31,7 @@ function createEmptyItem() {
 }
 
 function todayDate() {
-  return new Date().toISOString().slice(0, 10)
+  return getChileDateSuffix()
 }
 
 function ComprasOrdenesCreatePage() {
@@ -251,7 +252,6 @@ function ComprasOrdenesCreatePage() {
 
       const payload = {
         proveedor: form.proveedor,
-        estado: 'BORRADOR',
         fecha_emision: form.fecha_emision,
         fecha_entrega: form.fecha_entrega || null,
         observaciones: form.observaciones || '',

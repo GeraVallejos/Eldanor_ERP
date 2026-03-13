@@ -16,6 +16,8 @@ import ComprasOrdenesDetailPage from '@/modules/compras/pages/ComprasOrdenesDeta
 import ComprasDocumentosListPage from '@/modules/compras/pages/ComprasDocumentosListPage'
 import ComprasDocumentosCreatePage from '@/modules/compras/pages/ComprasDocumentosCreatePage'
 import ComprasDocumentosDetailPage from '@/modules/compras/pages/ComprasDocumentosDetailPage'
+import ComprasRecepcionesListPage from '@/modules/compras/pages/ComprasRecepcionesListPage'
+import ComprasRecepcionesCreatePage from '@/modules/compras/pages/ComprasRecepcionesCreatePage'
 import InventarioKardexPage from '@/modules/inventario/pages/InventarioKardexPage'
 import InventarioResumenPage from '@/modules/inventario/pages/InventarioResumenPage'
 import ProductosCreatePage from '@/modules/productos/pages/ProductosCreatePage'
@@ -53,6 +55,9 @@ const router = createBrowserRouter([
           { path: 'compras/documentos/nuevo', element: <ComprasDocumentosCreatePage /> },
           { path: 'compras/documentos/:id', element: <ComprasDocumentosDetailPage /> },
           { path: 'compras/documentos/:id/editar', element: <ComprasDocumentosCreatePage /> },
+          { path: 'compras/recepciones', element: <ComprasRecepcionesListPage /> },
+          { path: 'compras/recepciones/nuevo', element: <ComprasRecepcionesCreatePage /> },
+          { path: 'compras/recepciones/:id/editar', element: <ComprasRecepcionesCreatePage /> },
           { path: 'inventario/kardex', element: <InventarioKardexPage /> },
           { path: 'inventario/resumen', element: <InventarioResumenPage /> },
         ],

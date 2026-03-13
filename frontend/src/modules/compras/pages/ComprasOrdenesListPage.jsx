@@ -5,7 +5,10 @@ import { api } from '@/api/client'
 import { normalizeApiError } from '@/api/errors'
 import Button from '@/components/ui/Button'
 import DocumentActionsDialog from '@/components/ui/DocumentActionsDialog'
+import ExportMenuButton from '@/components/ui/ExportMenuButton'
 import { buttonVariants } from '@/components/ui/buttonVariants'
+import { formatDateChile, getChileDateSuffix } from '@/lib/dateTimeFormat'
+import { formatCurrencyCLP } from '@/lib/numberFormat'
 import TablePagination from '@/components/ui/TablePagination'
 import { useTableSorting } from '@/lib/tableSorting'
 import { cn } from '@/lib/utils'
@@ -25,12 +28,7 @@ function normalizeListResponse(data) {
 }
 
 function formatMoney(value) {
-  const num = Number(value)
-  if (!Number.isFinite(num)) {
-    return '0'
-  }
-
-  return Math.round(num).toLocaleString('es-CL')
+  return formatCurrencyCLP(value)
 }
 
 function ComprasOrdenesListPage() {
@@ -165,11 +163,17 @@ function ComprasOrdenesListPage() {
     try {
       const { data } = await api.post(`/ordenes-compra/${orden.id}/${action}/`, {}, { suppressGlobalErrorToast: true })
       setOrdenes((prev) => prev.map((row) => (String(row.id) === String(orden.id) ? { ...row, ...data } : row)))
-      toast.success('Orden anulada correctamente.')
+      const msgMap = {
+        anular: 'Orden anulada correctamente.',
+        enviar: 'Orden enviada correctamente.',
+      }
+      toast.success(msgMap[action] || 'Orden actualizada correctamente.')
     } catch (error) {
       const fallback =
         action === 'anular'
           ? 'No se puede anular la orden. Verifique si tiene documentos de compra activos asociados.'
+          : action === 'enviar'
+          ? 'No se puede enviar la orden. Asegurese de tener al menos un item.'
           : 'No se pudo actualizar la orden.'
       toast.error(normalizeApiError(error, { fallback }))
     } finally {
@@ -241,7 +245,7 @@ function ComprasOrdenesListPage() {
           state: {
             precargarDe: {
               proveedor: String(ordenData.proveedor || ''),
-              fecha_emision: new Date().toISOString().slice(0, 10),
+              fecha_emision: getChileDateSuffix(),
               fecha_entrega: ordenData.fecha_entrega || '',
               observaciones: ordenData.observaciones || '',
               items: scopedItems.map((item) => ({
@@ -262,7 +266,7 @@ function ComprasOrdenesListPage() {
     }
   }
 
-  const getTodaySuffix = () => new Date().toISOString().slice(0, 10)
+  const getTodaySuffix = () => getChileDateSuffix()
 
   const handleExportExcel = async () => {
     if (filteredOrdenes.length === 0) {
@@ -285,7 +289,7 @@ function ComprasOrdenesListPage() {
         return {
           numero: orden.numero || '-',
           proveedor: contacto?.nombre || '-',
-          fecha_emision: orden.fecha_emision || '-',
+          fecha_emision: formatDateChile(orden.fecha_emision),
           estado: orden.estado || '-',
           total: Number(orden.total || 0),
         }
@@ -308,7 +312,7 @@ function ComprasOrdenesListPage() {
         return [
           orden.numero || '-',
           contacto?.nombre || '-',
-          orden.fecha_emision || '-',
+          formatDateChile(orden.fecha_emision),
           orden.estado || '-',
           formatMoney(orden.total),
         ]
@@ -322,26 +326,15 @@ function ComprasOrdenesListPage() {
         <h2 className="text-2xl font-semibold">Ordenes de compra</h2>
 
         <div className="grid grid-cols-1 gap-2 sm:flex sm:items-center sm:justify-end sm:gap-2">
-          <Button
+          <ExportMenuButton
             variant="outline"
             size="md"
             fullWidth
             className="sm:w-auto"
-            onClick={handleExportExcel}
+            onExportExcel={handleExportExcel}
+            onExportPdf={handleExportPdf}
             disabled={filteredOrdenes.length === 0}
-          >
-            Exportar Excel
-          </Button>
-          <Button
-            variant="outline"
-            size="md"
-            fullWidth
-            className="sm:w-auto"
-            onClick={handleExportPdf}
-            disabled={filteredOrdenes.length === 0}
-          >
-            Exportar PDF
-          </Button>
+          />
           <Link
             to="/compras/ordenes/nuevo"
             className={cn(buttonVariants({ variant: 'default', size: 'md', fullWidth: true }), 'sm:w-auto')}
@@ -433,7 +426,7 @@ function ComprasOrdenesListPage() {
                     <tr key={orden.id} className="border-t border-border">
                       <td className="px-3 py-2">{orden.numero}</td>
                       <td className="px-3 py-2">{contacto?.nombre || '-'}</td>
-                      <td className="px-3 py-2">{orden.fecha_emision || '-'}</td>
+                      <td className="px-3 py-2">{formatDateChile(orden.fecha_emision)}</td>
                       <td className="px-3 py-2">{orden.estado || '-'}</td>
                       <td className="px-3 py-2">{formatMoney(orden.total)}</td>
                       <td className="px-3 py-2">
@@ -469,6 +462,36 @@ function ComprasOrdenesListPage() {
                             >
                               Crear doc
                             </Link>
+                          ) : null}
+
+                          {orden.estado === 'ENVIADA' || orden.estado === 'PARCIAL' ? (
+                            <Link
+                              to={`/compras/documentos/nuevo?orden_compra=${orden.id}`}
+                              className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'h-8 px-3 text-xs')}
+                            >
+                              Crear doc
+                            </Link>
+                          ) : null}
+
+                          {orden.estado === 'ENVIADA' || orden.estado === 'PARCIAL' ? (
+                            <Link
+                              to={`/compras/recepciones/nuevo?orden_compra=${orden.id}`}
+                              className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'h-8 px-3 text-xs')}
+                            >
+                              Recepcion
+                            </Link>
+                          ) : null}
+
+                          {orden.estado === 'BORRADOR' ? (
+                            <Button
+                              size="sm"
+                              variant="default"
+                              className="h-8 px-3 text-xs"
+                              disabled={updatingId === orden.id}
+                              onClick={() => updateEstado(orden, 'enviar')}
+                            >
+                              Enviar
+                            </Button>
                           ) : null}
 
                           {orden.estado === 'BORRADOR' ? (

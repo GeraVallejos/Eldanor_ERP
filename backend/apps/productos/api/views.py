@@ -50,23 +50,33 @@ class ProductoViewSet(TenantViewSetMixin, ModelViewSet ):
     def _is_truthy(value):
         return str(value).strip().lower() in {"1", "true", "t", "yes", "y", "si", "on"}
 
+    def _user_can_access_inactive(self):
+        user = self.request.user
+        if getattr(user, "is_superuser", False):
+            return True
+
+        empresa = self.get_empresa()
+        if not empresa:
+            return False
+
+        rol = user.get_rol_en_empresa(empresa)
+        return rol in {RolUsuario.OWNER, RolUsuario.ADMIN}
+
     def get_queryset(self):
         queryset = super().get_queryset()
+        # En acciones de detalle permitimos acceder a inactivos para roles avanzados,
+        # evitando 404 al reactivar productos previamente anulados.
+        if self.action in {"retrieve", "update", "partial_update", "destroy", "precio"}:
+            if self._user_can_access_inactive():
+                return queryset
+            return queryset.filter(activo=True)
+
         include_inactive = self._is_truthy(self.request.query_params.get("include_inactive"))
 
         if not include_inactive:
             return queryset.filter(activo=True)
 
-        user = self.request.user
-        if getattr(user, "is_superuser", False):
-            return queryset
-
-        empresa = self.get_empresa()
-        if not empresa:
-            return queryset.filter(activo=True)
-
-        rol = user.get_rol_en_empresa(empresa)
-        if rol in {RolUsuario.OWNER, RolUsuario.ADMIN}:
+        if self._user_can_access_inactive():
             return queryset
 
         return queryset.filter(activo=True)

@@ -1,12 +1,23 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { api } from '@/api/client'
 import { normalizeApiError } from '@/api/errors'
 import Button from '@/components/ui/Button'
 import SearchableSelect from '@/components/ui/SearchableSelect'
+import { formatDateTimeChile, getChileDateSuffix } from '@/lib/dateTimeFormat'
+import { formatCurrencyCLP, formatSmartNumber } from '@/lib/numberFormat'
 import { getProductosCatalog } from '@/modules/productos/services/productosCatalogCache'
 import { downloadExcelFile } from '@/modules/shared/exports/downloadExcelFile'
 import { downloadSimpleTablePdf } from '@/modules/shared/exports/downloadSimpleTablePdf'
+
+const DOCUMENTO_TIPO_OPTIONS = [
+  { value: 'GUIA_RECEPCION', label: 'Guia de recepcion' },
+  { value: 'FACTURA_COMPRA', label: 'Factura de compra' },
+  { value: 'VENTA_FACTURA', label: 'Venta factura' },
+  { value: 'AJUSTE', label: 'Ajuste' },
+  { value: 'TRASLADO', label: 'Traslado' },
+  { value: 'PRESUPUESTO', label: 'Presupuesto' },
+]
 
 function normalizeListResponse(data) {
   if (Array.isArray(data)) {
@@ -20,16 +31,49 @@ function normalizeListResponse(data) {
   return []
 }
 
-function formatMoney(value) {
-  const num = Number(value)
-  if (!Number.isFinite(num)) {
-    return '0'
+function formatQuantity(value) {
+  return formatSmartNumber(value, { maximumFractionDigits: 2 })
+}
+
+function formatDocumentoTipo(value) {
+  if (!value) {
+    return '-'
   }
-  return Math.round(num).toLocaleString('es-CL')
+
+  const normalized = String(value).trim().toUpperCase()
+  const labels = {
+    GUIA_RECEPCION: 'Guia recepcion',
+    FACTURA_COMPRA: 'Factura compra',
+    VENTA_FACTURA: 'Factura venta',
+    AJUSTE: 'Ajuste',
+    TRASLADO: 'Traslado',
+    PRESUPUESTO: 'Presupuesto',
+    COMPRA_RECEPCION: 'Compra recepcion',
+  }
+
+  if (labels[normalized]) {
+    return labels[normalized]
+  }
+
+  return normalized.toLowerCase().replace(/_/g, ' ')
+}
+
+function normalizeFiltersForQuery(filters) {
+  return {
+    producto_id: filters.producto_id,
+    bodega_id: filters.bodega_id,
+    tipo: filters.tipo,
+    documento_tipo: filters.documento_tipos.join(','),
+    referencia: filters.referencia,
+    desde: filters.desde,
+    hasta: filters.hasta,
+    page: filters.page,
+    page_size: filters.page_size,
+  }
 }
 
 function InventarioKardexPage() {
-  const [status, setStatus] = useState('idle')
+  const exportMenuRef = useRef(null)
   const [productos, setProductos] = useState([])
   const [bodegas, setBodegas] = useState([])
   const [movimientos, setMovimientos] = useState([])
@@ -38,13 +82,15 @@ function InventarioKardexPage() {
     producto_id: '',
     bodega_id: '',
     tipo: '',
-    documento_tipo: '',
+    documento_tipos: [],
     referencia: '',
     desde: '',
     hasta: '',
     page: 1,
     page_size: 25,
   })
+  const [submittedFilters, setSubmittedFilters] = useState(null)
+  const [exportMenuOpen, setExportMenuOpen] = useState(false)
 
   const loadCatalogs = async () => {
     try {
@@ -65,7 +111,6 @@ function InventarioKardexPage() {
       return
     }
 
-    setStatus('loading')
     try {
       const { data } = await api.get('/movimientos-inventario/kardex/', {
         params: customFilters,
@@ -78,9 +123,7 @@ function InventarioKardexPage() {
         next: data?.next || null,
         previous: data?.previous || null,
       })
-      setStatus('succeeded')
     } catch (error) {
-      setStatus('failed')
       toast.error(normalizeApiError(error, { fallback: 'No se pudo consultar el kardex.' }))
     }
   }, [])
@@ -94,40 +137,31 @@ function InventarioKardexPage() {
   }, [])
 
   useEffect(() => {
-    const { producto_id, bodega_id, tipo, documento_tipo, referencia, desde, hasta, page, page_size } = filters
-
-    if (!producto_id) {
+    if (!submittedFilters?.producto_id) {
       return
     }
 
     const timeoutId = setTimeout(() => {
-      void fetchKardex({
-        producto_id,
-        bodega_id,
-        tipo,
-        documento_tipo,
-        referencia,
-        desde,
-        hasta,
-        page,
-        page_size,
-      })
+      void fetchKardex(submittedFilters)
     }, 0)
 
     return () => clearTimeout(timeoutId)
-  }, [
-    filters,
-    filters.producto_id,
-    filters.bodega_id,
-    filters.tipo,
-    filters.documento_tipo,
-    filters.referencia,
-    filters.desde,
-    filters.hasta,
-    filters.page,
-    filters.page_size,
-    fetchKardex,
-  ])
+  }, [submittedFilters, fetchKardex])
+
+  useEffect(() => {
+    if (!exportMenuOpen) {
+      return undefined
+    }
+
+    const handlePointerDown = (event) => {
+      if (!exportMenuRef.current?.contains(event.target)) {
+        setExportMenuOpen(false)
+      }
+    }
+
+    document.addEventListener('mousedown', handlePointerDown)
+    return () => document.removeEventListener('mousedown', handlePointerDown)
+  }, [exportMenuOpen])
 
   const updateFilter = (key, value) => {
     setFilters((prev) => ({ ...prev, [key]: value, page: 1 }))
@@ -157,18 +191,41 @@ function InventarioKardexPage() {
     [bodegas],
   )
 
+  const bodegaById = useMemo(() => {
+    const map = new Map()
+    bodegas.forEach((bodega) => {
+      map.set(String(bodega.id), bodega)
+    })
+    return map
+  }, [bodegas])
+
   const applyFilters = async (event) => {
     event.preventDefault()
     if (!filters.producto_id) {
       toast.error('Debes seleccionar un producto.')
       return
     }
-    await fetchKardex({ ...filters, page: 1 })
+    const nextFilters = { ...filters, page: 1 }
+    setFilters(nextFilters)
+    setSubmittedFilters(normalizeFiltersForQuery(nextFilters))
+  }
+
+  const toggleDocumentoTipo = (value) => {
+    setFilters((prev) => {
+      const selected = new Set(prev.documento_tipos)
+      if (selected.has(value)) {
+        selected.delete(value)
+      } else {
+        selected.add(value)
+      }
+      return { ...prev, documento_tipos: Array.from(selected), page: 1 }
+    })
   }
 
   const pageLabel = `${filters.page}`
 
-  const getTodaySuffix = () => new Date().toISOString().slice(0, 10)
+  const getTodaySuffix = () => getChileDateSuffix()
+  const productExportName = (selectedProducto?.nombre || 'producto').toLowerCase().replace(/\s+/g, '_').slice(0, 40)
 
   const handleExportExcel = async () => {
     if (movimientos.length === 0) {
@@ -177,8 +234,11 @@ function InventarioKardexPage() {
 
     await downloadExcelFile({
       sheetName: 'Kardex',
-      fileName: `kardex_${getTodaySuffix()}.xlsx`,
+      fileName: `kardex_${productExportName}_${getTodaySuffix()}.xlsx`,
       columns: [
+        { header: 'Producto', key: 'producto', width: 24 },
+        { header: 'SKU', key: 'producto_sku', width: 18 },
+        { header: 'Bodega', key: 'bodega', width: 20 },
         { header: 'Fecha', key: 'fecha', width: 20 },
         { header: 'Tipo', key: 'tipo', width: 14 },
         { header: 'Cantidad', key: 'cantidad', width: 14 },
@@ -188,17 +248,26 @@ function InventarioKardexPage() {
         { header: 'Valor total', key: 'valor_total', width: 16 },
         { header: 'Documento', key: 'documento_tipo', width: 20 },
         { header: 'Referencia', key: 'referencia', width: 24 },
+        { header: 'Lote', key: 'lote_codigo', width: 16 },
+        { header: 'Vencimiento', key: 'fecha_vencimiento', width: 14 },
+        { header: 'Series', key: 'series_codigos', width: 30 },
       ],
       rows: movimientos.map((row) => ({
-        fecha: row.creado_en ? String(row.creado_en).slice(0, 19).replace('T', ' ') : '-',
+        producto: selectedProducto?.nombre || String(filters.producto_id || '-'),
+        producto_sku: selectedProducto?.sku || '-',
+        bodega: bodegaById.get(String(row.bodega))?.nombre || String(row.bodega || '-'),
+        fecha: formatDateTimeChile(row.creado_en),
         tipo: row.tipo || '-',
         cantidad: row.cantidad || 0,
         stock_anterior: row.stock_anterior || 0,
         stock_nuevo: row.stock_nuevo || 0,
         costo_unitario: Number(row.costo_unitario || 0),
         valor_total: Number(row.valor_total || 0),
-        documento_tipo: row.documento_tipo || '-',
+        documento_tipo: formatDocumentoTipo(row.documento_tipo),
         referencia: row.referencia || '-',
+        lote_codigo: row.lote_codigo || '-',
+        fecha_vencimiento: row.fecha_vencimiento || '-',
+        series_codigos: Array.isArray(row.series_codigos) ? row.series_codigos.join(' | ') : '-',
       })),
     })
   }
@@ -209,19 +278,17 @@ function InventarioKardexPage() {
     }
 
     await downloadSimpleTablePdf({
-      title: 'Kardex de inventario',
-      fileName: `kardex_${getTodaySuffix()}.pdf`,
-      headers: ['Fecha', 'Tipo', 'Cantidad', 'Stock ant.', 'Stock nuevo', 'Costo', 'Valor', 'Documento', 'Referencia'],
+      title: `Kardex de inventario - ${selectedProducto?.nombre || 'Producto'}`,
+      fileName: `kardex_${productExportName}_${getTodaySuffix()}.pdf`,
+      headers: ['Fecha', 'Tipo', 'Cant.', 'Stock ant.', 'Stock nuevo', 'Documento', 'Referencia'],
       rows: movimientos.map((row) => [
-        row.creado_en ? String(row.creado_en).slice(0, 19).replace('T', ' ') : '-',
+        formatDateTimeChile(row.creado_en),
         row.tipo || '-',
-        String(row.cantidad || 0),
-        String(row.stock_anterior || 0),
-        String(row.stock_nuevo || 0),
-        formatMoney(row.costo_unitario),
-        formatMoney(row.valor_total),
-        row.documento_tipo || '-',
-        row.referencia || '-',
+        formatQuantity(row.cantidad),
+        formatQuantity(row.stock_anterior),
+        formatQuantity(row.stock_nuevo),
+        formatDocumentoTipo(row.documento_tipo),
+        String(row.referencia || '-').slice(0, 42),
       ]),
     })
   }
@@ -233,11 +300,11 @@ function InventarioKardexPage() {
         <p className="text-sm text-muted-foreground">Consulta movimientos valorizados por producto y bodega.</p>
       </div>
 
-      <form className="grid gap-3 rounded-md border border-border bg-card p-4 md:grid-cols-4" onSubmit={applyFilters}>
-        <label className="text-sm">
+      <form className="grid gap-3 rounded-md border border-border bg-card p-4 md:grid-cols-12" onSubmit={applyFilters}>
+        <label className="text-sm font-medium md:col-span-4">
           Producto
           <SearchableSelect
-            className="mt-1"
+            className="mt-2"
             value={filters.producto_id}
             onChange={(next) => updateFilter('producto_id', next)}
             options={productoOptions}
@@ -247,10 +314,10 @@ function InventarioKardexPage() {
           />
         </label>
 
-        <label className="text-sm">
+        <label className="text-sm font-medium md:col-span-2">
           Bodega
           <SearchableSelect
-            className="mt-1"
+            className="mt-2"
             value={filters.bodega_id}
             onChange={(next) => updateFilter('bodega_id', next)}
             options={bodegaOptions}
@@ -260,10 +327,10 @@ function InventarioKardexPage() {
           />
         </label>
 
-        <label className="text-sm">
+        <label className="text-sm font-medium md:col-span-2">
           Tipo
           <select
-            className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
+            className="mt-2 w-full rounded-md border border-input bg-background px-3 py-2"
             value={filters.tipo}
             onChange={(event) => updateFilter('tipo', event.target.value)}
           >
@@ -273,68 +340,96 @@ function InventarioKardexPage() {
           </select>
         </label>
 
-        <label className="text-sm">
-          Documento
-          <select
-            className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
-            value={filters.documento_tipo}
-            onChange={(event) => updateFilter('documento_tipo', event.target.value)}
-          >
-            <option value="">Todos</option>
-            <option value="COMPRA_RECEPCION">Compra recepcion</option>
-            <option value="VENTA_FACTURA">Venta factura</option>
-            <option value="AJUSTE">Ajuste</option>
-            <option value="TRASLADO">Traslado</option>
-            <option value="PRESUPUESTO">Presupuesto</option>
-          </select>
-        </label>
-
-        <label className="text-sm">
+        <label className="text-sm font-medium md:col-span-2">
           Desde
           <input
             type="date"
-            className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
+            className="mt-2 w-full rounded-md border border-input bg-background px-3 py-2"
             value={filters.desde}
             onChange={(event) => updateFilter('desde', event.target.value)}
           />
         </label>
 
-        <label className="text-sm">
+        <label className="text-sm font-medium md:col-span-2">
           Hasta
           <input
             type="date"
-            className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
+            className="mt-2 w-full rounded-md border border-input bg-background px-3 py-2"
             value={filters.hasta}
             onChange={(event) => updateFilter('hasta', event.target.value)}
           />
         </label>
 
-        <label className="text-sm md:col-span-2">
-          Referencia
+        <div className="rounded-md border border-border bg-muted/20 p-3 md:col-span-7">
+          <p className="text-sm font-medium">Documentos</p>
+          <div className="mt-2 grid grid-cols-1 gap-x-4 gap-y-1 rounded-md border border-input bg-background px-3 py-2 md:grid-cols-3">
+            {DOCUMENTO_TIPO_OPTIONS.map((option) => (
+              <label key={option.value} className="inline-flex items-center gap-2 py-1 text-sm leading-none">
+                <input
+                  type="checkbox"
+                  checked={filters.documento_tipos.includes(option.value)}
+                  onChange={() => toggleDocumentoTipo(option.value)}
+                />
+                <span>{option.label}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+
+        <div className="rounded-md border border-border bg-muted/20 p-3 md:col-span-5">
+          <p className="text-sm font-medium">Referencia</p>
           <input
-            className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
+            className="mt-2 w-full rounded-md border border-input bg-background px-3 py-2"
             value={filters.referencia}
             onChange={(event) => updateFilter('referencia', event.target.value)}
-            placeholder="Buscar texto de referencia"
+            placeholder="Ej: GUIA 123, FACTURA 456, ANULACION"
           />
-        </label>
 
-        <div className="flex items-end gap-2">
-          <Button type="submit">Consultar</Button>
-          <Button type="button" variant="outline" onClick={handleExportExcel} disabled={movimientos.length === 0}>
-            Excel
-          </Button>
-          <Button type="button" variant="outline" onClick={handleExportPdf} disabled={movimientos.length === 0}>
-            PDF
-          </Button>
+          <div className="mt-3 flex flex-wrap justify-end gap-2" ref={exportMenuRef}>
+            <Button type="submit" className="min-w-28">Consultar</Button>
+            <div className="relative">
+              <Button
+                type="button"
+                variant="outline"
+                className="min-w-28"
+                onClick={() => setExportMenuOpen((prev) => !prev)}
+                disabled={movimientos.length === 0}
+              >
+                Exportar
+              </Button>
+
+              {exportMenuOpen ? (
+                <div className="absolute right-0 z-20 mt-2 w-40 rounded-md border border-border bg-popover p-1 shadow-md">
+                  <button
+                    type="button"
+                    className="block w-full rounded px-3 py-2 text-left text-sm hover:bg-muted"
+                    onClick={() => {
+                      setExportMenuOpen(false)
+                      void handleExportExcel()
+                    }}
+                  >
+                    Exportar Excel
+                  </button>
+                  <button
+                    type="button"
+                    className="mt-1 block w-full rounded px-3 py-2 text-left text-sm hover:bg-muted"
+                    onClick={() => {
+                      setExportMenuOpen(false)
+                      void handleExportPdf()
+                    }}
+                  >
+                    Exportar PDF
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          </div>
         </div>
       </form>
 
       {selectedProducto ? (
         <p className="text-sm text-muted-foreground">Producto seleccionado: {selectedProducto.nombre}</p>
       ) : null}
-
-      {status === 'loading' ? <p className="text-sm text-muted-foreground">Cargando movimientos...</p> : null}
 
       <div className="overflow-x-auto rounded-md border border-border bg-card">
         <table className="min-w-full text-sm">
@@ -361,14 +456,14 @@ function InventarioKardexPage() {
             ) : (
               movimientos.map((row) => (
                 <tr key={row.id} className="border-t border-border">
-                  <td className="px-3 py-2">{row.creado_en ? String(row.creado_en).slice(0, 19).replace('T', ' ') : '-'}</td>
+                  <td className="px-3 py-2">{formatDateTimeChile(row.creado_en)}</td>
                   <td className="px-3 py-2">{row.tipo}</td>
-                  <td className="px-3 py-2">{row.cantidad}</td>
-                  <td className="px-3 py-2">{row.stock_anterior}</td>
-                  <td className="px-3 py-2">{row.stock_nuevo}</td>
-                  <td className="px-3 py-2">{formatMoney(row.costo_unitario)}</td>
-                  <td className="px-3 py-2">{formatMoney(row.valor_total)}</td>
-                  <td className="px-3 py-2">{row.documento_tipo || '-'}</td>
+                  <td className="px-3 py-2">{formatQuantity(row.cantidad)}</td>
+                  <td className="px-3 py-2">{formatQuantity(row.stock_anterior)}</td>
+                  <td className="px-3 py-2">{formatQuantity(row.stock_nuevo)}</td>
+                  <td className="px-3 py-2">{formatCurrencyCLP(row.costo_unitario)}</td>
+                  <td className="px-3 py-2">{formatCurrencyCLP(row.valor_total)}</td>
+                  <td className="px-3 py-2">{formatDocumentoTipo(row.documento_tipo)}</td>
                   <td className="px-3 py-2">{row.referencia || '-'}</td>
                 </tr>
               ))
@@ -384,7 +479,13 @@ function InventarioKardexPage() {
             size="sm"
             variant="outline"
             disabled={!pagination.previous || filters.page <= 1}
-            onClick={() => setFilters((prev) => ({ ...prev, page: Math.max(prev.page - 1, 1) }))}
+            onClick={() => {
+              setFilters((prev) => {
+                const next = { ...prev, page: Math.max(prev.page - 1, 1) }
+                setSubmittedFilters(normalizeFiltersForQuery(next))
+                return next
+              })
+            }}
           >
             Anterior
           </Button>
@@ -393,7 +494,13 @@ function InventarioKardexPage() {
             size="sm"
             variant="outline"
             disabled={!pagination.next}
-            onClick={() => setFilters((prev) => ({ ...prev, page: prev.page + 1 }))}
+            onClick={() => {
+              setFilters((prev) => {
+                const next = { ...prev, page: prev.page + 1 }
+                setSubmittedFilters(normalizeFiltersForQuery(next))
+                return next
+              })
+            }}
           >
             Siguiente
           </Button>

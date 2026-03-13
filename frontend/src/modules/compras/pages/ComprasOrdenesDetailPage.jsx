@@ -4,7 +4,10 @@ import { toast } from 'sonner'
 import { api } from '@/api/client'
 import { normalizeApiError } from '@/api/errors'
 import Button from '@/components/ui/Button'
+import ExportMenuButton from '@/components/ui/ExportMenuButton'
 import { buttonVariants } from '@/components/ui/buttonVariants'
+import { formatDateChile, getChileDateSuffix } from '@/lib/dateTimeFormat'
+import { formatCurrencyCLP } from '@/lib/numberFormat'
 import { cn } from '@/lib/utils'
 import { getProductosCatalog } from '@/modules/productos/services/productosCatalogCache'
 import { downloadExcelFile } from '@/modules/shared/exports/downloadExcelFile'
@@ -23,12 +26,7 @@ function normalizeListResponse(data) {
 }
 
 function formatMoney(value) {
-  const num = Number(value)
-  if (!Number.isFinite(num)) {
-    return '0'
-  }
-
-  return Math.round(num).toLocaleString('es-CL')
+  return formatCurrencyCLP(value)
 }
 
 function ComprasOrdenesDetailPage() {
@@ -37,19 +35,22 @@ function ComprasOrdenesDetailPage() {
   const [orden, setOrden] = useState(null)
   const [items, setItems] = useState([])
   const [documentosAsociados, setDocumentosAsociados] = useState([])
+  const [recepcionesAsociadas, setRecepcionesAsociadas] = useState([])
   const [proveedores, setProveedores] = useState([])
   const [contactos, setContactos] = useState([])
   const [productos, setProductos] = useState([])
   const [impuestos, setImpuestos] = useState([])
+  const [updatingEstado, setUpdatingEstado] = useState(false)
 
   const loadData = useCallback(async () => {
     setStatus('loading')
     try {
-      const [{ data: ordenData }, { data: itemsData }, { data: documentosData }, { data: proveedoresData }, { data: contactosData }, productosData, { data: impuestosData }] =
+      const [{ data: ordenData }, { data: itemsData }, { data: documentosData }, { data: recepcionesData }, { data: proveedoresData }, { data: contactosData }, productosData, { data: impuestosData }] =
         await Promise.all([
           api.get(`/ordenes-compra/${ordenId}/`, { suppressGlobalErrorToast: true }),
           api.get('/ordenes-compra-items/', { suppressGlobalErrorToast: true }),
           api.get('/documentos-compra/', { suppressGlobalErrorToast: true }),
+          api.get('/recepciones-compra/', { suppressGlobalErrorToast: true }),
           api.get('/proveedores/', { suppressGlobalErrorToast: true }),
           api.get('/contactos/', { suppressGlobalErrorToast: true }),
           getProductosCatalog(),
@@ -60,6 +61,9 @@ function ComprasOrdenesDetailPage() {
       setItems(normalizeListResponse(itemsData).filter((row) => String(row.orden_compra) === String(ordenId)))
       setDocumentosAsociados(
         normalizeListResponse(documentosData).filter((doc) => String(doc.orden_compra) === String(ordenId)),
+      )
+      setRecepcionesAsociadas(
+        normalizeListResponse(recepcionesData).filter((rec) => String(rec.orden_compra) === String(ordenId)),
       )
       setProveedores(normalizeListResponse(proveedoresData))
       setContactos(normalizeListResponse(contactosData))
@@ -115,25 +119,16 @@ function ComprasOrdenesDetailPage() {
   const proveedor = proveedorById.get(String(orden?.proveedor))
   const contacto = contactoById.get(String(proveedor?.contacto))
 
-  const getTodaySuffix = () => new Date().toISOString().slice(0, 10)
+  const getTodaySuffix = () => getChileDateSuffix()
 
   const totalSubtotal = useMemo(() => {
-    return items.reduce((sum, item) => {
-      const cantidad = Number(item.cantidad ?? 0)
-      const precio_unitario = Number(item.precio_unitario ?? 0)
-      return sum + cantidad * precio_unitario
-    }, 0)
-  }, [items])
+    // Totales de la cabecera (calculados por el backend al guardar items)
+    return Number(orden?.subtotal ?? 0)
+  }, [orden])
 
   const totalImpuesto = useMemo(() => {
-    return items.reduce((sum, item) => {
-      const cantidad = Number(item.cantidad ?? 0)
-      const precio_unitario = Number(item.precio_unitario ?? 0)
-      const impuesto = impuestoById.get(String(item.impuesto))
-      const porcentaje = Number(impuesto?.porcentaje ?? 0)
-      return sum + cantidad * precio_unitario * (porcentaje / 100)
-    }, 0)
-  }, [items, impuestoById])
+    return Number(orden?.impuestos ?? 0)
+  }, [orden])
 
   const handleExportExcel = async () => {
     if (!orden) return
@@ -169,8 +164,8 @@ function ComprasOrdenesDetailPage() {
                 numero_oc: orden.numero || '-',
                 estado: orden.estado || '-',
                 proveedor: contacto?.nombre || '-',
-                fecha_emision: orden.fecha_emision || '-',
-                fecha_entrega: orden.fecha_entrega || '-',
+                fecha_emision: formatDateChile(orden.fecha_emision),
+                fecha_entrega: formatDateChile(orden.fecha_entrega),
                 producto: productoById.get(String(item.producto))?.nombre || '-',
                 descripcion: item.descripcion || '-',
                 cantidad,
@@ -185,8 +180,8 @@ function ComprasOrdenesDetailPage() {
                 numero_oc: orden.numero || '-',
                 estado: orden.estado || '-',
                 proveedor: contacto?.nombre || '-',
-                fecha_emision: orden.fecha_emision || '-',
-                fecha_entrega: orden.fecha_entrega || '-',
+                fecha_emision: formatDateChile(orden.fecha_emision),
+                fecha_entrega: formatDateChile(orden.fecha_entrega),
                 producto: '-',
                 descripcion: '-',
                 cantidad: 0,
@@ -244,32 +239,61 @@ function ComprasOrdenesDetailPage() {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="text-2xl font-semibold">Orden de compra #{orden.numero}</h2>
-          <p className="text-sm text-muted-foreground">Estado: {orden.estado}</p>
+          <p className="text-sm text-muted-foreground">Estado: <span className="font-medium">{orden.estado}</span></p>
         </div>
 
         <div className="flex gap-2">
-          <Button variant="outline" size="md" onClick={handleExportExcel}>
-            Exportar Excel
-          </Button>
-          <Button variant="outline" size="md" onClick={handleExportPdf}>
-            Exportar PDF
-          </Button>
-          {orden.estado === 'BORRADOR' && (
+          <ExportMenuButton
+            variant="outline"
+            size="md"
+            onExportExcel={handleExportExcel}
+            onExportPdf={handleExportPdf}
+          />
+          {orden.estado === 'BORRADOR' ? (
+            <Button
+              variant="default"
+              size="md"
+              disabled={updatingEstado}
+              onClick={async () => {
+                setUpdatingEstado(true)
+                try {
+                  const { data } = await api.post(`/ordenes-compra/${ordenId}/enviar/`, {}, { suppressGlobalErrorToast: true })
+                  setOrden((prev) => ({ ...prev, ...data }))
+                  toast.success('Orden enviada correctamente.')
+                } catch (error) {
+                  toast.error(normalizeApiError(error, { fallback: 'No se pudo enviar la orden.' }))
+                } finally {
+                  setUpdatingEstado(false)
+                }
+              }}
+            >
+              {updatingEstado ? 'Enviando...' : 'Enviar orden'}
+            </Button>
+          ) : null}
+          {orden.estado === 'BORRADOR' ? (
             <Link
               to={`/compras/documentos/nuevo?orden_compra=${orden.id}`}
               className={cn(buttonVariants({ variant: 'outline', size: 'md' }))}
             >
               Crear documento
             </Link>
-          )}
-          {orden.estado === 'BORRADOR' && (
+          ) : null}
+          {orden.estado === 'ENVIADA' || orden.estado === 'PARCIAL' ? (
+            <Link
+              to={`/compras/documentos/nuevo?orden_compra=${orden.id}`}
+              className={cn(buttonVariants({ variant: 'outline', size: 'md' }))}
+            >
+              Crear documento
+            </Link>
+          ) : null}
+          {orden.estado === 'BORRADOR' ? (
             <Link
               to={`/compras/ordenes/${orden.id}/editar`}
               className={cn(buttonVariants({ variant: 'default', size: 'md' }))}
             >
               Editar
             </Link>
-          )}
+          ) : null}
           <Link
             to="/compras/ordenes"
             className={cn(buttonVariants({ variant: 'outline', size: 'md' }))}
@@ -286,11 +310,11 @@ function ComprasOrdenesDetailPage() {
         </div>
         <div>
           <p className="text-xs font-medium text-muted-foreground">Fecha de emisión</p>
-          <p className="mt-1 text-sm">{orden.fecha_emision || '-'}</p>
+          <p className="mt-1 text-sm">{formatDateChile(orden.fecha_emision)}</p>
         </div>
         <div>
           <p className="text-xs font-medium text-muted-foreground">Fecha de entrega</p>
-          <p className="mt-1 text-sm">{orden.fecha_entrega || '-'}</p>
+          <p className="mt-1 text-sm">{formatDateChile(orden.fecha_entrega)}</p>
         </div>
         <div>
           <p className="text-xs font-medium text-muted-foreground">RUT Proveedor</p>
@@ -323,6 +347,26 @@ function ComprasOrdenesDetailPage() {
                   {doc.folio || 'S/F'}
                 </span>
                 <span className="text-muted-foreground">({doc.estado || '-'})</span>
+              </Link>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="rounded-md border border-border bg-card p-4">
+        <p className="text-xs font-medium text-muted-foreground">Recepciones de compra</p>
+        {recepcionesAsociadas.length === 0 ? (
+          <p className="mt-2 text-sm text-muted-foreground">Esta orden no tiene recepciones registradas.</p>
+        ) : (
+          <div className="mt-2 flex flex-col gap-2">
+            {recepcionesAsociadas.map((rec) => (
+              <Link
+                key={rec.id}
+                to={`/compras/recepciones/${rec.id}/editar`}
+                className="inline-flex items-center gap-2 text-sm text-primary hover:underline"
+              >
+                <span>Recepcion {rec.fecha}</span>
+                <span className="text-muted-foreground">({rec.estado})</span>
               </Link>
             ))}
           </div>

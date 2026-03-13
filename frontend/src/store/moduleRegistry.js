@@ -4,6 +4,7 @@ import { comprasStoreModule } from '@/modules/compras/store'
 import { inventarioStoreModule } from '@/modules/inventario/store'
 import { contactosStoreModule } from '@/modules/contactos/store'
 import { presupuestosStoreModule } from '@/modules/presupuestos/store'
+import { uiStoreModule } from '@/modules/shared/ui/store'
 
 export const STORE_MODULES = [
   authStoreModule,
@@ -12,6 +13,7 @@ export const STORE_MODULES = [
   inventarioStoreModule,
   contactosStoreModule,
   presupuestosStoreModule,
+  uiStoreModule,
 ]
 
 export function buildReducersFromModules(modules = STORE_MODULES) {

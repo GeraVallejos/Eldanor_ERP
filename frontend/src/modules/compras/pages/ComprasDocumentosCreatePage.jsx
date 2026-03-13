@@ -5,6 +5,7 @@ import { api } from '@/api/client'
 import { normalizeApiError } from '@/api/errors'
 import Button from '@/components/ui/Button'
 import SearchableSelect from '@/components/ui/SearchableSelect'
+import { getChileDateSuffix } from '@/lib/dateTimeFormat'
 import { getProductosCatalog } from '@/modules/productos/services/productosCatalogCache'
 
 function normalizeListResponse(data) {
@@ -14,7 +15,7 @@ function normalizeListResponse(data) {
 }
 
 function todayDate() {
-  return new Date().toISOString().slice(0, 10)
+  return getChileDateSuffix()
 }
 
 const EMPTY_ITEM = {

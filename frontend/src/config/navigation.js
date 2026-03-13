@@ -103,7 +103,7 @@ const NAV_MODULES = [
       },
       {
         id: 'compras-documentos',
-        label: 'Documentos (Guias/Facturas)',
+        label: 'Documentos tributarios (Guias/Facturas)',
         to: '/compras/documentos',
         enabled: true,
       },

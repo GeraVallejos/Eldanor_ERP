@@ -6,9 +6,12 @@ import { api } from '@/api/client'
 import { normalizeApiError } from '@/api/errors'
 import Button from '@/components/ui/Button'
 import BulkImportButton from '@/components/ui/BulkImportButton'
+import ExportMenuButton from '@/components/ui/ExportMenuButton'
 import { buttonVariants } from '@/components/ui/buttonVariants'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import TablePagination from '@/components/ui/TablePagination'
+import { getChileDateSuffix } from '@/lib/dateTimeFormat'
+import { formatCurrencyCLP, formatSmartNumber } from '@/lib/numberFormat'
 import { useTableSorting } from '@/lib/tableSorting'
 import { cn } from '@/lib/utils'
 import { downloadExcelFile } from '@/modules/shared/exports/downloadExcelFile'
@@ -28,25 +31,15 @@ function normalizeListResponse(data) {
 }
 
 function formatMoney(value) {
-  const num = Number(value)
-  if (!Number.isFinite(num)) {
-    return '0'
-  }
-
-  return Math.round(num).toLocaleString('es-CL')
+  return formatCurrencyCLP(value)
 }
 
 function toIntegerString(value) {
-  const num = Number(value)
-  if (!Number.isFinite(num)) {
-    return '0'
-  }
-
-  return String(Math.round(num))
+  return formatSmartNumber(value, { maximumFractionDigits: 0 })
 }
 
 function getTodaySuffix() {
-  return new Date().toISOString().slice(0, 10)
+  return getChileDateSuffix()
 }
 
 function ClientesListPage() {
@@ -337,26 +330,15 @@ function ClientesListPage() {
               }}
             />
           ) : null}
-          <Button
+          <ExportMenuButton
             variant="outline"
             size="md"
             fullWidth
             className="sm:w-auto"
-            onClick={handleExportExcel}
+            onExportExcel={handleExportExcel}
+            onExportPdf={handleExportPdf}
             disabled={filteredClientes.length === 0}
-          >
-            Exportar Excel
-          </Button>
-          <Button
-            variant="outline"
-            size="md"
-            fullWidth
-            className="sm:w-auto"
-            onClick={handleExportPdf}
-            disabled={filteredClientes.length === 0}
-          >
-            Exportar PDF
-          </Button>
+          />
           <Link
             to="/contactos/clientes/nuevo"
             className={cn(buttonVariants({ variant: 'default', size: 'md', fullWidth: true }), 'sm:w-auto')}

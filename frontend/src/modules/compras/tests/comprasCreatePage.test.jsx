@@ -63,7 +63,6 @@ describe('compras/CreatePage', () => {
 
     expect(ordenPayload).toMatchObject({
       proveedor: 'p-1',
-      estado: 'BORRADOR',
     })
 
     expect(itemPayload).toMatchObject({

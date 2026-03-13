@@ -4,7 +4,10 @@ import { toast } from 'sonner'
 import { api } from '@/api/client'
 import { normalizeApiError } from '@/api/errors'
 import Button from '@/components/ui/Button'
+import ExportMenuButton from '@/components/ui/ExportMenuButton'
 import { buttonVariants } from '@/components/ui/buttonVariants'
+import { formatDateChile, getChileDateSuffix } from '@/lib/dateTimeFormat'
+import { formatCurrencyCLP } from '@/lib/numberFormat'
 import { cn } from '@/lib/utils'
 import { getProductosCatalog } from '@/modules/productos/services/productosCatalogCache'
 import { downloadExcelFile } from '@/modules/shared/exports/downloadExcelFile'
@@ -28,9 +31,7 @@ function normalizeListResponse(data) {
 }
 
 function formatMoney(value) {
-  const num = Number(value)
-  if (!Number.isFinite(num)) return '0'
-  return Math.round(num).toLocaleString('es-CL')
+  return formatCurrencyCLP(value)
 }
 
 function ComprasDocumentosDetailPage() {
@@ -94,7 +95,7 @@ function ComprasDocumentosDetailPage() {
   const proveedor = proveedorById.get(String(documento?.proveedor || ''))
   const contacto = contactoById.get(String(proveedor?.contacto || ''))
 
-  const getTodaySuffix = () => new Date().toISOString().slice(0, 10)
+  const getTodaySuffix = () => getChileDateSuffix()
 
   const handleExportExcel = async () => {
     if (!documento) return
@@ -121,7 +122,7 @@ function ComprasDocumentosDetailPage() {
               folio: documento.folio || '-',
               proveedor: contacto?.nombre || '-',
               estado: ESTADO_LABELS[documento.estado] || documento.estado,
-              fecha_emision: documento.fecha_emision || '-',
+              fecha_emision: formatDateChile(documento.fecha_emision),
               producto: productoById.get(String(item.producto))?.nombre || item.descripcion || '-',
               cantidad: Number(item.cantidad || 0),
               precio_unitario: Number(item.precio_unitario || 0),
@@ -134,7 +135,7 @@ function ComprasDocumentosDetailPage() {
                 folio: documento.folio || '-',
                 proveedor: contacto?.nombre || '-',
                 estado: ESTADO_LABELS[documento.estado] || documento.estado,
-                fecha_emision: documento.fecha_emision || '-',
+                fecha_emision: formatDateChile(documento.fecha_emision),
                 producto: '-',
                 cantidad: 0,
                 precio_unitario: 0,
@@ -155,7 +156,7 @@ function ComprasDocumentosDetailPage() {
             documento.folio || '-',
             contacto?.nombre || '-',
             ESTADO_LABELS[documento.estado] || documento.estado,
-            documento.fecha_emision || '-',
+            formatDateChile(documento.fecha_emision),
             productoById.get(String(item.producto))?.nombre || item.descripcion || '-',
             String(Number(item.cantidad || 0)),
             formatMoney(item.precio_unitario),
@@ -167,7 +168,7 @@ function ComprasDocumentosDetailPage() {
             documento.folio || '-',
             contacto?.nombre || '-',
             ESTADO_LABELS[documento.estado] || documento.estado,
-            documento.fecha_emision || '-',
+            formatDateChile(documento.fecha_emision),
             '-',
             '0',
             '0',
@@ -208,12 +209,14 @@ function ComprasDocumentosDetailPage() {
         </div>
 
         <div className="grid grid-cols-1 gap-2 sm:flex sm:items-center sm:justify-end sm:gap-2">
-          <Button variant="outline" size="md" fullWidth className="sm:w-auto" onClick={handleExportExcel}>
-            Exportar Excel
-          </Button>
-          <Button variant="outline" size="md" fullWidth className="sm:w-auto" onClick={handleExportPdf}>
-            Exportar PDF
-          </Button>
+          <ExportMenuButton
+            variant="outline"
+            size="md"
+            fullWidth
+            className="sm:w-auto"
+            onExportExcel={handleExportExcel}
+            onExportPdf={handleExportPdf}
+          />
           <Link
             to={`/compras/documentos/${documento.id}/editar`}
             className={cn(buttonVariants({ variant: 'outline', size: 'md', fullWidth: true }), 'sm:w-auto')}
@@ -236,11 +239,11 @@ function ComprasDocumentosDetailPage() {
         </div>
         <div>
           <p className="text-xs font-medium text-muted-foreground">Fecha emision</p>
-          <p className="mt-1 text-sm">{documento.fecha_emision || '-'}</p>
+          <p className="mt-1 text-sm">{formatDateChile(documento.fecha_emision)}</p>
         </div>
         <div>
           <p className="text-xs font-medium text-muted-foreground">Fecha recepcion</p>
-          <p className="mt-1 text-sm">{documento.fecha_recepcion || '-'}</p>
+          <p className="mt-1 text-sm">{formatDateChile(documento.fecha_recepcion)}</p>
         </div>
       </div>
 

@@ -6,9 +6,11 @@ import { api } from '@/api/client'
 import { normalizeApiError } from '@/api/errors'
 import Button from '@/components/ui/Button'
 import BulkImportButton from '@/components/ui/BulkImportButton'
+import ExportMenuButton from '@/components/ui/ExportMenuButton'
 import { buttonVariants } from '@/components/ui/buttonVariants'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import TablePagination from '@/components/ui/TablePagination'
+import { getChileDateSuffix } from '@/lib/dateTimeFormat'
 import { useTableSorting } from '@/lib/tableSorting'
 import { cn } from '@/lib/utils'
 import { downloadExcelFile } from '@/modules/shared/exports/downloadExcelFile'
@@ -244,7 +246,7 @@ function ProveedoresListPage() {
     }
   }
 
-  const getTodaySuffix = () => new Date().toISOString().slice(0, 10)
+  const getTodaySuffix = () => getChileDateSuffix()
 
   const handleExportExcel = async () => {
     if (filteredProveedores.length === 0) {
@@ -314,26 +316,15 @@ function ProveedoresListPage() {
               }}
             />
           ) : null}
-          <Button
+          <ExportMenuButton
             variant="outline"
             size="md"
             fullWidth
             className="sm:w-auto"
-            onClick={handleExportExcel}
+            onExportExcel={handleExportExcel}
+            onExportPdf={handleExportPdf}
             disabled={filteredProveedores.length === 0}
-          >
-            Exportar Excel
-          </Button>
-          <Button
-            variant="outline"
-            size="md"
-            fullWidth
-            className="sm:w-auto"
-            onClick={handleExportPdf}
-            disabled={filteredProveedores.length === 0}
-          >
-            Exportar PDF
-          </Button>
+          />
           <Link
             to="/contactos/proveedores/nuevo"
             className={cn(buttonVariants({ variant: 'default', size: 'md', fullWidth: true }), 'sm:w-auto')}

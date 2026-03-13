@@ -228,6 +228,48 @@ class TestInventarioApi:
         assert len(resp.data["results"]) == 1
         assert resp.data["results"][0]["tipo"] == "ENTRADA"
 
+    def test_kardex_compra_recepcion_incluye_factura_compra(self, api_client, owner_usuario, empresa):
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
+
+        producto = Producto.objects.create(
+            empresa=empresa,
+            nombre="Producto Kardex Compra Familia",
+            sku="PK-COMPRA-1",
+            stock_actual=Decimal("0.00"),
+            maneja_inventario=True,
+            precio_referencia=Decimal("1800"),
+        )
+
+        InventarioService.registrar_movimiento(
+            producto_id=producto.id,
+            tipo="ENTRADA",
+            cantidad=Decimal("2.00"),
+            referencia="COMPRA RECEPCION",
+            empresa=empresa,
+            usuario=owner_usuario,
+            documento_tipo=TipoDocumentoReferencia.COMPRA_RECEPCION,
+        )
+        InventarioService.registrar_movimiento(
+            producto_id=producto.id,
+            tipo="ENTRADA",
+            cantidad=Decimal("1.00"),
+            referencia="COMPRA FACTURA",
+            empresa=empresa,
+            usuario=owner_usuario,
+            documento_tipo=TipoDocumentoReferencia.FACTURA_COMPRA,
+        )
+
+        resp = api_client.get(
+            reverse("movimiento-inventario-kardex"),
+            {
+                "producto_id": str(producto.id),
+                "documento_tipo": "COMPRA_RECEPCION",
+            },
+        )
+
+        assert resp.status_code == status.HTTP_200_OK
+        assert resp.data["count"] == 2
+
     def test_resumen_valorizado_endpoint(self, api_client, owner_usuario, empresa):
         api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
 

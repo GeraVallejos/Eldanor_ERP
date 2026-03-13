@@ -637,7 +637,23 @@ class InventarioService:
         if tipo:
             queryset = queryset.filter(tipo=tipo)
         if documento_tipo:
-            queryset = queryset.filter(documento_tipo=documento_tipo)
+            if isinstance(documento_tipo, (list, tuple, set)):
+                tipos = [str(valor).strip() for valor in documento_tipo if str(valor).strip()]
+            else:
+                tipos = [valor.strip() for valor in str(documento_tipo).split(",") if valor.strip()]
+
+            if TipoDocumentoReferencia.COMPRA_RECEPCION in tipos:
+                tipos = list(
+                    set(tipos).union(
+                        {
+                            TipoDocumentoReferencia.COMPRA_RECEPCION,
+                            TipoDocumentoReferencia.GUIA_RECEPCION,
+                            TipoDocumentoReferencia.FACTURA_COMPRA,
+                        }
+                    )
+                )
+
+            queryset = queryset.filter(documento_tipo__in=tipos)
         if referencia:
             queryset = queryset.filter(referencia__icontains=referencia)
         return queryset.order_by("creado_en", "id")

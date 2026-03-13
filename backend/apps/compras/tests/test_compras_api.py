@@ -202,6 +202,266 @@ class TestComprasApi:
         producto.refresh_from_db()
         assert producto.stock_actual == Decimal("3.00")
 
+    def test_factura_con_guia_previa_parcial_mueve_solo_pendiente_oc(self, api_client, owner_usuario, proveedor, empresa):
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
+
+        producto = Producto.objects.create(
+            empresa=empresa,
+            nombre="Producto Parcial OC",
+            sku="POC-1",
+            stock_actual=Decimal("0.00"),
+            maneja_inventario=True,
+            precio_referencia=Decimal("1000"),
+        )
+
+        orden_resp = api_client.post(
+            reverse("orden-compra-list"),
+            {
+                "proveedor": str(proveedor.id),
+                "fecha_emision": str(date.today()),
+            },
+            format="json",
+        )
+        assert orden_resp.status_code == status.HTTP_201_CREATED, orden_resp.data
+        orden_id = orden_resp.data["id"]
+
+        orden_item_resp = api_client.post(
+            reverse("orden-compra-item-list"),
+            {
+                "orden_compra": orden_id,
+                "producto": str(producto.id),
+                "descripcion": "Item parcial",
+                "cantidad": "10.00",
+                "precio_unitario": "1000.00",
+            },
+            format="json",
+        )
+        assert orden_item_resp.status_code == status.HTTP_201_CREATED, orden_item_resp.data
+
+        guia_resp = api_client.post(
+            reverse("documento-compra-list"),
+            {
+                "tipo_documento": "GUIA_RECEPCION",
+                "proveedor": str(proveedor.id),
+                "orden_compra": str(orden_id),
+                "folio": "GR-PARC-001",
+                "fecha_emision": str(date.today()),
+                "fecha_recepcion": str(date.today()),
+            },
+            format="json",
+        )
+        assert guia_resp.status_code == status.HTTP_201_CREATED, guia_resp.data
+
+        guia_id = guia_resp.data["id"]
+        guia_item_resp = api_client.post(
+            reverse("documento-compra-item-list"),
+            {
+                "documento": guia_id,
+                "producto": str(producto.id),
+                "cantidad": "4.00",
+                "precio_unitario": "1000.00",
+                "subtotal": "4000.00",
+            },
+            format="json",
+        )
+        assert guia_item_resp.status_code == status.HTTP_201_CREATED, guia_item_resp.data
+
+        guia_confirmar_resp = api_client.post(reverse("documento-compra-confirmar-guia", args=[guia_id]), {}, format="json")
+        assert guia_confirmar_resp.status_code == status.HTTP_200_OK
+
+        factura_resp = api_client.post(
+            reverse("documento-compra-list"),
+            {
+                "tipo_documento": "FACTURA_COMPRA",
+                "proveedor": str(proveedor.id),
+                "orden_compra": str(orden_id),
+                "folio": "FAC-PARC-001",
+                "fecha_emision": str(date.today()),
+                "fecha_recepcion": str(date.today()),
+            },
+            format="json",
+        )
+        assert factura_resp.status_code == status.HTTP_201_CREATED, factura_resp.data
+
+        factura_id = factura_resp.data["id"]
+        factura_item_resp = api_client.post(
+            reverse("documento-compra-item-list"),
+            {
+                "documento": factura_id,
+                "producto": str(producto.id),
+                "cantidad": "10.00",
+                "precio_unitario": "1000.00",
+                "subtotal": "10000.00",
+            },
+            format="json",
+        )
+        assert factura_item_resp.status_code == status.HTTP_201_CREATED, factura_item_resp.data
+
+        factura_confirmar_resp = api_client.post(reverse("documento-compra-confirmar-factura", args=[factura_id]), {}, format="json")
+        assert factura_confirmar_resp.status_code == status.HTTP_200_OK, factura_confirmar_resp.data
+
+        producto.refresh_from_db()
+        # Guia movio 4; factura debe mover solo pendiente (6)
+        assert producto.stock_actual == Decimal("10.00")
+
+    def test_guia_posterior_a_factura_no_duplica_stock(self, api_client, owner_usuario, proveedor, empresa):
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
+
+        producto = Producto.objects.create(
+            empresa=empresa,
+            nombre="Producto Factura Primero",
+            sku="PFP-1",
+            stock_actual=Decimal("0.00"),
+            maneja_inventario=True,
+            precio_referencia=Decimal("1000"),
+        )
+
+        orden_resp = api_client.post(
+            reverse("orden-compra-list"),
+            {
+                "proveedor": str(proveedor.id),
+                "fecha_emision": str(date.today()),
+            },
+            format="json",
+        )
+        assert orden_resp.status_code == status.HTTP_201_CREATED, orden_resp.data
+        orden_id = orden_resp.data["id"]
+
+        orden_item_resp = api_client.post(
+            reverse("orden-compra-item-list"),
+            {
+                "orden_compra": orden_id,
+                "producto": str(producto.id),
+                "descripcion": "Item factura primero",
+                "cantidad": "8.00",
+                "precio_unitario": "1000.00",
+            },
+            format="json",
+        )
+        assert orden_item_resp.status_code == status.HTTP_201_CREATED, orden_item_resp.data
+
+        factura_resp = api_client.post(
+            reverse("documento-compra-list"),
+            {
+                "tipo_documento": "FACTURA_COMPRA",
+                "proveedor": str(proveedor.id),
+                "orden_compra": str(orden_id),
+                "folio": "FAC-FIRST-001",
+                "fecha_emision": str(date.today()),
+                "fecha_recepcion": str(date.today()),
+            },
+            format="json",
+        )
+        assert factura_resp.status_code == status.HTTP_201_CREATED, factura_resp.data
+        factura_id = factura_resp.data["id"]
+
+        factura_item_resp = api_client.post(
+            reverse("documento-compra-item-list"),
+            {
+                "documento": factura_id,
+                "producto": str(producto.id),
+                "cantidad": "8.00",
+                "precio_unitario": "1000.00",
+                "subtotal": "8000.00",
+            },
+            format="json",
+        )
+        assert factura_item_resp.status_code == status.HTTP_201_CREATED, factura_item_resp.data
+
+        factura_confirmar_resp = api_client.post(reverse("documento-compra-confirmar-factura", args=[factura_id]), {}, format="json")
+        assert factura_confirmar_resp.status_code == status.HTTP_200_OK
+
+        guia_resp = api_client.post(
+            reverse("documento-compra-list"),
+            {
+                "tipo_documento": "GUIA_RECEPCION",
+                "proveedor": str(proveedor.id),
+                "orden_compra": str(orden_id),
+                "folio": "GR-LATE-001",
+                "fecha_emision": str(date.today()),
+                "fecha_recepcion": str(date.today()),
+            },
+            format="json",
+        )
+        assert guia_resp.status_code == status.HTTP_201_CREATED, guia_resp.data
+        guia_id = guia_resp.data["id"]
+
+        guia_item_resp = api_client.post(
+            reverse("documento-compra-item-list"),
+            {
+                "documento": guia_id,
+                "producto": str(producto.id),
+                "cantidad": "8.00",
+                "precio_unitario": "1000.00",
+                "subtotal": "8000.00",
+            },
+            format="json",
+        )
+        assert guia_item_resp.status_code == status.HTTP_201_CREATED, guia_item_resp.data
+
+        guia_confirmar_resp = api_client.post(reverse("documento-compra-confirmar-guia", args=[guia_id]), {}, format="json")
+        assert guia_confirmar_resp.status_code == status.HTTP_200_OK
+
+        producto.refresh_from_db()
+        assert producto.stock_actual == Decimal("8.00")
+
+    def test_confirmar_factura_en_transito_no_mueve_stock(self, api_client, owner_usuario, proveedor, empresa):
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
+
+        producto = Producto.objects.create(
+            empresa=empresa,
+            nombre="Producto En Transito",
+            sku="PET-1",
+            stock_actual=Decimal("0.00"),
+            maneja_inventario=True,
+            precio_referencia=Decimal("1200"),
+        )
+
+        documento_resp = api_client.post(
+            reverse("documento-compra-list"),
+            {
+                "tipo_documento": "FACTURA_COMPRA",
+                "proveedor": str(proveedor.id),
+                "folio": "FAC-TRANS-001",
+                "fecha_emision": str(date.today()),
+                "fecha_recepcion": str(date.today()),
+            },
+            format="json",
+        )
+        assert documento_resp.status_code == status.HTTP_201_CREATED
+
+        documento_id = documento_resp.data["id"]
+
+        documento_item_resp = api_client.post(
+            reverse("documento-compra-item-list"),
+            {
+                "documento": documento_id,
+                "producto": str(producto.id),
+                "cantidad": "3.00",
+                "precio_unitario": "1500.00",
+                "subtotal": "4500.00",
+            },
+            format="json",
+        )
+        assert documento_item_resp.status_code == status.HTTP_201_CREATED, documento_item_resp.data
+
+        confirmar_resp = api_client.post(
+            reverse("documento-compra-confirmar-factura", args=[documento_id]),
+            {"en_transito": True},
+            format="json",
+        )
+        assert confirmar_resp.status_code == status.HTTP_200_OK
+        assert confirmar_resp.data["estado"] == "CONFIRMADO"
+
+        assert not MovimientoInventario.all_objects.filter(
+            empresa=empresa,
+            producto=producto,
+            documento_tipo="FACTURA_COMPRA",
+            documento_id=documento_id,
+        ).exists()
+        producto.refresh_from_db()
+        assert producto.stock_actual == Decimal("0.00")
+
     def test_permite_multiples_documentos_para_misma_oc(self, api_client, owner_usuario, proveedor, empresa):
         api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
 
@@ -707,7 +967,123 @@ class TestComprasApi:
         )
 
         conf_2 = api_client.post(reverse("documento-compra-confirmar-factura", args=[doc_2.data["id"]]), {}, format="json")
-        assert conf_2.status_code == status.HTTP_409_CONFLICT
+        assert conf_2.status_code == status.HTTP_200_OK, conf_2.data
+
+        producto.refresh_from_db()
+        # La segunda factura solo debe mover pendiente de OC (2 de 3)
+        assert producto.stock_actual == Decimal("5.00")
+
+    def test_confirmar_factura_actualiza_estado_oc_a_recibida(self, api_client, owner_usuario, proveedor, empresa):
+        """Confirmar una factura que cubre el 100% de la OC debe dejarla en RECIBIDA."""
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
+
+        producto = Producto.objects.create(
+            empresa=empresa,
+            nombre="Prod OC Recibida",
+            sku="OC-REC-1",
+            stock_actual=Decimal("0.00"),
+            maneja_inventario=True,
+            precio_referencia=Decimal("1000"),
+        )
+
+        orden_resp = api_client.post(
+            reverse("orden-compra-list"),
+            {"proveedor": str(proveedor.id), "fecha_emision": str(date.today())},
+            format="json",
+        )
+        assert orden_resp.status_code == status.HTTP_201_CREATED
+        orden_id = orden_resp.data["id"]
+
+        api_client.post(
+            reverse("orden-compra-item-list"),
+            {"orden_compra": str(orden_id), "producto": str(producto.id), "descripcion": "Item test", "cantidad": "5.00", "precio_unitario": "1000.00"},
+            format="json",
+        )
+
+        OrdenCompra.all_objects.filter(id=orden_id).update(estado="ENVIADA")
+
+        factura_resp = api_client.post(
+            reverse("documento-compra-list"),
+            {
+                "tipo_documento": "FACTURA_COMPRA",
+                "proveedor": str(proveedor.id),
+                "orden_compra": str(orden_id),
+                "folio": "FAC-RECIBIDA-001",
+                "fecha_emision": str(date.today()),
+                "fecha_recepcion": str(date.today()),
+            },
+            format="json",
+        )
+        assert factura_resp.status_code == status.HTTP_201_CREATED
+        factura_id = factura_resp.data["id"]
+
+        api_client.post(
+            reverse("documento-compra-item-list"),
+            {"documento": factura_id, "producto": str(producto.id), "descripcion": "Item test", "cantidad": "5.00", "precio_unitario": "1000.00"},
+            format="json",
+        )
+
+        confirmar = api_client.post(reverse("documento-compra-confirmar-factura", args=[factura_id]), {}, format="json")
+        assert confirmar.status_code == status.HTTP_200_OK
+
+        orden = OrdenCompra.all_objects.get(id=orden_id)
+        assert orden.estado == "RECIBIDA"
+
+    def test_confirmar_guia_parcial_actualiza_estado_oc_a_parcial(self, api_client, owner_usuario, proveedor, empresa):
+        """Confirmar una guía que cubre solo parte de la OC debe dejarla en PARCIAL."""
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
+
+        producto = Producto.objects.create(
+            empresa=empresa,
+            nombre="Prod OC Parcial",
+            sku="OC-PARC-1",
+            stock_actual=Decimal("0.00"),
+            maneja_inventario=True,
+            precio_referencia=Decimal("1000"),
+        )
+
+        orden_resp = api_client.post(
+            reverse("orden-compra-list"),
+            {"proveedor": str(proveedor.id), "fecha_emision": str(date.today())},
+            format="json",
+        )
+        assert orden_resp.status_code == status.HTTP_201_CREATED
+        orden_id = orden_resp.data["id"]
+
+        api_client.post(
+            reverse("orden-compra-item-list"),
+            {"orden_compra": str(orden_id), "producto": str(producto.id), "descripcion": "Item test", "cantidad": "10.00", "precio_unitario": "1000.00"},
+            format="json",
+        )
+
+        OrdenCompra.all_objects.filter(id=orden_id).update(estado="ENVIADA")
+
+        guia_resp = api_client.post(
+            reverse("documento-compra-list"),
+            {
+                "tipo_documento": "GUIA_RECEPCION",
+                "proveedor": str(proveedor.id),
+                "orden_compra": str(orden_id),
+                "folio": "GR-PARCIAL-001",
+                "fecha_emision": str(date.today()),
+                "fecha_recepcion": str(date.today()),
+            },
+            format="json",
+        )
+        assert guia_resp.status_code == status.HTTP_201_CREATED
+        guia_id = guia_resp.data["id"]
+
+        api_client.post(
+            reverse("documento-compra-item-list"),
+            {"documento": guia_id, "producto": str(producto.id), "descripcion": "Item test", "cantidad": "4.00", "precio_unitario": "1000.00"},
+            format="json",
+        )
+
+        confirmar = api_client.post(reverse("documento-compra-confirmar-guia", args=[guia_id]), {}, format="json")
+        assert confirmar.status_code == status.HTTP_200_OK
+
+        orden = OrdenCompra.all_objects.get(id=orden_id)
+        assert orden.estado == "PARCIAL"
 
     def test_recepcion_compra_endpoint_confirma_y_actualiza_oc(self, api_client, owner_usuario, proveedor, empresa):
         api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")

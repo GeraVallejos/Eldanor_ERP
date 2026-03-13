@@ -203,6 +203,7 @@ class MovimientoInventarioViewSet(TenantViewSetMixin, ModelViewSet):
         hasta = self._parse_instant(request.query_params.get("hasta"), end_of_day=True)
         tipo = request.query_params.get("tipo")
         documento_tipo = request.query_params.get("documento_tipo")
+        documento_tipos = [valor.strip() for valor in str(documento_tipo or "").split(",") if valor.strip()]
         referencia = request.query_params.get("referencia")
         if not producto_id:
             return Response({"detail": "producto_id es requerido."}, status=status.HTTP_400_BAD_REQUEST)
@@ -214,7 +215,7 @@ class MovimientoInventarioViewSet(TenantViewSetMixin, ModelViewSet):
             desde=desde,
             hasta=hasta,
             tipo=tipo,
-            documento_tipo=documento_tipo,
+            documento_tipo=documento_tipos,
             referencia=referencia,
         )
 

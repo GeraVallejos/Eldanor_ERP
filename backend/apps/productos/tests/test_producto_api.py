@@ -219,3 +219,24 @@ class TestProductoApi:
         assert resp.status_code == status.HTTP_204_NO_CONTENT
         producto.refresh_from_db()
         assert producto.activo is False
+
+    def test_owner_puede_reactivar_producto_inactivo_por_patch_detalle(self, api_client, owner_usuario, empresa):
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
+
+        producto = Producto.objects.create(
+            empresa=empresa,
+            nombre="Producto Reactivable",
+            sku="PR-001",
+            precio_referencia=Decimal("2200"),
+            activo=False,
+        )
+
+        resp = api_client.patch(
+            reverse("producto-detail", args=[producto.id]),
+            {"activo": True},
+            format="json",
+        )
+
+        assert resp.status_code == status.HTTP_200_OK, resp.data
+        producto.refresh_from_db()
+        assert producto.activo is True

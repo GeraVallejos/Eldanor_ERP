@@ -285,6 +285,87 @@ class TestDocumentoCompraService:
         producto_factura.refresh_from_db()
         assert producto_factura.stock_actual == Decimal("0")
 
+        cxp = CuentaPorPagar.all_objects.get(empresa=empresa, documento_compra=factura)
+        assert cxp.estado == "ANULADA"
+        assert cxp.saldo == Decimal("0")
+
+    def test_reingreso_factura_mismo_folio_tras_anulacion_no_colisiona_cxp(self, empresa, owner_usuario, proveedor):
+        producto = Producto.objects.create(
+            empresa=empresa,
+            creado_por=owner_usuario,
+            nombre="Producto Reingreso Factura",
+            sku="PRF-001",
+            stock_actual=Decimal("0.00"),
+            maneja_inventario=True,
+            precio_referencia=Decimal("4000"),
+        )
+
+        factura_1 = DocumentoCompraProveedor.objects.create(
+            empresa=empresa,
+            creado_por=owner_usuario,
+            tipo_documento="FACTURA_COMPRA",
+            proveedor=proveedor,
+            folio="FAC-REING-001",
+            fecha_emision=date.today(),
+            fecha_recepcion=date.today(),
+            subtotal_neto=Decimal("4000"),
+            impuestos=Decimal("760"),
+            total=Decimal("4760"),
+        )
+        DocumentoCompraProveedorItem.objects.create(
+            empresa=empresa,
+            creado_por=owner_usuario,
+            documento=factura_1,
+            producto=producto,
+            cantidad=Decimal("1"),
+            precio_unitario=Decimal("4000"),
+            subtotal=Decimal("4000"),
+        )
+
+        DocumentoCompraService.confirmar_factura(
+            documento_id=factura_1.id,
+            empresa=empresa,
+            usuario=owner_usuario,
+        )
+        DocumentoCompraService.anular_documento(
+            documento_id=factura_1.id,
+            empresa=empresa,
+            usuario=owner_usuario,
+        )
+
+        factura_2 = DocumentoCompraProveedor.objects.create(
+            empresa=empresa,
+            creado_por=owner_usuario,
+            tipo_documento="FACTURA_COMPRA",
+            proveedor=proveedor,
+            folio="FAC-REING-001",
+            fecha_emision=date.today(),
+            fecha_recepcion=date.today(),
+            subtotal_neto=Decimal("4000"),
+            impuestos=Decimal("760"),
+            total=Decimal("4760"),
+        )
+        DocumentoCompraProveedorItem.objects.create(
+            empresa=empresa,
+            creado_por=owner_usuario,
+            documento=factura_2,
+            producto=producto,
+            cantidad=Decimal("1"),
+            precio_unitario=Decimal("4000"),
+            subtotal=Decimal("4000"),
+        )
+
+        DocumentoCompraService.confirmar_factura(
+            documento_id=factura_2.id,
+            empresa=empresa,
+            usuario=owner_usuario,
+        )
+
+        cxp_1 = CuentaPorPagar.all_objects.get(empresa=empresa, documento_compra=factura_1)
+        cxp_2 = CuentaPorPagar.all_objects.get(empresa=empresa, documento_compra=factura_2)
+        assert cxp_1.referencia != cxp_2.referencia
+        assert cxp_2.estado == "PENDIENTE"
+
     def test_confirmar_guia_no_encontrada_lanza_error(self, empresa, owner_usuario):
         import uuid
         with pytest.raises(ResourceNotFoundError):

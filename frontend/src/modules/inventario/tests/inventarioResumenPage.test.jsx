@@ -59,7 +59,7 @@ describe('inventario/InventarioResumenPage', () => {
     renderWithProviders(<InventarioResumenPage />)
 
     expect(await screen.findByRole('heading', { name: 'Resumen valorizado' })).toBeInTheDocument()
-    expect(screen.getByText('180.000')).toBeInTheDocument()
+    expect(await screen.findByText('$ 180.000')).toBeInTheDocument()
 
     await userEvent.selectOptions(screen.getByLabelText('Agrupar por'), 'bodega')
     await userEvent.click(screen.getByRole('button', { name: 'Actualizar' }))

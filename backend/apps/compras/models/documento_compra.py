@@ -97,6 +97,25 @@ class DocumentoCompraProveedor(BaseModel):
     # Flag técnico para unicidad compatible con MySQL (sin constraints condicionales).
     bloquea_duplicado = models.BooleanField(default=True, editable=False)
 
+    # Auditoría de ciclo de vida
+    confirmado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="documentos_compra_confirmados",
+    )
+    confirmado_en = models.DateTimeField(null=True, blank=True)
+
+    anulado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="documentos_compra_anulados",
+    )
+    anulado_en = models.DateTimeField(null=True, blank=True)
+
     class Meta:
         constraints = [
             models.UniqueConstraint(

@@ -15,9 +15,12 @@ import { api } from '@/api/client'
 import { normalizeApiError } from '@/api/errors'
 import Button from '@/components/ui/Button'
 import BulkImportButton from '@/components/ui/BulkImportButton'
+import ExportMenuButton from '@/components/ui/ExportMenuButton'
 import { buttonVariants } from '@/components/ui/buttonVariants'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import TablePagination from '@/components/ui/TablePagination'
+import { getChileDateSuffix } from '@/lib/dateTimeFormat'
+import { formatCurrencyCLP, formatSmartNumber } from '@/lib/numberFormat'
 import { cn } from '@/lib/utils'
 import { invalidateProductosCatalogCache } from '@/modules/productos/services/productosCatalogCache'
 import { downloadExcelFile } from '@/modules/shared/exports/downloadExcelFile'
@@ -35,12 +38,7 @@ import { selectCurrentUser } from '@/modules/auth/authSlice'
 const columnHelper = createColumnHelper()
 
 function formatMoney(value) {
-  const num = Number(value)
-  if (!Number.isFinite(num)) {
-    return '0'
-  }
-
-  return Math.round(num).toLocaleString('es-CL')
+  return formatCurrencyCLP(value)
 }
 
 function ProductosListPage() {
@@ -221,6 +219,10 @@ function ProductosListPage() {
         header: 'Precio ref.',
         cell: (info) => formatMoney(info.getValue() ?? 0),
       }),
+      columnHelper.accessor('stock_actual', {
+        header: 'Stock actual',
+        cell: (info) => formatSmartNumber(info.getValue() ?? 0, { maximumFractionDigits: 2 }),
+      }),
       columnHelper.accessor('activo', {
         header: 'Activo',
         cell: (info) => (info.getValue() ? 'Si' : 'No'),
@@ -283,7 +285,7 @@ function ProductosListPage() {
       return
     }
 
-    const today = new Date().toISOString().slice(0, 10)
+    const today = getChileDateSuffix()
 
     await downloadExcelFile({
       sheetName: 'Productos',
@@ -321,11 +323,11 @@ function ProductosListPage() {
       return
     }
 
-    const today = new Date().toISOString().slice(0, 10)
+    const today = getChileDateSuffix()
     await downloadSimpleTablePdf({
       title: 'Listado de productos',
       fileName: `productos_${today}.pdf`,
-      headers: ['Nombre', 'SKU', 'Tipo', 'Categoria', 'Precio ref.', 'Activo'],
+      headers: ['Nombre', 'SKU', 'Tipo', 'Categoria', 'Precio ref.', 'Stock actual', 'Activo'],
       rows: rows.map((row) => {
         const item = row.original
         return [
@@ -334,6 +336,7 @@ function ProductosListPage() {
           item?.tipo || '-',
           categoriaLabelById.get(String(item?.categoria || '')) || '-',
           formatMoney(item?.precio_referencia ?? 0),
+          Math.round(Number(item?.stock_actual ?? 0)).toLocaleString('es-CL'),
           item?.activo ? 'Si' : 'No',
         ]
       }),
@@ -369,26 +372,15 @@ function ProductosListPage() {
               }}
             />
           ) : null}
-          <Button
-            onClick={handleExportExcel}
+          <ExportMenuButton
+            onExportExcel={handleExportExcel}
+            onExportPdf={handleExportPdf}
             disabled={status !== 'succeeded' || table.getRowModel().rows.length === 0}
             variant="outline"
             size="md"
             fullWidth
             className="sm:w-auto"
-          >
-            Exportar Excel
-          </Button>
-          <Button
-            onClick={handleExportPdf}
-            disabled={status !== 'succeeded' || table.getRowModel().rows.length === 0}
-            variant="outline"
-            size="md"
-            fullWidth
-            className="sm:w-auto"
-          >
-            Exportar PDF
-          </Button>
+          />
           <Link
             to="/productos/nuevo"
             className={cn(buttonVariants({ variant: 'default', size: 'md', fullWidth: true }), 'sm:w-auto')}

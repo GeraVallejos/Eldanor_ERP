@@ -10,10 +10,17 @@ import {
   bootstrapSession,
   logout,
 } from '@/modules/auth/authSlice'
+import { startGlobalLoading, stopGlobalLoading } from '@/modules/shared/ui/uiSlice'
 
 setupApiInterceptors({
   onAuthFailed: () => {
     store.dispatch(logout())
+  },
+  onRequestStart: () => {
+    store.dispatch(startGlobalLoading())
+  },
+  onRequestEnd: () => {
+    store.dispatch(stopGlobalLoading())
   },
 })
 

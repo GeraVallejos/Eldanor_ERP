@@ -53,16 +53,36 @@ const refreshApi = axios.create({
   withCredentials: true,
 })
 
-export function setupApiInterceptors({ onAuthFailed }) {
-  const requestInterceptor = api.interceptors.request.use(withCsrfHeader)
+export function setupApiInterceptors({ onAuthFailed, onRequestStart, onRequestEnd }) {
+  const finalizeLoading = (config) => {
+    if (!config?._globalLoadingTracked) {
+      return
+    }
+    config._globalLoadingTracked = false
+    onRequestEnd?.()
+  }
+
+  const requestInterceptor = api.interceptors.request.use((config) => {
+    const nextConfig = withCsrfHeader(config)
+    if (!nextConfig?.suppressGlobalLoading) {
+      nextConfig._globalLoadingTracked = true
+      onRequestStart?.()
+    }
+    return nextConfig
+  })
   const refreshRequestInterceptor = refreshApi.interceptors.request.use(withCsrfHeader)
 
   const responseInterceptor = api.interceptors.response.use(
-    (response) => response,
+    (response) => {
+      finalizeLoading(response?.config)
+      return response
+    },
     async (error) => {
       const status = error?.response?.status
       const originalRequest = error?.config
       const suppressGlobalErrorToast = originalRequest?.suppressGlobalErrorToast
+
+      finalizeLoading(originalRequest)
 
       if (!originalRequest || status !== 401 || originalRequest._retry) {
         notifyGlobalApiError(error, { suppressGlobalErrorToast })

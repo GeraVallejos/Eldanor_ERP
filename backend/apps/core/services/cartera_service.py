@@ -36,7 +36,8 @@ class CarteraService:
 
         dias_credito = getattr(documento.proveedor, "dias_credito", 0) or 0
         fecha_vencimiento = documento.fecha_emision + timedelta(days=int(dias_credito))
-        referencia = f"COMPRA-{documento.tipo_documento}-{documento.folio}"
+        # Incluye sufijo estable por documento para evitar colision al reingresar mismo folio tras anulación.
+        referencia = f"COMPRA-{documento.tipo_documento}-{documento.folio}-{str(documento.id)[:8]}"
         moneda = CarteraService._moneda_documento_o_base(
             empresa=documento.empresa,
             moneda=getattr(documento, "moneda", None),

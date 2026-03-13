@@ -4,6 +4,7 @@ import { toast } from 'sonner'
 import { api } from '@/api/client'
 import { normalizeApiError } from '@/api/errors'
 import Button from '@/components/ui/Button'
+import { getChileDateSuffix } from '@/lib/dateTimeFormat'
 import { getProductosCatalog } from '@/modules/productos/services/productosCatalogCache'
 import { buttonVariants } from '@/components/ui/buttonVariants'
 import { cn } from '@/lib/utils'
@@ -21,7 +22,7 @@ function normalizeListResponse(data) {
 }
 
 function todayDate() {
-  return new Date().toISOString().slice(0, 10)
+  return getChileDateSuffix()
 }
 
 function createEmptyItem() {

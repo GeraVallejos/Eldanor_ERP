@@ -5,8 +5,11 @@ import { api } from '@/api/client'
 import { normalizeApiError } from '@/api/errors'
 import Button from '@/components/ui/Button'
 import DocumentActionsDialog from '@/components/ui/DocumentActionsDialog'
+import ExportMenuButton from '@/components/ui/ExportMenuButton'
 import ReasonDialog from '@/components/ui/ReasonDialog'
 import { buttonVariants } from '@/components/ui/buttonVariants'
+import { formatDateChile, getChileDateSuffix } from '@/lib/dateTimeFormat'
+import { formatCurrencyCLP } from '@/lib/numberFormat'
 import TablePagination from '@/components/ui/TablePagination'
 import { useTableSorting } from '@/lib/tableSorting'
 import { cn } from '@/lib/utils'
@@ -31,9 +34,7 @@ function normalizeListResponse(data) {
 }
 
 function formatMoney(value) {
-  const num = Number(value)
-  if (!Number.isFinite(num)) return '0'
-  return Math.round(num).toLocaleString('es-CL')
+  return formatCurrencyCLP(value)
 }
 
 function ComprasDocumentosListPage() {
@@ -50,6 +51,8 @@ function ComprasDocumentosListPage() {
   const [actionDialogOpen, setActionDialogOpen] = useState(false)
   const [actionType, setActionType] = useState(null)
   const [actionItem, setActionItem] = useState(null)
+  const [facturaConfirmDoc, setFacturaConfirmDoc] = useState(null)
+  const [facturaEnTransito, setFacturaEnTransito] = useState(false)
 
   const loadData = async () => {
     setStatus('loading')
@@ -106,6 +109,16 @@ function ComprasDocumentosListPage() {
     setActionDialogOpen(false)
     setActionItem(null)
     setActionType(null)
+  }
+
+  const openFacturaConfirmDialog = (doc) => {
+    setFacturaConfirmDoc(doc)
+    setFacturaEnTransito(false)
+  }
+
+  const closeFacturaConfirmDialog = () => {
+    setFacturaConfirmDoc(null)
+    setFacturaEnTransito(false)
   }
 
   const handleActionConfirm = async () => {
@@ -177,7 +190,7 @@ function ComprasDocumentosListPage() {
     initialDirection: 'desc',
   })
 
-  const handleAccion = async (doc, accion) => {
+  const handleAccion = async (doc, accion, options = {}) => {
     setUpdatingId(doc.id)
     try {
       let endpoint = ''
@@ -200,6 +213,9 @@ function ComprasDocumentosListPage() {
           doc.tipo_documento === 'GUIA_RECEPCION'
             ? `/documentos-compra/${doc.id}/confirmar_guia/`
             : `/documentos-compra/${doc.id}/confirmar_factura/`
+        payload = {
+          en_transito: Boolean(options.enTransito),
+        }
       }
 
       const { data } = await api.post(endpoint, payload, { suppressGlobalErrorToast: true })
@@ -213,7 +229,13 @@ function ComprasDocumentosListPage() {
         toast.success('Documento duplicado correctamente.')
       } else {
         setDocumentos((prev) => prev.map((d) => (String(d.id) === String(doc.id) ? { ...d, ...data } : d)))
-        toast.success(accion === 'anular' ? 'Documento anulado.' : 'Documento confirmado.')
+        toast.success(
+          accion === 'anular'
+            ? 'Documento anulado.'
+            : options.enTransito
+            ? 'Documento confirmado en transito (sin ingreso a stock disponible).'
+            : 'Documento confirmado.',
+        )
       }
     } catch (error) {
       toast.error(normalizeApiError(error, { fallback: 'No se pudo actualizar el documento.' }))
@@ -222,7 +244,7 @@ function ComprasDocumentosListPage() {
     }
   }
 
-  const getTodaySuffix = () => new Date().toISOString().slice(0, 10)
+  const getTodaySuffix = () => getChileDateSuffix()
 
   const handleExportExcel = async () => {
     if (filtered.length === 0) return
@@ -244,7 +266,7 @@ function ComprasDocumentosListPage() {
           tipo: TIPO_LABELS[doc.tipo_documento] || doc.tipo_documento,
           folio: doc.folio || '-',
           proveedor: ctc?.nombre || '-',
-          fecha_emision: doc.fecha_emision || '-',
+          fecha_emision: formatDateChile(doc.fecha_emision),
           estado: ESTADO_LABELS[doc.estado] || doc.estado,
           total: Number(doc.total || 0),
         }
@@ -265,7 +287,7 @@ function ComprasDocumentosListPage() {
           TIPO_LABELS[doc.tipo_documento] || doc.tipo_documento,
           doc.folio || '-',
           ctc?.nombre || '-',
-          doc.fecha_emision || '-',
+          formatDateChile(doc.fecha_emision),
           ESTADO_LABELS[doc.estado] || doc.estado,
           formatMoney(doc.total),
         ]
@@ -279,26 +301,15 @@ function ComprasDocumentosListPage() {
         <h2 className="text-2xl font-semibold">Documentos de compra</h2>
 
         <div className="grid grid-cols-1 gap-2 sm:flex sm:items-center sm:justify-end sm:gap-2">
-          <Button
+          <ExportMenuButton
             variant="outline"
             size="md"
             fullWidth
             className="sm:w-auto"
-            onClick={handleExportExcel}
+            onExportExcel={handleExportExcel}
+            onExportPdf={handleExportPdf}
             disabled={filtered.length === 0}
-          >
-            Exportar Excel
-          </Button>
-          <Button
-            variant="outline"
-            size="md"
-            fullWidth
-            className="sm:w-auto"
-            onClick={handleExportPdf}
-            disabled={filtered.length === 0}
-          >
-            Exportar PDF
-          </Button>
+          />
           <Link
             to="/compras/ordenes"
             className={cn(buttonVariants({ variant: 'outline', size: 'md', fullWidth: true }), 'sm:w-auto')}
@@ -413,7 +424,7 @@ function ComprasDocumentosListPage() {
                       <td className="px-3 py-2">{TIPO_LABELS[doc.tipo_documento] || doc.tipo_documento}</td>
                       <td className="px-3 py-2">{doc.folio}</td>
                       <td className="px-3 py-2">{ctc?.nombre || '-'}</td>
-                      <td className="px-3 py-2">{doc.fecha_emision || '-'}</td>
+                      <td className="px-3 py-2">{formatDateChile(doc.fecha_emision)}</td>
                       <td className="px-3 py-2">{ESTADO_LABELS[doc.estado] || doc.estado}</td>
                       <td className="px-3 py-2 text-right">{formatMoney(doc.total)}</td>
                       <td className="px-3 py-2">
@@ -440,7 +451,13 @@ function ComprasDocumentosListPage() {
                                 size="sm"
                                 className="text-xs"
                                 disabled={isBusy}
-                                onClick={() => handleAccion(doc, 'confirmar')}
+                                onClick={() => {
+                                  if (doc.tipo_documento === 'FACTURA_COMPRA') {
+                                    openFacturaConfirmDialog(doc)
+                                    return
+                                  }
+                                  void handleAccion(doc, 'confirmar')
+                                }}
                               >
                                 {isBusy ? 'Procesando...' : 'Confirmar'}
                               </Button>
@@ -546,6 +563,65 @@ function ComprasDocumentosListPage() {
         onCancel={closeActionDialog}
         onConfirm={handleActionConfirm}
       />
+
+      {facturaConfirmDoc ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="w-full max-w-lg rounded-lg bg-background p-6 shadow-xl space-y-4">
+            <h3 className="text-lg font-semibold">Confirmar factura de compra</h3>
+            <p className="text-sm text-muted-foreground">
+              Define como impactara inventario la factura {facturaConfirmDoc.folio || '-'}. Si ya hubo ingreso fisico por GD/recepcion,
+              el sistema solo movera pendiente para evitar duplicados.
+            </p>
+
+            <label className="flex items-start gap-2 rounded-md border border-border p-3">
+              <input
+                type="radio"
+                name="factura-flujo"
+                checked={!facturaEnTransito}
+                onChange={() => setFacturaEnTransito(false)}
+                className="mt-1"
+              />
+              <span className="text-sm">
+                <span className="font-medium">Ingreso normal</span>
+                <br />
+                Confirma la factura y registra entrada a inventario disponible (solo pendiente de OC si aplica).
+              </span>
+            </label>
+
+            <label className="flex items-start gap-2 rounded-md border border-border p-3">
+              <input
+                type="radio"
+                name="factura-flujo"
+                checked={facturaEnTransito}
+                onChange={() => setFacturaEnTransito(true)}
+                className="mt-1"
+              />
+              <span className="text-sm">
+                <span className="font-medium">Factura en transito</span>
+                <br />
+                Confirma documento tributario, pero sin mover stock disponible todavia.
+              </span>
+            </label>
+
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" size="md" onClick={closeFacturaConfirmDialog}>
+                Cancelar
+              </Button>
+              <Button
+                variant="default"
+                size="md"
+                disabled={updatingId === facturaConfirmDoc.id}
+                onClick={async () => {
+                  await handleAccion(facturaConfirmDoc, 'confirmar', { enTransito: facturaEnTransito })
+                  closeFacturaConfirmDialog()
+                }}
+              >
+                {updatingId === facturaConfirmDoc.id ? 'Procesando...' : 'Confirmar factura'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </section>
   )
 }

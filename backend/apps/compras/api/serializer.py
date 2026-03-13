@@ -79,7 +79,10 @@ class DocumentoCompraProveedorSerializer(serializers.ModelSerializer):
     class Meta:
         model = DocumentoCompraProveedor
         fields = "__all__"
-        read_only_fields = ("id", "empresa", "creado_por", "creado_en", "actualizado_en", "estado")
+        read_only_fields = (
+            "id", "empresa", "creado_por", "creado_en", "actualizado_en", "estado",
+            "confirmado_por", "confirmado_en", "anulado_por", "anulado_en",
+        )
         validators = []
 
 

@@ -42,7 +42,7 @@ describe('inventario/InventarioKardexPage', () => {
               tipo: 'ENTRADA',
               cantidad: '5.00',
               stock_anterior: '10.00',
-              stock_nuevo: '15.00',
+              stock_nuevo: '15.50',
               costo_unitario: '12000.00',
               valor_total: '60000.00',
               documento_tipo: 'COMPRA_RECEPCION',
@@ -64,17 +64,26 @@ describe('inventario/InventarioKardexPage', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Principal' }))
 
     await userEvent.selectOptions(screen.getByLabelText('Tipo'), 'ENTRADA')
-    await userEvent.type(screen.getByPlaceholderText('Buscar texto de referencia'), 'OC-001')
+    await userEvent.click(screen.getByLabelText('Guia de recepcion'))
+    await userEvent.click(screen.getByLabelText('Factura de compra'))
+    await userEvent.type(screen.getByPlaceholderText('Ej: GUIA 123, FACTURA 456, ANULACION'), 'OC-001')
     await userEvent.click(screen.getByRole('button', { name: 'Consultar' }))
 
-    expect(await screen.findByText('COMPRA_RECEPCION')).toBeInTheDocument()
+    expect(await screen.findByText('Compra recepcion')).toBeInTheDocument()
     expect(screen.getByText('OC-001')).toBeInTheDocument()
+    expect(screen.getByText('5')).toBeInTheDocument()
+    expect(screen.getByText('10')).toBeInTheDocument()
+    expect(screen.getByText('15,5')).toBeInTheDocument()
+    expect(screen.queryByText('5.00')).not.toBeInTheDocument()
+    expect(screen.queryByText('10.00')).not.toBeInTheDocument()
+    expect(screen.queryByText('15.50')).not.toBeInTheDocument()
 
     await waitFor(() => {
       expect(kardexParams).toMatchObject({
         producto_id: 'prod-1',
         bodega_id: 'bod-1',
         tipo: 'ENTRADA',
+        documento_tipo: 'GUIA_RECEPCION,FACTURA_COMPRA',
         referencia: 'OC-001',
       })
     })

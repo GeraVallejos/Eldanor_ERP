@@ -3,7 +3,10 @@ import { toast } from 'sonner'
 import { api } from '@/api/client'
 import { normalizeApiError } from '@/api/errors'
 import Button from '@/components/ui/Button'
+import ExportMenuButton from '@/components/ui/ExportMenuButton'
 import SearchableSelect from '@/components/ui/SearchableSelect'
+import { formatDateTimeChile, getChileDateSuffix } from '@/lib/dateTimeFormat'
+import { formatCurrencyCLP, formatSmartNumber } from '@/lib/numberFormat'
 import { getProductosCatalog } from '@/modules/productos/services/productosCatalogCache'
 import { downloadExcelFile } from '@/modules/shared/exports/downloadExcelFile'
 import { downloadSimpleTablePdf } from '@/modules/shared/exports/downloadSimpleTablePdf'
@@ -20,16 +23,15 @@ function normalizeListResponse(data) {
   return []
 }
 
-function formatMoney(value) {
-  const num = Number(value)
-  if (!Number.isFinite(num)) {
-    return '0'
-  }
-  return Math.round(num).toLocaleString('es-CL')
+function formatNumber(value) {
+  return formatSmartNumber(value, { maximumFractionDigits: 2 })
+}
+
+function formatCurrency(value) {
+  return formatCurrencyCLP(value)
 }
 
 function InventarioResumenPage() {
-  const [status, setStatus] = useState('idle')
   const [stocks, setStocks] = useState([])
   const [productos, setProductos] = useState([])
   const [bodegas, setBodegas] = useState([])
@@ -57,16 +59,13 @@ function InventarioResumenPage() {
   }
 
   const loadResumen = useCallback(async (nextFilters) => {
-    setStatus('loading')
     try {
       const { data } = await api.get('/stocks/resumen/', {
         params: nextFilters,
         suppressGlobalErrorToast: true,
       })
       setResumen(data)
-      setStatus('succeeded')
     } catch (error) {
-      setStatus('failed')
       toast.error(normalizeApiError(error, { fallback: 'No se pudo cargar el resumen valorizado.' }))
     }
   }, [])
@@ -115,6 +114,14 @@ function InventarioResumenPage() {
     [bodegas],
   )
 
+  const bodegaById = useMemo(() => {
+    const map = new Map()
+    bodegas.forEach((bodega) => {
+      map.set(String(bodega.id), bodega)
+    })
+    return map
+  }, [bodegas])
+
   const onSubmit = async (event) => {
     event.preventDefault()
     await loadResumen(filters)
@@ -124,7 +131,9 @@ function InventarioResumenPage() {
     return stocks.reduce((acc, row) => acc + Number(row.stock || 0), 0)
   }, [stocks])
 
-  const getTodaySuffix = () => new Date().toISOString().slice(0, 10)
+  const resumenStockTotal = Number(resumen?.totales?.stock_total || 0)
+
+  const getTodaySuffix = () => getChileDateSuffix()
 
   const detalleRows = useMemo(() => {
     const rows = Array.isArray(resumen?.detalle) ? resumen.detalle : []
@@ -133,6 +142,8 @@ function InventarioResumenPage() {
       return rows.map((row) => ({
         groupLabel: row.bodega__nombre || '-',
         stockTotal: Number(row.stock_total || 0),
+        reservadoTotal: Number(row.reservado_total || 0),
+        disponibleTotal: Number(row.disponible_total || 0),
         valorTotal: Number(row.valor_total || 0),
       }))
     }
@@ -146,6 +157,8 @@ function InventarioResumenPage() {
         sku: producto?.sku || '-',
         tipo: producto?.tipo || '-',
         stockTotal: Number(row.stock_total || 0),
+        reservadoTotal: Number(row.reservado_total || 0),
+        disponibleTotal: Number(row.disponible_total || 0),
         valorTotal: Number(row.valor_total || 0),
       }
     })
@@ -164,6 +177,15 @@ function InventarioResumenPage() {
       return
     }
 
+    const filtroProductoLabel = filters.producto_id
+      ? productoById.get(String(filters.producto_id))?.nombre || String(filters.producto_id)
+      : 'Todos'
+    const filtroBodegaLabel = filters.bodega_id
+      ? bodegaById.get(String(filters.bodega_id))?.nombre || String(filters.bodega_id)
+      : 'Todas'
+    const valorTotalGeneral = Number(resumen?.totales?.valor_total || 0)
+    const now = new Date()
+
     await downloadExcelFile({
       sheetName: 'ResumenInventario',
       fileName: `resumen_inventario_${getTodaySuffix()}.xlsx`,
@@ -171,16 +193,34 @@ function InventarioResumenPage() {
         filters.group_by === 'bodega'
           ? [
               { header: 'Bodega', key: 'grupo', width: 30 },
-              { header: 'Stock', key: 'stock_total', width: 14 },
-              { header: 'Valor', key: 'valor_total', width: 16 },
+              { header: 'Stock total', key: 'stock_total', width: 14 },
+              { header: 'Stock reservado', key: 'reservado_total', width: 16 },
+              { header: 'Stock disponible', key: 'disponible_total', width: 16 },
+              { header: 'Valor total', key: 'valor_total', width: 16 },
+              { header: 'Costo promedio', key: 'costo_promedio', width: 16 },
+              { header: '% valor inventario', key: 'participacion_valor_pct', width: 18 },
+              { header: 'Agrupacion', key: 'ctx_group_by', width: 14 },
+              { header: 'Filtro producto', key: 'ctx_producto', width: 24 },
+              { header: 'Filtro bodega', key: 'ctx_bodega', width: 24 },
+              { header: 'Solo con stock', key: 'ctx_only_with_stock', width: 16 },
+              { header: 'Exportado en', key: 'ctx_exportado_en', width: 22 },
             ]
           : [
               { header: 'Producto', key: 'grupo', width: 30 },
               { header: 'Categoria', key: 'categoria', width: 22 },
               { header: 'SKU', key: 'sku', width: 18 },
               { header: 'Tipo', key: 'tipo', width: 16 },
-              { header: 'Stock', key: 'stock_total', width: 14 },
-              { header: 'Valor', key: 'valor_total', width: 16 },
+              { header: 'Stock total', key: 'stock_total', width: 14 },
+              { header: 'Stock reservado', key: 'reservado_total', width: 16 },
+              { header: 'Stock disponible', key: 'disponible_total', width: 16 },
+              { header: 'Valor total', key: 'valor_total', width: 16 },
+              { header: 'Costo promedio', key: 'costo_promedio', width: 16 },
+              { header: '% valor inventario', key: 'participacion_valor_pct', width: 18 },
+              { header: 'Agrupacion', key: 'ctx_group_by', width: 14 },
+              { header: 'Filtro producto', key: 'ctx_producto', width: 24 },
+              { header: 'Filtro bodega', key: 'ctx_bodega', width: 24 },
+              { header: 'Solo con stock', key: 'ctx_only_with_stock', width: 16 },
+              { header: 'Exportado en', key: 'ctx_exportado_en', width: 22 },
             ],
       rows: rows.map((row) => ({
         grupo: row.groupLabel,
@@ -188,7 +228,17 @@ function InventarioResumenPage() {
         sku: row.sku,
         tipo: row.tipo,
         stock_total: row.stockTotal,
+        reservado_total: row.reservadoTotal,
+        disponible_total: row.disponibleTotal,
         valor_total: row.valorTotal,
+        costo_promedio: Number(row.stockTotal || 0) > 0 ? row.valorTotal / row.stockTotal : 0,
+        participacion_valor_pct:
+          valorTotalGeneral > 0 ? Number(((row.valorTotal / valorTotalGeneral) * 100).toFixed(2)) : 0,
+        ctx_group_by: filters.group_by,
+        ctx_producto: filtroProductoLabel,
+        ctx_bodega: filtroBodegaLabel,
+        ctx_only_with_stock: onlyWithStock ? 'Si' : 'No',
+        ctx_exportado_en: formatDateTimeChile(now),
       })),
     })
   }
@@ -210,16 +260,16 @@ function InventarioResumenPage() {
         filters.group_by === 'bodega'
           ? rows.map((row) => [
               row.groupLabel,
-              formatMoney(row.stockTotal),
-              formatMoney(row.valorTotal),
+              formatNumber(row.stockTotal),
+              formatCurrency(row.valorTotal),
             ])
           : rows.map((row) => [
               row.groupLabel,
               row.categoria || '-',
               row.sku || '-',
               row.tipo || '-',
-              formatMoney(row.stockTotal),
-              formatMoney(row.valorTotal),
+              formatNumber(row.stockTotal),
+              formatCurrency(row.valorTotal),
             ]),
     })
   }
@@ -272,43 +322,30 @@ function InventarioResumenPage() {
 
         <div className="flex items-end gap-2">
           <Button type="submit">Actualizar</Button>
-          <Button
-            type="button"
+          <ExportMenuButton
             variant="outline"
-            onClick={handleExportExcel}
+            onExportExcel={handleExportExcel}
+            onExportPdf={handleExportPdf}
             disabled={visibleRows.length === 0}
-          >
-            Excel
-          </Button>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={handleExportPdf}
-            disabled={visibleRows.length === 0}
-          >
-            PDF
-          </Button>
+          />
         </div>
       </form>
 
       <div className="grid gap-3 md:grid-cols-3">
         <article className="rounded-md border border-border bg-card p-4">
-          <p className="text-xs text-muted-foreground">Stock total (vista stocks)</p>
-          <p className="text-xl font-semibold">{formatMoney(summaryStock)}</p>
+          <p className="text-sm text-muted-foreground">Stock total resumido</p>
+          <p className="text-xl font-semibold">{formatNumber(resumenStockTotal)}</p>
+          
         </article>
-
         <article className="rounded-md border border-border bg-card p-4">
-          <p className="text-xs text-muted-foreground">Stock total (resumen)</p>
-          <p className="text-xl font-semibold">{formatMoney(resumen?.totales?.stock_total)}</p>
+          <p className="text-sm text-muted-foreground">Valor total inventario</p>
+          <p className="text-xl font-semibold">{formatCurrency(resumen?.totales?.valor_total)}</p>
         </article>
-
-        <article className="rounded-md border border-border bg-card p-4">
-          <p className="text-xs text-muted-foreground">Valor total inventario</p>
-          <p className="text-xl font-semibold">{formatMoney(resumen?.totales?.valor_total)}</p>
+         <article className="rounded-md border border-border bg-card p-4">
+          <p className="text-sm text-muted-foreground">Stock total general (incluye inactivos)</p>
+          <p className="text-xl font-semibold">{formatNumber(summaryStock)}</p>
         </article>
       </div>
-
-      {status === 'loading' ? <p className="text-sm text-muted-foreground">Actualizando resumen...</p> : null}
 
       <label className="inline-flex items-center gap-2 text-sm text-muted-foreground">
         <input
@@ -347,8 +384,8 @@ function InventarioResumenPage() {
                   {filters.group_by === 'producto' ? <td className="px-3 py-2">{row.categoria || '-'}</td> : null}
                   {filters.group_by === 'producto' ? <td className="px-3 py-2">{row.sku || '-'}</td> : null}
                   {filters.group_by === 'producto' ? <td className="px-3 py-2">{row.tipo || '-'}</td> : null}
-                  <td className="px-3 py-2">{formatMoney(row.stockTotal)}</td>
-                  <td className="px-3 py-2">{formatMoney(row.valorTotal)}</td>
+                  <td className="px-3 py-2">{formatNumber(row.stockTotal)}</td>
+                  <td className="px-3 py-2">{formatCurrency(row.valorTotal)}</td>
                 </tr>
               ))
             ) : (

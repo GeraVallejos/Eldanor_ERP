@@ -11,7 +11,7 @@ class DocumentoItemBase(BaseModel):
         blank=True
     )
 
-    descripcion = models.CharField(max_length=255)
+    descripcion = models.CharField(max_length=255, blank=True)
 
     cantidad = models.DecimalField(
         max_digits=12,

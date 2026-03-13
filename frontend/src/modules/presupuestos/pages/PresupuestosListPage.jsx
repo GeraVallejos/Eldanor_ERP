@@ -8,6 +8,7 @@ import { normalizeApiError } from '@/api/errors'
 import Button from '@/components/ui/Button'
 import { buttonVariants } from '@/components/ui/buttonVariants'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
+import { formatCurrencyCLP } from '@/lib/numberFormat'
 import TablePagination from '@/components/ui/TablePagination'
 import { useTableSorting } from '@/lib/tableSorting'
 import { cn } from '@/lib/utils'
@@ -45,12 +46,7 @@ function normalizeListResponse(data) {
 }
 
 function formatMoney(value) {
-  const num = Number(value)
-  if (!Number.isFinite(num)) {
-    return '0'
-  }
-
-  return Math.round(num).toLocaleString('es-CL')
+  return formatCurrencyCLP(value)
 }
 
 function PresupuestosListPage() {

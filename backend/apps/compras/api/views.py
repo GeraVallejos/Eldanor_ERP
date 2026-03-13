@@ -34,6 +34,10 @@ from apps.core.models import TipoDocumento
 from apps.core.services import SecuenciaService
 
 
+def _as_bool(value):
+    return str(value).strip().lower() in {"1", "true", "t", "yes", "y", "si", "sí"}
+
+
 class OrdenCompraViewSet(TenantViewSetMixin, ModelViewSet):
     model = OrdenCompra
     serializer_class = OrdenCompraSerializer
@@ -225,11 +229,13 @@ class DocumentoCompraProveedorViewSet(TenantViewSetMixin, ModelViewSet):
     @action(detail=True, methods=["post"])
     def confirmar_guia(self, request, pk=None):
         bodega_id = request.data.get("bodega_id")
+        en_transito = _as_bool(request.data.get("en_transito"))
         documento = DocumentoCompraService.confirmar_guia(
             documento_id=pk,
             empresa=request.user.empresa_activa,
             usuario=request.user,
             bodega_id=bodega_id,
+            en_transito=en_transito,
         )
         serializer = self.get_serializer(documento)
         return Response(serializer.data, status=status.HTTP_200_OK)
@@ -237,11 +243,13 @@ class DocumentoCompraProveedorViewSet(TenantViewSetMixin, ModelViewSet):
     @action(detail=True, methods=["post"])
     def confirmar_factura(self, request, pk=None):
         bodega_id = request.data.get("bodega_id")
+        en_transito = _as_bool(request.data.get("en_transito"))
         documento = DocumentoCompraService.confirmar_factura(
             documento_id=pk,
             empresa=request.user.empresa_activa,
             usuario=request.user,
             bodega_id=bodega_id,
+            en_transito=en_transito,
         )
         serializer = self.get_serializer(documento)
         return Response(serializer.data, status=status.HTTP_200_OK)
