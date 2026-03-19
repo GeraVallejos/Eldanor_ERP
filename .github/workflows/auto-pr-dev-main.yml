@@ -24,51 +24,62 @@ jobs:
         with:
           github-token: ${{ github.token }}
           script: |
-            const owner = context.repo.owner;
-            const repo = context.repo.repo;
-            const base = 'main';
-            const head = 'dev';
-
-            const { data: openPrs } = await github.rest.pulls.list({
-              owner,
-              repo,
-              state: 'open',
-              base,
-              head: `${owner}:${head}`,
-              per_page: 1,
-            });
-
-            if (openPrs.length > 0) {
-              core.info(`Ya existe PR abierto dev->main: #${openPrs[0].number}`);
-              return;
-            }
-
+            // Envuelto en try global: este workflow nunca debe bloquear un push.
             try {
-              const { data: pr } = await github.rest.pulls.create({
-                owner,
-                repo,
-                title: 'chore: sync dev into main',
-                head,
-                base,
-                body: [
-                  'PR auto-generado por workflow.',
-                  '',
-                  '- origen: dev',
-                  '- destino: main',
-                  '- accion: validar CI y auto-merge si corresponde',
-                ].join('\n'),
-                draft: false,
-              });
+              const owner = context.repo.owner;
+              const repo = context.repo.repo;
+              const base = 'main';
+              const head = 'dev';
 
-              core.info(`PR creado: #${pr.number}`);
-            } catch (error) {
-              const msg = String(error?.message || error);
-
-              // Caso habitual: no hay commits nuevos entre dev y main.
-              if (msg.includes('No commits between')) {
-                core.info('No hay cambios nuevos entre dev y main. No se crea PR.');
+              let openPrs = [];
+              try {
+                const { data } = await github.rest.pulls.list({
+                  owner,
+                  repo,
+                  state: 'open',
+                  base,
+                  head: `${owner}:${head}`,
+                  per_page: 1,
+                });
+                openPrs = data;
+              } catch (e) {
+                core.warning(`No se pudo listar PRs abiertos: ${e.message}`);
                 return;
               }
 
-              throw error;
+              if (openPrs.length > 0) {
+                core.info(`Ya existe PR abierto dev->main: #${openPrs[0].number}`);
+                return;
+              }
+
+              try {
+                const { data: pr } = await github.rest.pulls.create({
+                  owner,
+                  repo,
+                  title: 'chore: sync dev into main',
+                  head,
+                  base,
+                  body: [
+                    'PR auto-generado por workflow.',
+                    '',
+                    '- origen: dev',
+                    '- destino: main',
+                    '- accion: validar CI y auto-merge si corresponde',
+                  ].join('\n'),
+                  draft: false,
+                });
+                core.info(`PR creado: #${pr.number}`);
+              } catch (error) {
+                const msg = String(error?.message || error);
+                // Casos conocidos no son errores reales.
+                if (msg.includes('No commits between') || msg.includes('A pull request already exists')) {
+                  core.info(`Sin PR nuevo necesario: ${msg}`);
+                  return;
+                }
+                // Cualquier otro error solo advierte, no bloquea el push.
+                core.warning(`No se pudo crear PR dev->main: ${msg}`);
+              }
+            } catch (fatal) {
+              // Captura de seguridad: ningun error puede fallar este job.
+              core.warning(`Error inesperado en auto-PR workflow: ${fatal.message}`);
             }
