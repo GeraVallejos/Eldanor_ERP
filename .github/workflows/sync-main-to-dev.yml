@@ -32,6 +32,11 @@ jobs:
       - name: Merge main into dev
         run: |
           git checkout dev
+          # Si dev ya apunta al mismo commit que main, no hay nada que hacer.
+          if git merge-base --is-ancestor origin/main dev; then
+            echo "dev ya incluye todos los commits de main. Nada que sincronizar."
+            exit 0
+          fi
           git merge origin/main --no-edit -m "chore: sync main into dev [skip ci]" || {
             echo "Merge fallido (posibles conflictos). Se requiere resolucion manual."
             exit 0
