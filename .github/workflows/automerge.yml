@@ -45,39 +45,12 @@ jobs:
                 per_page: 1,
               });
 
-              let pr = prs[0];
-
-              // Si no existe PR, lo creamos automaticamente.
-              if (!pr) {
-                core.info('No hay PR abierto dev->main. Creando PR automatico...');
-                try {
-                  const { data: createdPr } = await github.rest.pulls.create({
-                    owner,
-                    repo,
-                    title: 'chore: sync dev into main',
-                    head: 'dev',
-                    base: 'main',
-                    body: [
-                      'PR auto-generado por workflow.',
-                      '',
-                      '- origen: dev',
-                      '- destino: main',
-                      '- accion: merge automatico cuando CI este en verde',
-                    ].join('\n'),
-                    draft: false,
-                  });
-                  pr = createdPr;
-                  core.info(`PR creado: #${pr.number}.`);
-                } catch (createError) {
-                  const msg = String(createError?.message || createError);
-                  if (msg.includes('No commits between') || msg.includes('A pull request already exists')) {
-                    core.info(`No se requiere crear PR nuevo: ${msg}`);
-                    return;
-                  }
-                  core.warning(`No se pudo crear PR dev->main: ${msg}`);
-                  return;
-                }
+              if (!prs[0]) {
+                core.info('No hay PR abierto dev->main. Nada que mergear.');
+                return;
               }
+
+              const pr = prs[0];
 
               if (pr.draft) {
                 core.info(`PR #${pr.number} esta en draft. Se omite merge automatico.`);
@@ -86,18 +59,35 @@ jobs:
 
               core.info(`Mergeando PR #${pr.number}...`);
 
+              let mergeSha = null;
               try {
-                await github.rest.pulls.merge({
+                const { data: mergeResult } = await github.rest.pulls.merge({
                   owner,
                   repo,
                   pull_number: pr.number,
                   merge_method: 'merge',
                   commit_title: `chore: merge dev into main (#${pr.number})`,
                 });
-                core.info(`PR #${pr.number} mergeado exitosamente.`);
+                mergeSha = mergeResult.sha;
+                core.info(`PR #${pr.number} mergeado exitosamente (${mergeSha.slice(0,7)}).`);
               } catch (error) {
-                // Merge con conflictos o PR ya cerrado: solo advierte.
                 core.warning(`No se pudo mergear PR #${pr.number}: ${error.message}`);
+                return;
+              }
+
+              // Fast-forward dev al mismo commit de main para evitar el "behind 1".
+              // Es seguro: el merge commit de main tiene a dev como padre directo.
+              try {
+                await github.rest.git.updateRef({
+                  owner,
+                  repo,
+                  ref: 'heads/dev',
+                  sha: mergeSha,
+                  force: false,
+                });
+                core.info(`dev sincronizado con main (fast-forward a ${mergeSha.slice(0,7)}).`);
+              } catch (syncError) {
+                core.warning(`No se pudo sincronizar dev con main: ${syncError.message}`);
               }
             } catch (fatal) {
               core.warning(`Error inesperado en auto-merge: ${fatal.message}`);
