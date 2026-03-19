@@ -10,6 +10,9 @@ Esta guia describe la automatizacion configurada para este ERP y como usarla.
 - CD: [cd.yml](../.github/workflows/cd.yml)
   - Build en `main` (o manual) y publicacion de artifacts (`frontend-dist`, `backend-source`).
   - Deploy opcional por webhook si existe el secreto `DEPLOY_WEBHOOK_URL`.
+- Auto-merge: [automerge.yml](../.github/workflows/automerge.yml)
+  - Habilita auto-merge para PR `dev -> main`.
+  - GitHub hace el merge solo cuando todos los checks requeridos estan en verde.
 
 ## Flujo recomendado
 
@@ -26,6 +29,16 @@ Si quieres despliegue automatico via webhook, agrega en GitHub:
 - `DEPLOY_WEBHOOK_URL`: URL del proveedor de deploy (Render, Railway, etc.).
 
 Si no defines ese secreto, el deploy se omite y solo se generan artifacts.
+
+## Requisitos para auto-merge
+
+Para que funcione correctamente:
+
+1. En GitHub repo settings, activar **Allow auto-merge**.
+2. En branch protection de `main`, marcar checks requeridos (CI backend y frontend).
+3. Abrir PR desde `dev` hacia `main`.
+
+Con eso, el workflow habilita auto-merge y GitHub fusiona automaticamente cuando CI queda en verde.
 
 ## Settings usados en CI
 

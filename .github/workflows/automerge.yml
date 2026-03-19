@@ -1,0 +1,59 @@
+name: Auto Merge Dev to Main
+
+on:
+  pull_request_target:
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - ready_for_review
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  enable-automerge:
+    if: >-
+      github.event.pull_request.base.ref == 'main' &&
+      github.event.pull_request.head.ref == 'dev' &&
+      github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Enable auto-merge for dev PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+
+            try {
+              await github.graphql(
+                `mutation($pullRequestId: ID!) {
+                  enablePullRequestAutoMerge(input: {
+                    pullRequestId: $pullRequestId,
+                    mergeMethod: SQUASH
+                  }) {
+                    pullRequest {
+                      number
+                    }
+                  }
+                }`,
+                { pullRequestId: pr.node_id }
+              );
+
+              core.info(`Auto-merge habilitado para PR #${pr.number}.`);
+            } catch (error) {
+              const msg = String(error?.message || error);
+
+              if (
+                msg.includes('Pull request is in clean status') ||
+                msg.includes('already enabled') ||
+                msg.includes('Auto merge is already enabled')
+              ) {
+                core.info(`Auto-merge ya estaba habilitado para PR #${pr.number}.`);
+                return;
+              }
+
+              throw error;
+            }
