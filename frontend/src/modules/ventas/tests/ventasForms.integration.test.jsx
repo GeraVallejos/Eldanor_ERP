@@ -49,7 +49,7 @@ describe('ventas/forms integration', () => {
     let itemPayload = null
 
     server.use(
-      http.get('*/clientes/', async () => HttpResponse.json([{ id: 'cli-1', nombre: 'Cliente 1' }])),
+      http.get('*/clientes/', async () => HttpResponse.json([{ id: 'cli-1', nombre: 'Cliente 1', contacto_nombre: 'Cliente 1' }])),
       http.get('*/productos/', async () => HttpResponse.json([{ id: 'prod-1', nombre: 'Producto 1', precio_referencia: 1000, impuesto: 1 }])),
       http.get('*/impuestos/', async () => HttpResponse.json([{ id: 1, nombre: 'IVA', porcentaje: 19 }])),
       http.get('*/pedidos-venta/siguiente_numero/', async () => HttpResponse.json({ numero: 'PV-100' })),
@@ -71,8 +71,13 @@ describe('ventas/forms integration', () => {
     expect(await screen.findByText('Nuevo pedido de venta')).toBeInTheDocument()
 
     const combos = await screen.findAllByRole('combobox')
-    await userEvent.selectOptions(combos[0], 'cli-1')
-    await userEvent.selectOptions(combos[1], 'prod-1')
+    // Select cliente in SearchableSelect
+    await userEvent.type(combos[0], 'Cliente')
+    await userEvent.click(await screen.findByRole('button', { name: 'Cliente 1' }))
+
+    // Select producto in SearchableSelect
+    await userEvent.type(combos[1], 'Producto')
+    await userEvent.click(await screen.findByRole('button', { name: 'Producto 1' }))
 
     await userEvent.click(screen.getByRole('button', { name: 'Crear pedido' }))
 
@@ -100,11 +105,11 @@ describe('ventas/forms integration', () => {
     let guiaPatchPayload = null
 
     server.use(
-      http.get('*/clientes/', async () => HttpResponse.json([{ id: 'cli-1', nombre: 'Cliente 1' }])),
+      http.get('*/clientes/', async () => HttpResponse.json([{ id: 'cli-1', nombre: 'Cliente 1', contacto_nombre: 'Cliente 1' }])),
       http.get('*/pedidos-venta/', async () => HttpResponse.json([{ id: 'ped-1', numero: 'PV-001' }])),
       http.get('*/productos/', async () => HttpResponse.json([{ id: 'prod-1', nombre: 'Producto 1', precio_referencia: 1000, impuesto: 1 }])),
       http.get('*/impuestos/', async () => HttpResponse.json([{ id: 1, nombre: 'IVA', porcentaje: 19 }])),
-      http.get('*/guias-despacho/g-1/', async () => HttpResponse.json({ id: 'g-1', numero: 'GD-001', cliente: 'cli-1', pedido_venta: 'ped-1', fecha_despacho: '2026-03-19', observaciones: '' })),
+      http.get('*/guias-despacho/g-1/', async () => HttpResponse.json({ id: 'g-1', numero: 'GD-001', cliente: 'cli-1', cliente_nombre: 'Cliente 1', pedido_venta: 'ped-1', fecha_despacho: '2026-03-19', observaciones: '' })),
       http.get('*/guias-despacho-items/', async () => HttpResponse.json([{ id: 'gi-1', guia_despacho: 'g-1', producto: 'prod-1', descripcion: 'Producto 1', cantidad: 1, precio_unitario: 1000, impuesto: 1, impuesto_porcentaje: 19 }])),
       http.patch('*/guias-despacho/g-1/', async ({ request }) => {
         guiaPatchPayload = await request.json()
@@ -147,7 +152,7 @@ describe('ventas/forms integration', () => {
     let facturaItemPayload = null
 
     server.use(
-      http.get('*/clientes/', async () => HttpResponse.json([{ id: 'cli-1', nombre: 'Cliente 1' }])),
+      http.get('*/clientes/', async () => HttpResponse.json([{ id: 'cli-1', nombre: 'Cliente 1', contacto_nombre: 'Cliente 1' }])),
       http.get('*/pedidos-venta/', async () => HttpResponse.json([{ id: 'ped-1', numero: 'PV-001' }])),
       http.get('*/guias-despacho/', async () => HttpResponse.json([{ id: 'g-1', numero: 'GD-001' }])),
       http.get('*/productos/', async () => HttpResponse.json([{ id: 'prod-1', nombre: 'Producto 1', precio_referencia: 1000, impuesto: 1 }])),
@@ -170,9 +175,18 @@ describe('ventas/forms integration', () => {
 
     expect(await screen.findByText('Nueva factura de venta')).toBeInTheDocument()
 
-    const combos = await screen.findAllByRole('combobox')
-    await userEvent.selectOptions(combos[0], 'cli-1')
-    await userEvent.selectOptions(combos[3], 'prod-1')
+    // Wait for items section to be visible
+    expect(await screen.findByText('Items')).toBeInTheDocument()
+
+    // Find inputs by aria-label (more reliable than role)
+    const clienteInput = await screen.findByLabelText('Cliente')
+    await userEvent.type(clienteInput, 'Cliente')
+    await userEvent.click(await screen.findByRole('button', { name: 'Cliente 1' }))
+
+    // Find producto input by aria-label
+    const productoInputs = await screen.findAllByLabelText(/Producto item/)
+    await userEvent.type(productoInputs[0], 'Producto')
+    await userEvent.click(await screen.findByRole('button', { name: 'Producto 1' }))
 
     await userEvent.click(screen.getByRole('button', { name: 'Crear factura' }))
 
@@ -200,7 +214,7 @@ describe('ventas/forms integration', () => {
     let notaPatchPayload = null
 
     server.use(
-      http.get('*/clientes/', async () => HttpResponse.json([{ id: 'cli-1', nombre: 'Cliente 1' }])),
+      http.get('*/clientes/', async () => HttpResponse.json([{ id: 'cli-1', nombre: 'Cliente 1', contacto_nombre: 'Cliente 1' }])),
       http.get('*/facturas-venta/', async () => HttpResponse.json([{ id: 'f-1', numero: 'FV-001' }])),
       http.get('*/facturas-venta-items/', async () => HttpResponse.json([{ id: 'fi-1', factura_venta: 'f-1', producto: 'prod-1', descripcion: 'Producto 1', cantidad: 1, precio_unitario: 1000, descuento: 0, impuesto: 1, impuesto_porcentaje: 19 }])),
       http.get('*/productos/', async () => HttpResponse.json([{ id: 'prod-1', nombre: 'Producto 1', precio_referencia: 1000, impuesto: 1 }])),

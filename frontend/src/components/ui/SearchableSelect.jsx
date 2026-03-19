@@ -121,6 +121,8 @@ function SearchableSelect({
         <input
           ref={inputRef}
           type="text"
+          role="combobox"
+          aria-expanded={open}
           value={displayValue}
           aria-label={ariaLabel}
           placeholder={placeholder}
