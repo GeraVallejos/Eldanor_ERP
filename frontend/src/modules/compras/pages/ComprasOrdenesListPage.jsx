@@ -5,7 +5,7 @@ import { api } from '@/api/client'
 import { normalizeApiError } from '@/api/errors'
 import Button from '@/components/ui/Button'
 import DocumentActionsDialog from '@/components/ui/DocumentActionsDialog'
-import ExportMenuButton from '@/components/ui/ExportMenuButton'
+import MenuButton from '@/components/ui/MenuButton'
 import { buttonVariants } from '@/components/ui/buttonVariants'
 import { formatDateChile, getChileDateSuffix } from '@/lib/dateTimeFormat'
 import { formatCurrencyCLP, normalizeObjectNumericFields } from '@/lib/numberFormat'
@@ -328,7 +328,7 @@ function ComprasOrdenesListPage() {
         <h2 className="text-2xl font-semibold">Ordenes de compra</h2>
 
         <div className="grid grid-cols-1 gap-2 sm:flex sm:items-center sm:justify-end sm:gap-2">
-          <ExportMenuButton
+          <MenuButton
             variant="outline"
             size="md"
             fullWidth

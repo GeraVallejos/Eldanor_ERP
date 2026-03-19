@@ -1,4 +1,5 @@
 from django.db import IntegrityError, transaction
+from django.db.models import Q
 
 from apps.auditoria.models import AuditEvent, AuditSeverity
 from apps.core.exceptions import BusinessRuleError
@@ -147,26 +148,155 @@ class AuditoriaService:
         return queryset.order_by("-occurred_at", "-id")
 
     @staticmethod
-    def verificar_cadena_integridad(*, empresa, limit=5000):
-        """Valida la cadena hash de auditoria y retorna resumen de consistencia."""
-        eventos = list(
-            AuditEvent.all_objects.filter(empresa=empresa)
-            .order_by("occurred_at", "id")[:limit]
+    def verificar_cadena_integridad(*, empresa, limit=None):
+        return AuditoriaService.verificar_cadena_integridad_avanzada(
+            empresa=empresa,
+            limit=limit,
+            date_from=None,
+            date_to=None,
+            include_blocks=False,
+            block_size=1000,
         )
 
-        previous_hash = ""
-        inconsistencias = []
+    @staticmethod
+    def verificar_cadena_integridad_avanzada(
+        *,
+        empresa,
+        limit=None,
+        date_from=None,
+        date_to=None,
+        include_blocks=False,
+        block_size=1000,
+    ):
+        """Valida cadena hash con soporte de rango y resumen por bloques.
 
-        for evento in eventos:
+        - Sin filtros revisa toda la cadena de la empresa.
+        - Con date_from/date_to valida solo ese rango, anclando el hash previo
+          al evento inmediatamente anterior del rango.
+        """
+        queryset = AuditEvent.all_objects.filter(empresa=empresa)
+        if date_from:
+            queryset = queryset.filter(occurred_at__gte=date_from)
+        if date_to:
+            queryset = queryset.filter(occurred_at__lte=date_to)
+        queryset = queryset.order_by("occurred_at", "id")
+
+        normalized_limit = None
+        if limit is not None:
+            try:
+                normalized_limit = int(limit)
+            except (TypeError, ValueError) as exc:
+                raise BusinessRuleError("limit debe ser un entero positivo.") from exc
+
+            if normalized_limit <= 0:
+                raise BusinessRuleError("limit debe ser mayor que cero.")
+
+            queryset = queryset[:normalized_limit]
+
+        normalized_block_size = 1000
+        if include_blocks:
+            try:
+                normalized_block_size = int(block_size)
+            except (TypeError, ValueError) as exc:
+                raise BusinessRuleError("block_size debe ser un entero positivo.") from exc
+
+            if normalized_block_size <= 0:
+                raise BusinessRuleError("block_size debe ser mayor que cero.")
+
+        first_event = queryset.first()
+        if first_event is None:
+            return {
+                "is_valid": True,
+                "total_events": 0,
+                "inconsistencies": [],
+                "is_partial_scan": normalized_limit is not None,
+                "has_range_filter": bool(date_from or date_to),
+                "blocks": [],
+            }
+
+        previous_hash = ""
+        if date_from is not None or date_to is not None:
+            previous_event = (
+                AuditEvent.all_objects.filter(empresa=empresa)
+                .filter(
+                    Q(occurred_at__lt=first_event.occurred_at)
+                    | Q(occurred_at=first_event.occurred_at, id__lt=first_event.id)
+                )
+                .only("event_hash")
+                .order_by("-occurred_at", "-id")
+                .first()
+            )
+            previous_hash = previous_event.event_hash if previous_event else ""
+
+        inconsistencias = []
+        total_events = 0
+        blocks = []
+        block_cursor = {
+            "index": 1,
+            "count": 0,
+            "from_event_id": None,
+            "to_event_id": None,
+            "from_occurred_at": None,
+            "to_occurred_at": None,
+            "inconsistency_ids": [],
+        }
+
+        def _flush_block():
+            if block_cursor["count"] == 0:
+                return
+            blocks.append(
+                {
+                    "index": block_cursor["index"],
+                    "from_event_id": block_cursor["from_event_id"],
+                    "to_event_id": block_cursor["to_event_id"],
+                    "from_occurred_at": block_cursor["from_occurred_at"],
+                    "to_occurred_at": block_cursor["to_occurred_at"],
+                    "total_events": block_cursor["count"],
+                    "inconsistency_count": len(block_cursor["inconsistency_ids"]),
+                    "is_valid": len(block_cursor["inconsistency_ids"]) == 0,
+                    "inconsistency_ids": list(block_cursor["inconsistency_ids"]),
+                }
+            )
+            block_cursor["index"] += 1
+            block_cursor["count"] = 0
+            block_cursor["from_event_id"] = None
+            block_cursor["to_event_id"] = None
+            block_cursor["from_occurred_at"] = None
+            block_cursor["to_occurred_at"] = None
+            block_cursor["inconsistency_ids"] = []
+
+        for evento in queryset.iterator(chunk_size=1000):
+            total_events += 1
+            if include_blocks and block_cursor["count"] == 0:
+                block_cursor["from_event_id"] = str(evento.id)
+                block_cursor["from_occurred_at"] = evento.occurred_at.isoformat()
+
+            if include_blocks:
+                block_cursor["count"] += 1
+                block_cursor["to_event_id"] = str(evento.id)
+                block_cursor["to_occurred_at"] = evento.occurred_at.isoformat()
+
             expected = evento.compute_event_hash()
 
             if evento.previous_hash != previous_hash or evento.event_hash != expected:
-                inconsistencias.append(str(evento.id))
+                inconsistency_id = str(evento.id)
+                inconsistencias.append(inconsistency_id)
+                if include_blocks:
+                    block_cursor["inconsistency_ids"].append(inconsistency_id)
 
             previous_hash = evento.event_hash
 
+            if include_blocks and block_cursor["count"] >= normalized_block_size:
+                _flush_block()
+
+        if include_blocks:
+            _flush_block()
+
         return {
             "is_valid": len(inconsistencias) == 0,
-            "total_events": len(eventos),
+            "total_events": total_events,
             "inconsistencies": inconsistencias,
+            "is_partial_scan": normalized_limit is not None,
+            "has_range_filter": bool(date_from or date_to),
+            "blocks": blocks,
         }

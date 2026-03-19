@@ -1,4 +1,5 @@
 from django.conf import settings
+import logging
 import mimetypes
 from django.middleware.csrf import get_token
 from django.utils.module_loading import import_string
@@ -45,6 +46,9 @@ from apps.core.permisos.services import (
     validar_codigos_permisos,
 )
 from apps.core.services import CarteraService, TipoCambioService
+
+
+logger = logging.getLogger(__name__)
 
 
 def _auth_cookie_kwargs(max_age):
@@ -614,8 +618,15 @@ class EmpresaLogoView(APIView):
                 normalized.save(buffer, format="PNG", optimize=True)
                 content = buffer.getvalue()
                 content_type = "image/png"
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning(
+                "No se pudo normalizar el logo de empresa a PNG; se devuelve contenido original.",
+                extra={
+                    "empresa_id": str(getattr(empresa, "id", "")),
+                    "logo_name": str(getattr(getattr(empresa, "logo", None), "name", "")),
+                    "error": str(exc),
+                },
+            )
 
         response = HttpResponse(content, content_type=content_type)
         response["Content-Disposition"] = 'inline; filename="empresa-logo.png"'

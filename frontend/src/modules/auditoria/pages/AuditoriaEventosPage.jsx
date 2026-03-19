@@ -22,7 +22,7 @@ import {
   setAuditoriaSubmittedFilters,
 } from '@/modules/auditoria/store/auditoriaSlice'
 import Button from '@/components/ui/Button'
-import ExportMenuButton from '@/components/ui/ExportMenuButton'
+import MenuButton from '@/components/ui/MenuButton'
 import SearchableSelect from '@/components/ui/SearchableSelect'
 import TablePagination from '@/components/ui/TablePagination'
 import { formatDateTimeChile, getChileDateSuffix } from '@/lib/dateTimeFormat'
@@ -436,19 +436,30 @@ function AuditoriaEventosPage() {
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
-          <ExportMenuButton
+        <div className="flex items-center gap-2 self-start sm:self-auto">
+          <Button variant="default" onClick={() => void fetchEventos()} disabled={loading}>
+            {loading ? 'Actualizando...' : 'Actualizar'}
+          </Button>
+          <MenuButton
             variant="outline"
             onExportExcel={handleExportExcel}
             onExportPdf={handleExportPdf}
             disabled={rows.length === 0}
           />
-          <Button variant="outline" onClick={() => void fetchEventos()} disabled={loading}>
-            {loading ? 'Actualizando...' : 'Actualizar'}
-          </Button>
-          <Button variant="default" onClick={() => void checkIntegrity()} disabled={checkingIntegrity}>
-            {checkingIntegrity ? 'Verificando...' : 'Verificar integridad'}
-          </Button>
+          <MenuButton
+            variant="outline"
+            label="Herramientas"
+            menuClassName="w-64"
+            items={[
+              {
+                key: 'integridad',
+                label: checkingIntegrity ? 'Verificando integridad...' : 'Verificar integridad',
+                description: 'Ejecuta la validacion tecnica de la cadena hash.',
+                onClick: checkIntegrity,
+                disabled: checkingIntegrity,
+              },
+            ]}
+          />
         </div>
       </header>
 

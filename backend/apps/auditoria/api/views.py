@@ -49,6 +49,10 @@ class AuditEventViewSet(TenantViewSetMixin, ReadOnlyModelViewSet):
 
         return datetime.combine(d, time.max if end_of_day else time.min)
 
+    @staticmethod
+    def _as_bool(value):
+        return str(value).strip().lower() in {"1", "true", "t", "yes", "y", "si", "sí"}
+
     def get_queryset(self):
         queryset = super().get_queryset()
 
@@ -77,6 +81,19 @@ class AuditEventViewSet(TenantViewSetMixin, ReadOnlyModelViewSet):
 
     @action(detail=False, methods=["get"])
     def integridad(self, request):
-        result = AuditoriaService.verificar_cadena_integridad(empresa=self.get_empresa())
+        limit = request.query_params.get("limit")
+        date_from = self._parse_instant(request.query_params.get("date_from"))
+        date_to = self._parse_instant(request.query_params.get("date_to"), end_of_day=True)
+        include_blocks = self._as_bool(request.query_params.get("resumen") or request.query_params.get("blocks"))
+        block_size = request.query_params.get("block_size") or 1000
+
+        result = AuditoriaService.verificar_cadena_integridad_avanzada(
+            empresa=self.get_empresa(),
+            limit=limit if limit not in (None, "") else None,
+            date_from=date_from,
+            date_to=date_to,
+            include_blocks=include_blocks,
+            block_size=block_size,
+        )
         status_code = status.HTTP_200_OK if result["is_valid"] else status.HTTP_409_CONFLICT
         return Response(result, status=status_code)

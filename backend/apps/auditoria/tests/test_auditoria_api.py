@@ -63,6 +63,71 @@ class TestAuditoriaApi:
         assert response.data["is_valid"] is True
         assert response.data["total_events"] == 1
 
+    def test_integridad_cadena_permite_limit(self, api_client, empresa, usuario):
+        UserEmpresa.objects.create(user=usuario, empresa=empresa, rol=RolUsuario.ADMIN, activo=True)
+        api_client.force_authenticate(user=usuario)
+
+        AuditoriaService.registrar_evento(
+            empresa=empresa,
+            usuario=usuario,
+            module_code="INVENTARIO",
+            action_code="EDITAR",
+            event_type="INVENTARIO_MOVIMIENTO_REGISTRADO",
+            entity_type="MOVIMIENTO_INVENTARIO",
+            entity_id="mv-1",
+            summary="Movimiento registrado",
+        )
+        AuditoriaService.registrar_evento(
+            empresa=empresa,
+            usuario=usuario,
+            module_code="INVENTARIO",
+            action_code="EDITAR",
+            event_type="INVENTARIO_MOVIMIENTO_REGISTRADO",
+            entity_type="MOVIMIENTO_INVENTARIO",
+            entity_id="mv-2",
+            summary="Movimiento registrado 2",
+        )
+
+        response = api_client.get("/api/auditoria/eventos/integridad/?limit=1")
+
+        assert response.status_code == 200
+        assert response.data["is_valid"] is True
+        assert response.data["total_events"] == 1
+        assert response.data["is_partial_scan"] is True
+
+    def test_integridad_cadena_retorna_resumen_por_bloques(self, api_client, empresa, usuario):
+        UserEmpresa.objects.create(user=usuario, empresa=empresa, rol=RolUsuario.ADMIN, activo=True)
+        api_client.force_authenticate(user=usuario)
+
+        AuditoriaService.registrar_evento(
+            empresa=empresa,
+            usuario=usuario,
+            module_code="INVENTARIO",
+            action_code="EDITAR",
+            event_type="INVENTARIO_MOVIMIENTO_REGISTRADO",
+            entity_type="MOVIMIENTO_INVENTARIO",
+            entity_id="mv-1",
+            summary="Movimiento registrado",
+        )
+        AuditoriaService.registrar_evento(
+            empresa=empresa,
+            usuario=usuario,
+            module_code="INVENTARIO",
+            action_code="EDITAR",
+            event_type="INVENTARIO_MOVIMIENTO_REGISTRADO",
+            entity_type="MOVIMIENTO_INVENTARIO",
+            entity_id="mv-2",
+            summary="Movimiento registrado 2",
+        )
+
+        response = api_client.get("/api/auditoria/eventos/integridad/?resumen=1&block_size=1")
+
+        assert response.status_code == 200
+        assert response.data["is_valid"] is True
+        assert response.data["total_events"] == 2
+        assert len(response.data["blocks"]) == 2
+        assert response.data["blocks"][0]["total_events"] == 1
+
     def test_bloquea_usuario_sin_permiso_modulo(self, api_client, empresa):
         User = get_user_model()
         email_token = uuid.uuid4().hex[:8]

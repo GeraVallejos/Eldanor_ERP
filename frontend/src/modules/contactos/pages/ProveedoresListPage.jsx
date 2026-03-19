@@ -6,7 +6,7 @@ import { api } from '@/api/client'
 import { normalizeApiError } from '@/api/errors'
 import Button from '@/components/ui/Button'
 import BulkImportButton from '@/components/ui/BulkImportButton'
-import ExportMenuButton from '@/components/ui/ExportMenuButton'
+import MenuButton from '@/components/ui/MenuButton'
 import { buttonVariants } from '@/components/ui/buttonVariants'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import TablePagination from '@/components/ui/TablePagination'
@@ -316,7 +316,7 @@ function ProveedoresListPage() {
               }}
             />
           ) : null}
-          <ExportMenuButton
+          <MenuButton
             variant="outline"
             size="md"
             fullWidth

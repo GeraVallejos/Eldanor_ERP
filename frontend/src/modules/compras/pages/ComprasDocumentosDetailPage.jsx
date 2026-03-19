@@ -4,7 +4,7 @@ import { toast } from 'sonner'
 import { api } from '@/api/client'
 import { normalizeApiError } from '@/api/errors'
 import Button from '@/components/ui/Button'
-import ExportMenuButton from '@/components/ui/ExportMenuButton'
+import MenuButton from '@/components/ui/MenuButton'
 import { buttonVariants } from '@/components/ui/buttonVariants'
 import { formatDateChile, getChileDateSuffix } from '@/lib/dateTimeFormat'
 import { formatCurrencyCLP } from '@/lib/numberFormat'
@@ -210,7 +210,7 @@ function ComprasDocumentosDetailPage() {
         </div>
 
         <div className="grid grid-cols-1 gap-2 sm:flex sm:items-center sm:justify-end sm:gap-2">
-          <ExportMenuButton
+          <MenuButton
             variant="outline"
             size="md"
             fullWidth

@@ -3,7 +3,7 @@ import { toast } from 'sonner'
 import { api } from '@/api/client'
 import { normalizeApiError } from '@/api/errors'
 import Button from '@/components/ui/Button'
-import ExportMenuButton from '@/components/ui/ExportMenuButton'
+import MenuButton from '@/components/ui/MenuButton'
 import SearchableSelect from '@/components/ui/SearchableSelect'
 import { formatDateTimeChile, getChileDateSuffix } from '@/lib/dateTimeFormat'
 import { formatCurrencyCLP, formatSmartNumber } from '@/lib/numberFormat'
@@ -322,7 +322,7 @@ function InventarioResumenPage() {
 
         <div className="flex items-end gap-2">
           <Button type="submit">Actualizar</Button>
-          <ExportMenuButton
+          <MenuButton
             variant="outline"
             onExportExcel={handleExportExcel}
             onExportPdf={handleExportPdf}

@@ -4,7 +4,7 @@ import { toast } from 'sonner'
 import { api } from '@/api/client'
 import { normalizeApiError } from '@/api/errors'
 import Button from '@/components/ui/Button'
-import ExportMenuButton from '@/components/ui/ExportMenuButton'
+import MenuButton from '@/components/ui/MenuButton'
 import { buttonVariants } from '@/components/ui/buttonVariants'
 import { formatDateChile, getChileDateSuffix } from '@/lib/dateTimeFormat'
 import { formatCurrencyCLP } from '@/lib/numberFormat'
@@ -243,7 +243,7 @@ function ComprasOrdenesDetailPage() {
         </div>
 
         <div className="flex gap-2">
-          <ExportMenuButton
+          <MenuButton
             variant="outline"
             size="md"
             onExportExcel={handleExportExcel}

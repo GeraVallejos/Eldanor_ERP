@@ -13,7 +13,7 @@ import {
   setAuditoriaDetalleStatus,
 } from '@/modules/auditoria/store/auditoriaSlice'
 import Button from '@/components/ui/Button'
-import ExportMenuButton from '@/components/ui/ExportMenuButton'
+import MenuButton from '@/components/ui/MenuButton'
 import { buttonVariants } from '@/components/ui/buttonVariants'
 import { formatDateTimeChile, getChileDateSuffix } from '@/lib/dateTimeFormat'
 import { cn } from '@/lib/utils'
@@ -323,7 +323,7 @@ function AuditoriaEventoDetailPage() {
         </div>
 
         <div className="flex items-center gap-2">
-          <ExportMenuButton variant="outline" onExportExcel={handleExportExcel} onExportPdf={handleExportPdf} />
+          <MenuButton variant="outline" onExportExcel={handleExportExcel} onExportPdf={handleExportPdf} />
           <Button
             type="button"
             variant="outline"
