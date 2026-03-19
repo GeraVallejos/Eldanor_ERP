@@ -1,0 +1,39 @@
+name: Sync main into dev
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    name: Merge main into dev
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ github.token }}
+
+      - name: Configure git
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Merge main into dev
+        run: |
+          git checkout dev
+          git merge origin/main --no-edit -m "chore: sync main into dev [skip ci]" || {
+            echo "Merge fallido (posibles conflictos). Se requiere resolucion manual."
+            exit 0
+          }
+          git push origin dev

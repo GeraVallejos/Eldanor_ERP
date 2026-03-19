@@ -307,7 +307,7 @@ Archivos involucrados:
 - `apps/core/services/accounting_bridge.py`
 - `apps/core/services/cartera_service.py`
 
-## Principios de idempotencia
+## Principios de Idempotencia
 
 Todos los flujos usan `idempotency_key` para garantizar operaciones exactitud-una:
 

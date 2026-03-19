@@ -1,83 +1,71 @@
 name: Auto Merge Dev to Main
 
+# Dispara cuando el workflow CI completa en la rama dev.
+# Usa merge directo via REST API, sin necesitar la opcion
+# "Allow auto-merge" en Settings del repositorio.
+
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 on:
-  pull_request_target:
-    types:
-      - opened
-      - reopened
-      - synchronize
-      - ready_for_review
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
 
 permissions:
   contents: write
   pull-requests: write
 
 jobs:
-  enable-automerge:
-    if: >-
-      github.event.pull_request.base.ref == 'main' &&
-      github.event.pull_request.head.ref == 'dev' &&
-      github.event.pull_request.draft == false
+  auto-merge:
+    name: Merge dev PR when CI passes
+    # Solo actuar si CI paso en dev
+    if: >
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'dev'
     runs-on: ubuntu-latest
 
     steps:
-      - name: Enable auto-merge for dev PR
+      - name: Merge open dev->main PR
         uses: actions/github-script@v8
         with:
+          github-token: ${{ github.token }}
           script: |
-            const pr = context.payload.pull_request;
-
-            // Consultamos estado actual para evitar mutacion cuando GitHub marca el PR como inestable.
-            const { data: prData } = await github.rest.pulls.get({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              pull_number: pr.number,
-            });
-
-            const mergeableState = String(prData.mergeable_state || '').toLowerCase();
-            if (['dirty', 'blocked', 'behind', 'draft', 'unknown', 'unstable'].includes(mergeableState)) {
-              core.warning(
-                `Auto-merge no habilitado para PR #${pr.number}: estado actual ${mergeableState}.`,
-              );
-              return;
-            }
-
             try {
-              await github.graphql(
-                `mutation($pullRequestId: ID!) {
-                  enablePullRequestAutoMerge(input: {
-                    pullRequestId: $pullRequestId,
-                    mergeMethod: SQUASH
-                  }) {
-                    pullRequest {
-                      number
-                    }
-                  }
-                }`,
-                { pullRequestId: pr.node_id }
-              );
+              const owner = context.repo.owner;
+              const repo = context.repo.repo;
 
-              core.info(`Auto-merge habilitado para PR #${pr.number}.`);
-            } catch (error) {
-              const msg = String(error?.message || error);
+              // Buscar PR abierto dev -> main
+              const { data: prs } = await github.rest.pulls.list({
+                owner,
+                repo,
+                state: 'open',
+                base: 'main',
+                head: `${owner}:dev`,
+                per_page: 1,
+              });
 
-              if (
-                msg.includes('unstable status') ||
-                msg.includes('Pull request is in clean status') ||
-                msg.includes('already enabled') ||
-                msg.includes('Auto merge is already enabled') ||
-                msg.includes('Resource not accessible by integration') ||
-                msg.includes('Auto merge is not allowed') ||
-                msg.includes('enable auto-merge') ||
-                msg.includes('is in draft')
-              ) {
-                core.warning(`No se pudo habilitar auto-merge para PR #${pr.number}: ${msg}`);
+              if (prs.length === 0) {
+                core.info('No hay PR abierto dev->main. Nada que mergear.');
                 return;
               }
 
-              // No bloquea el PR por fallas de automatizacion.
-              core.warning(`Auto-merge no habilitado para PR #${pr.number}: ${msg}`);
+              const pr = prs[0];
+              core.info(`Mergeando PR #${pr.number}...`);
+
+              try {
+                await github.rest.pulls.merge({
+                  owner,
+                  repo,
+                  pull_number: pr.number,
+                  merge_method: 'merge',
+                  commit_title: `chore: merge dev into main (#${pr.number})`,
+                });
+                core.info(`PR #${pr.number} mergeado exitosamente.`);
+              } catch (error) {
+                // Merge con conflictos o PR ya cerrado: solo advierte.
+                core.warning(`No se pudo mergear PR #${pr.number}: ${error.message}`);
+              }
+            } catch (fatal) {
+              core.warning(`Error inesperado en auto-merge: ${fatal.message}`);
             }
