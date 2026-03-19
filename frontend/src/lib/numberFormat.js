@@ -48,9 +48,12 @@ const DEFAULT_NUMERIC_NORMALIZERS = {
   precio_unitario: toIntegerString,
   precio_referencia: toIntegerString,
   precio_costo: toIntegerString,
+  tasa: toQuantityString,
+  tasa_referencia: toQuantityString,
   subtotal: toIntegerString,
   total: toIntegerString,
   descuento: toIntegerString,
+  decimales: toIntegerString,
 }
 
 export function normalizeNumericInputByField(field, value, normalizers = DEFAULT_NUMERIC_NORMALIZERS) {

@@ -3,6 +3,7 @@ import { toast } from 'sonner'
 import { api } from '@/api/client'
 import { normalizeApiError } from '@/api/errors'
 import Button from '@/components/ui/Button'
+import { formatSmartNumber, normalizeNumericInputByField } from '@/lib/numberFormat'
 import { usePermission } from '@/modules/shared/auth/usePermission'
 
 function normalizeListResponse(data) {
@@ -100,7 +101,16 @@ function TesoreriaTipoCambioPage() {
           </label>
           <label className="text-sm">
             Tasa
-            <input type="number" min="0.000001" step="0.000001" className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2" value={form.tasa} onChange={(event) => setForm((prev) => ({ ...prev, tasa: event.target.value }))} required />
+            <input
+              type="number"
+              min="0.000001"
+              step="0.000001"
+              className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
+              value={form.tasa}
+              onChange={(event) => setForm((prev) => ({ ...prev, tasa: normalizeNumericInputByField('tasa', event.target.value) }))}
+              required
+            />
+            <span className="mt-1 block text-xs text-muted-foreground">{formatSmartNumber(form.tasa || 0, { maximumFractionDigits: 6 })}</span>
           </label>
           <div className="flex items-end">
             <Button type="submit" disabled={saving}>{saving ? 'Guardando...' : 'Registrar'}</Button>
@@ -132,7 +142,7 @@ function TesoreriaTipoCambioPage() {
                   <td className="px-3 py-2">{item.fecha}</td>
                   <td className="px-3 py-2">{monedaLabel(item.moneda_origen)}</td>
                   <td className="px-3 py-2">{monedaLabel(item.moneda_destino)}</td>
-                  <td className="px-3 py-2">{item.tasa}</td>
+                  <td className="px-3 py-2">{formatSmartNumber(item.tasa, { maximumFractionDigits: 6 })}</td>
                   <td className="px-3 py-2">{item.observacion || '-'}</td>
                 </tr>
               ))

@@ -3,6 +3,7 @@ import { toast } from 'sonner'
 import { api } from '@/api/client'
 import { normalizeApiError } from '@/api/errors'
 import Button from '@/components/ui/Button'
+import { formatCurrencyCLP, toIntegerString } from '@/lib/numberFormat'
 import { usePermissions } from '@/modules/shared/auth/usePermission'
 
 function normalizeListResponse(data) {
@@ -79,12 +80,16 @@ function TesoreriaCuentasPage() {
               <tr key={row.id} className="border-t border-border">
                 <td className="px-3 py-2">{row.referencia}</td>
                 <td className="px-3 py-2">{row.fecha_vencimiento}</td>
-                <td className="px-3 py-2">{row.monto_total}</td>
-                <td className="px-3 py-2">{row.saldo}</td>
+                <td className="px-3 py-2">{formatCurrencyCLP(row.monto_total)}</td>
+                <td className="px-3 py-2">{formatCurrencyCLP(row.saldo)}</td>
                 <td className="px-3 py-2">{row.estado}</td>
                 <td className="px-3 py-2">
                   {(type === 'cxc' ? permissions['TESORERIA.COBRAR'] : permissions['TESORERIA.PAGAR']) ? (
-                    <Button size="sm" variant="outline" onClick={() => setPaymentState({ id: row.id, type, monto: row.saldo, fecha_pago: '' })}>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setPaymentState({ id: row.id, type, monto: toIntegerString(row.saldo), fecha_pago: '' })}
+                    >
                       Aplicar pago
                     </Button>
                   ) : 'Sin permiso'}
@@ -112,7 +117,17 @@ function TesoreriaCuentasPage() {
         <form className="grid gap-3 rounded-md border border-border bg-card p-4 md:grid-cols-3" onSubmit={applyPayment}>
           <label className="text-sm">
             Monto
-            <input type="number" min="0" step="0.01" className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2" value={paymentState.monto} onChange={(event) => setPaymentState((prev) => ({ ...prev, monto: event.target.value }))} required />
+            <input
+              type="number"
+              min="0"
+              step="1"
+              inputMode="numeric"
+              className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
+              value={paymentState.monto}
+              onChange={(event) => setPaymentState((prev) => ({ ...prev, monto: toIntegerString(event.target.value) }))}
+              required
+            />
+            <span className="mt-1 block text-xs text-muted-foreground">{formatCurrencyCLP(paymentState.monto || 0)}</span>
           </label>
           <label className="text-sm">
             Fecha pago
