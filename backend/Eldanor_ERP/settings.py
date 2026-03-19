@@ -130,6 +130,8 @@ AXES_RESET_ON_SUCCESS = True
 # En local evita bloqueos por pruebas repetidas; en produccion (DEBUG=False) sigue activo.
 AXES_ENABLED = not DEBUG
 
+ENABLE_DRF_THROTTLING = config("ENABLE_DRF_THROTTLING", default=not DEBUG, cast=bool)
+
 
 # =========================================================
 # DRF CONFIG
@@ -149,10 +151,14 @@ REST_FRAMEWORK = {
     "DEFAULT_VERSIONING_CLASS": "rest_framework.versioning.URLPathVersioning",
     "DEFAULT_VERSION": "v1",
     "ALLOWED_VERSIONS": ["v1"],
-    "DEFAULT_THROTTLE_CLASSES": [
-        "rest_framework.throttling.AnonRateThrottle",
-        "rest_framework.throttling.UserRateThrottle",
-    ],
+    "DEFAULT_THROTTLE_CLASSES": (
+        [
+            "rest_framework.throttling.AnonRateThrottle",
+            "rest_framework.throttling.UserRateThrottle",
+        ]
+        if ENABLE_DRF_THROTTLING
+        else []
+    ),
     "DEFAULT_THROTTLE_RATES": {
         # En desarrollo el frontend dispara varias cargas de catalogos.
         "anon": config("DRF_THROTTLE_ANON_RATE", default="300/hour" if DEBUG else "30/hour"),

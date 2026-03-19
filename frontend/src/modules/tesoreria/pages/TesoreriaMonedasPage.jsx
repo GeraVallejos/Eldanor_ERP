@@ -3,6 +3,7 @@ import { toast } from 'sonner'
 import { api } from '@/api/client'
 import { normalizeApiError } from '@/api/errors'
 import Button from '@/components/ui/Button'
+import { formatSmartNumber, normalizeNumericInputByField, toIntegerString } from '@/lib/numberFormat'
 import { usePermission } from '@/modules/shared/auth/usePermission'
 
 function normalizeListResponse(data) {
@@ -111,9 +112,11 @@ function TesoreriaMonedasPage() {
               type="number"
               min="0"
               max="6"
+              step="1"
+              inputMode="numeric"
               className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
               value={form.decimales}
-              onChange={(event) => setForm((prev) => ({ ...prev, decimales: Number(event.target.value || 0) }))}
+              onChange={(event) => setForm((prev) => ({ ...prev, decimales: Number(toIntegerString(event.target.value)) }))}
             />
           </label>
           <label className="text-sm">
@@ -124,8 +127,9 @@ function TesoreriaMonedasPage() {
               step="0.000001"
               className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
               value={form.tasa_referencia}
-              onChange={(event) => setForm((prev) => ({ ...prev, tasa_referencia: Number(event.target.value || 0) }))}
+              onChange={(event) => setForm((prev) => ({ ...prev, tasa_referencia: normalizeNumericInputByField('tasa_referencia', event.target.value) }))}
             />
+            <span className="mt-1 block text-xs text-muted-foreground">{formatSmartNumber(form.tasa_referencia, { maximumFractionDigits: 6 })}</span>
           </label>
           <div className="flex flex-wrap items-end gap-4">
             <label className="inline-flex items-center gap-2 text-sm">
@@ -149,15 +153,16 @@ function TesoreriaMonedasPage() {
               <th className="px-3 py-2 text-left font-medium">Nombre</th>
               <th className="px-3 py-2 text-left font-medium">Símbolo</th>
               <th className="px-3 py-2 text-left font-medium">Decimales</th>
+              <th className="px-3 py-2 text-left font-medium">Tasa ref.</th>
               <th className="px-3 py-2 text-left font-medium">Base</th>
               <th className="px-3 py-2 text-left font-medium">Activa</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
-              <tr><td className="px-3 py-3 text-muted-foreground" colSpan={6}>Cargando monedas...</td></tr>
+              <tr><td className="px-3 py-3 text-muted-foreground" colSpan={7}>Cargando monedas...</td></tr>
             ) : monedas.length === 0 ? (
-              <tr><td className="px-3 py-3 text-muted-foreground" colSpan={6}>No hay monedas registradas.</td></tr>
+              <tr><td className="px-3 py-3 text-muted-foreground" colSpan={7}>No hay monedas registradas.</td></tr>
             ) : (
               monedas.map((moneda) => (
                 <tr key={moneda.id} className="border-t border-border">
@@ -165,6 +170,7 @@ function TesoreriaMonedasPage() {
                   <td className="px-3 py-2">{moneda.nombre}</td>
                   <td className="px-3 py-2">{moneda.simbolo || '-'}</td>
                   <td className="px-3 py-2">{moneda.decimales}</td>
+                  <td className="px-3 py-2">{formatSmartNumber(moneda.tasa_referencia, { maximumFractionDigits: 6 })}</td>
                   <td className="px-3 py-2">{moneda.es_base ? 'Sí' : 'No'}</td>
                   <td className="px-3 py-2">{moneda.activa ? 'Sí' : 'No'}</td>
                 </tr>
