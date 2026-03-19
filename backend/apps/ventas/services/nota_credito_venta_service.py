@@ -7,6 +7,7 @@ from apps.core.exceptions import BusinessRuleError, ConflictError, ResourceNotFo
 from apps.core.services import CarteraService, DomainEventService, OutboxService, SecuenciaService
 from apps.core.models import TipoDocumento
 from apps.core.models.cartera import CuentaPorCobrar
+from apps.documentos.services.integracion_tributaria_service import IntegracionTributariaService
 from apps.ventas.models import (
     EstadoFacturaVenta,
     EstadoNotaCreditoVenta,
@@ -162,6 +163,12 @@ class NotaCreditoVentaService:
         nota.emitido_por = usuario
         nota.emitido_en = timezone.now()
         nota.save(update_fields=["estado", "emitido_por", "emitido_en"])
+        IntegracionTributariaService.solicitar_emision(
+            documento=nota,
+            usuario=usuario,
+            tipo_documento="NOTA_CREDITO_VENTA",
+            payload_extra={"cliente_id": str(nota.cliente_id)},
+        )
 
         cls.registrar_historial(
             nota=nota,

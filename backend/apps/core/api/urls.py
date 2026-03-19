@@ -17,11 +17,13 @@ from apps.core.api.views import (
     MiembrosEmpresaPermisosView,
     GestionPermisosUsuarioEmpresaView,
     EmpresaLogoView,
+    MonedaViewSet,
     TipoCambioViewSet,
 )
 
 
 router = DefaultRouter()
+router.register(r"monedas", MonedaViewSet, basename="moneda")
 router.register(r"tipos-cambio", TipoCambioViewSet, basename="tipo-cambio")
 router.register(r"cuentas-por-cobrar", CuentaPorCobrarViewSet, basename="cuenta-por-cobrar")
 router.register(r"cuentas-por-pagar", CuentaPorPagarViewSet, basename="cuenta-por-pagar")

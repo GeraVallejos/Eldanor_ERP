@@ -7,6 +7,7 @@ from django.utils import timezone
 from apps.core.exceptions import BusinessRuleError, ConflictError, ResourceNotFoundError
 from apps.core.services import CarteraService, DomainEventService, OutboxService, SecuenciaService
 from apps.core.models import TipoDocumento
+from apps.documentos.services.integracion_tributaria_service import IntegracionTributariaService
 from apps.ventas.models import (
     EstadoFacturaVenta,
     EstadoPedidoVenta,
@@ -82,6 +83,12 @@ class FacturaVentaService:
         factura.emitido_por = usuario
         factura.emitido_en = timezone.now()
         factura.save(update_fields=["estado", "emitido_por", "emitido_en"])
+        IntegracionTributariaService.solicitar_emision(
+            documento=factura,
+            usuario=usuario,
+            tipo_documento="FACTURA_VENTA",
+            payload_extra={"cliente_id": str(factura.cliente_id)},
+        )
 
         # Registrar cuenta por cobrar. Referencia única por empresa+numero de factura.
         referencia_cxc = f"FV-{factura.numero}-{str(factura.id)[:8]}"

@@ -15,7 +15,7 @@ from apps.compras.models import (
 )
 from apps.core.exceptions import BusinessRuleError, ConflictError, ResourceNotFoundError
 from apps.core.models import TipoDocumento
-from apps.core.services import SecuenciaService
+from apps.core.services import DomainEventService, OutboxService, SecuenciaService
 from apps.documentos.models import TipoDocumentoReferencia
 from apps.inventario.models import TipoMovimiento
 from apps.inventario.services.inventario_service import InventarioService
@@ -24,6 +24,7 @@ from apps.inventario.services.inventario_service import InventarioService
 class OrdenCompraService:
     @staticmethod
     def recalcular_totales(*, orden):
+        """Recalcula subtotal, impuestos y total de la orden a partir de sus líneas activas."""
         resumen = OrdenCompraItem.all_objects.filter(
             empresa=orden.empresa,
             orden_compra=orden,
@@ -44,6 +45,7 @@ class OrdenCompraService:
 
     @staticmethod
     def validar_orden_editable(*, orden):
+        """Valida que la orden siga en BORRADOR antes de permitir cambios manuales."""
         if orden.estado != EstadoOrdenCompra.BORRADOR:
             raise ConflictError(
                 "Solo se puede editar una orden en estado borrador. "
@@ -53,6 +55,7 @@ class OrdenCompraService:
     @staticmethod
     @transaction.atomic
     def enviar_orden(*, orden_id, empresa):
+        """Envía una orden de compra borrador siempre que tenga al menos un ítem válido."""
         orden = OrdenCompra.all_objects.select_for_update().filter(id=orden_id, empresa=empresa).first()
         if not orden:
             raise ResourceNotFoundError("Orden de compra no encontrada.")
@@ -65,11 +68,28 @@ class OrdenCompraService:
 
         orden.estado = EstadoOrdenCompra.ENVIADA
         orden.save(update_fields=["estado"])
+        DomainEventService.record_event(
+            empresa=empresa,
+            aggregate_type="OrdenCompra",
+            aggregate_id=orden.id,
+            event_type="orden_compra.enviada",
+            payload={"orden_id": str(orden.id), "numero": orden.numero},
+            meta={"source": "OrdenCompraService.enviar_orden"},
+            idempotency_key=f"oc:{orden.id}:enviada",
+        )
+        OutboxService.enqueue(
+            empresa=empresa,
+            topic="compras.orden",
+            event_name="orden_compra.enviada",
+            payload={"orden_id": str(orden.id), "numero": orden.numero},
+            dedup_key=f"oc:{orden.id}:enviada",
+        )
         return orden
 
     @staticmethod
     @transaction.atomic
     def anular_orden(*, orden_id, empresa):
+        """Anula una orden sin recepciones ni documentos activos asociados."""
         orden = OrdenCompra.all_objects.select_for_update().filter(id=orden_id, empresa=empresa).first()
         if not orden:
             raise ResourceNotFoundError("Orden de compra no encontrada.")
@@ -88,11 +108,28 @@ class OrdenCompraService:
 
         orden.estado = EstadoOrdenCompra.CANCELADA
         orden.save(update_fields=["estado"])
+        DomainEventService.record_event(
+            empresa=empresa,
+            aggregate_type="OrdenCompra",
+            aggregate_id=orden.id,
+            event_type="orden_compra.anulada",
+            payload={"orden_id": str(orden.id), "numero": orden.numero},
+            meta={"source": "OrdenCompraService.anular_orden"},
+            idempotency_key=f"oc:{orden.id}:anulada",
+        )
+        OutboxService.enqueue(
+            empresa=empresa,
+            topic="compras.orden",
+            event_name="orden_compra.anulada",
+            payload={"orden_id": str(orden.id), "numero": orden.numero},
+            dedup_key=f"oc:{orden.id}:anulada",
+        )
         return orden
 
     @staticmethod
     @transaction.atomic
     def eliminar_orden_sin_documentos(*, orden_id, empresa):
+        """Elimina una orden solo si no existe trazabilidad documental asociada."""
         orden = OrdenCompra.all_objects.select_for_update().filter(id=orden_id, empresa=empresa).first()
         if not orden:
             raise ResourceNotFoundError("Orden de compra no encontrada.")
@@ -231,6 +268,7 @@ class RecepcionCompraService:
     @staticmethod
     @transaction.atomic
     def confirmar_recepcion(*, recepcion_id, empresa, usuario, bodega_id=None):
+        """Confirma una recepción y genera la entrada física correspondiente en inventario."""
         recepcion = (
             RecepcionCompra.all_objects
             .select_for_update()
@@ -296,6 +334,30 @@ class RecepcionCompraService:
 
         recepcion.estado = EstadoRecepcion.CONFIRMADA
         recepcion.save(update_fields=["estado"])
+        DomainEventService.record_event(
+            empresa=empresa,
+            aggregate_type="RecepcionCompra",
+            aggregate_id=recepcion.id,
+            event_type="recepcion_compra.confirmada",
+            payload={
+                "recepcion_id": str(recepcion.id),
+                "orden_compra_id": str(orden.id) if orden else None,
+            },
+            meta={"source": "RecepcionCompraService.confirmar_recepcion"},
+            idempotency_key=f"recepcion:{recepcion.id}:confirmada",
+            usuario=usuario,
+        )
+        OutboxService.enqueue(
+            empresa=empresa,
+            topic="compras.recepcion",
+            event_name="recepcion_compra.confirmada",
+            payload={
+                "recepcion_id": str(recepcion.id),
+                "orden_compra_id": str(orden.id) if orden else None,
+            },
+            usuario=usuario,
+            dedup_key=f"recepcion:{recepcion.id}:confirmada",
+        )
 
         orden_items = list(OrdenCompraItem.all_objects.filter(empresa=empresa, orden_compra=orden)) if orden else []
         if orden and orden_items:

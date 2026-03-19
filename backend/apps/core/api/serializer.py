@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from apps.core.models.empresa import Empresa
-from apps.core.models import CuentaPorCobrar, CuentaPorPagar, TipoCambio
+from apps.core.models import CuentaPorCobrar, CuentaPorPagar, Moneda, TipoCambio
 
 
 
@@ -55,6 +55,13 @@ class AplicarPlantillaSerializer(serializers.Serializer):
 class TipoCambioSerializer(serializers.ModelSerializer):
     class Meta:
         model = TipoCambio
+        fields = "__all__"
+        read_only_fields = ("id", "empresa", "creado_por", "creado_en", "actualizado_en")
+
+
+class MonedaSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Moneda
         fields = "__all__"
         read_only_fields = ("id", "empresa", "creado_por", "creado_en", "actualizado_en")
 

@@ -5,19 +5,19 @@
 ### Flujo de login
 
 ```
-1. Usuario envia credenciales POST /api/auth/login/
+1. Usuario envia credenciales POST /api/token/
    -> Backend valida contra User.objects.get(username/email)
    -> Genera JWT access + refresh tokens
-   -> Retorna tokens en response (data) + HttpOnly cookies
+   -> Retorna informacion de usuario + cookies HttpOnly
 
 2. Response HTTP:
-   - Body: { "access": "eyJ...", "refresh": "eyJ..." }
+   - Body: { "detail": "Login exitoso.", "user": { ... } }
    - Cookies:
      - Set-Cookie: acceso_token=eyJ...; HttpOnly; Secure; SameSite=Strict
      - Set-Cookie: refresco_token=eyJ...; HttpOnly; Secure; SameSite=Strict
 
-3. Frontend almacena tokens en memory (NO localStorage, evita XSS)
-   - O browser auto-maneja cookies HttpOnly transparentemente
+3. Frontend consume `user` del body y delega los JWT al browser via cookies HttpOnly.
+   - No se expone `access`/`refresh` en el payload JSON.
 ```
 
 ### Autenticacion en requests
@@ -63,13 +63,13 @@ def authenticate(self, request):
 ```
 1. Access token expira (default 15 minutos, configurable)
 
-2. Client envia POST /api/auth/refresh/ con refresh token
-   - Via header: Authorization: Bearer <refresh_token>
+2. Client envia POST /api/token/refresh/
    - Via cookie: browser auto-envia cookie refresco_token
+   - Debe incluir CSRF token en metodos unsafe cuando autentica por cookie
 
 3. Backend valida refresh token (expira en 7 dias)
    -> Genera nuevo access token
-   -> Retorna en cookies + body
+   -> Retorna nueva cookie access + body `{ "detail": "Sesion renovada." }`
 
 4. Importante: Refresh token es long-lived (7 dias)
    -> Almacenar SOLO en cookie HttpOnly
@@ -81,6 +81,7 @@ def authenticate(self, request):
 ```
 POST /api/auth/logout/
   -> Backend invalida refresh token (opcional, agrega a blacklist)
+  -> Si no existe refresh cookie responde 401 con contrato de error normalizado
   -> Respuesta limpia cookies:
      - Set-Cookie: acceso_token=; expires=Thu, 01 Jan 1970 00:00:00 GMT; Path=/
      - Set-Cookie: refresco_token=; expires=...

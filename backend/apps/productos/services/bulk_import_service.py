@@ -1,9 +1,12 @@
 from decimal import Decimal, InvalidOperation
 import re
 
+from apps.auditoria.models import AuditSeverity
+from apps.auditoria.services import AuditoriaService
 from apps.core.exceptions import AuthorizationError, BusinessRuleError
 from apps.core.models import Moneda
 from apps.core.roles import RolUsuario
+from apps.core.services import DomainEventService, OutboxService
 from apps.core.services.csv_import import parse_csv_upload
 from apps.core.services.xlsx_template import build_xlsx_template
 from apps.inventario.models import Bodega, StockProducto
@@ -203,7 +206,48 @@ def _resolve_import_empresa(user, empresa):
     )
 
 
+def _registrar_resumen_importacion(*, empresa, user, payload):
+    """Registra auditoría y eventos de integración para la carga masiva de productos."""
+    DomainEventService.record_event(
+        empresa=empresa,
+        aggregate_type="ProductoBulkImport",
+        aggregate_id=empresa.id,
+        event_type="productos.bulk_import.finalizado",
+        payload=payload,
+        meta={"source": "productos.bulk_import_service"},
+        idempotency_key=f"productos-bulk-import:{payload['total_rows']}:{payload['successful_rows']}:{payload['errors']}",
+        usuario=user,
+    )
+    OutboxService.enqueue(
+        empresa=empresa,
+        topic="productos.bulk_import",
+        event_name="productos.bulk_import.finalizado",
+        payload=payload,
+        usuario=user,
+        dedup_key=f"productos-bulk-import:{payload['total_rows']}:{payload['successful_rows']}:{payload['errors']}",
+    )
+    AuditoriaService.registrar_evento(
+        empresa=empresa,
+        usuario=user,
+        module_code="PRODUCTOS",
+        action_code="CREAR",
+        event_type="PRODUCTOS_BULK_IMPORT",
+        entity_type="PRODUCTO",
+        summary="Carga masiva de productos ejecutada.",
+        severity=AuditSeverity.INFO,
+        changes={
+            "registros_creados": [0, int(payload["created"])],
+            "registros_actualizados": [0, int(payload["updated"])],
+            "filas_con_error": [0, int(payload["errors"])],
+        },
+        payload=payload,
+        source="productos.bulk_import_service",
+        idempotency_key=f"audit:productos-bulk-import:{payload['total_rows']}:{payload['successful_rows']}:{payload['errors']}",
+    )
+
+
 def bulk_import_productos(*, uploaded_file, user, empresa):
+    """Importa productos desde CSV resolviendo catálogo relacionado dentro de la empresa activa."""
     empresa = _resolve_import_empresa(user, empresa)
     _ensure_admin_user(user, empresa)
 
@@ -372,16 +416,29 @@ def bulk_import_productos(*, uploaded_file, user, empresa):
                 }
             )
 
-    return {
+    result = {
         "created": created,
         "updated": updated,
         "errors": errors,
         "total_rows": len(rows),
         "successful_rows": created + updated,
     }
+    _registrar_resumen_importacion(
+        empresa=empresa,
+        user=user,
+        payload={
+            "created": created,
+            "updated": updated,
+            "errors": len(errors),
+            "total_rows": len(rows),
+            "successful_rows": created + updated,
+        },
+    )
+    return result
 
 
 def build_productos_bulk_template(*, user, empresa):
+    """Construye la plantilla XLSX oficial para carga masiva de productos."""
     _ensure_admin_user(user, empresa)
 
     headers = [

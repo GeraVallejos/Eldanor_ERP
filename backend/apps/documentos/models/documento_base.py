@@ -13,6 +13,14 @@ class TipoDocumentoReferencia(models.TextChoices):
     PRESUPUESTO = "PRESUPUESTO", "Presupuesto"
 
 
+class EstadoIntegracionTributaria(models.TextChoices):
+    PENDIENTE = "PENDIENTE", "Pendiente"
+    EN_COLA = "EN_COLA", "En cola"
+    ENVIADO = "ENVIADO", "Enviado"
+    ACEPTADO = "ACEPTADO", "Aceptado"
+    RECHAZADO = "RECHAZADO", "Rechazado"
+
+
 class DocumentoReferenciaMixin(models.Model):
     documento_tipo = models.CharField(
         max_length=50,
@@ -45,6 +53,14 @@ class DocumentoNumeradoBase(DocumentoBase):
 
 class DocumentoTributableBase(DocumentoNumeradoBase):
     impuestos = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    estado_tributario = models.CharField(
+        max_length=20,
+        choices=EstadoIntegracionTributaria.choices,
+        default=EstadoIntegracionTributaria.PENDIENTE,
+    )
+    track_id_tributario = models.CharField(max_length=120, blank=True)
+    mensaje_tributario = models.TextField(blank=True)
+    enviado_tributario_en = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         abstract = True

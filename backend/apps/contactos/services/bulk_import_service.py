@@ -7,6 +7,7 @@ from apps.auditoria.models import AuditSeverity
 from apps.auditoria.services import AuditoriaService
 from apps.core.permisos.constantes_permisos import Acciones, Modulos
 from apps.core.roles import RolUsuario
+from apps.core.services import DomainEventService, OutboxService
 from apps.core.services.csv_import import parse_csv_upload
 from apps.core.services.xlsx_template import build_xlsx_template
 from apps.core.validators import formatear_rut, validar_rut_con_dv
@@ -129,6 +130,30 @@ def _registrar_auditoria_importacion(*, empresa, user, entity_type, summary, pay
         payload=payload,
         source="contactos.bulk_import_service",
     )
+    event_payload = {
+        "entity_type": entity_type,
+        "summary": summary,
+        **payload,
+    }
+    dedup_key = f"contactos-bulk-import:{entity_type}:{total_rows}:{successful_rows}:{errors}"
+    DomainEventService.record_event(
+        empresa=empresa,
+        aggregate_type="ContactoBulkImport",
+        aggregate_id=empresa.id,
+        event_type=f"contactos.bulk_import.{entity_type.lower()}",
+        payload=event_payload,
+        meta={"source": "contactos.bulk_import_service"},
+        idempotency_key=dedup_key,
+        usuario=user,
+    )
+    OutboxService.enqueue(
+        empresa=empresa,
+        topic="contactos.bulk_import",
+        event_name=f"contactos.bulk_import.{entity_type.lower()}",
+        payload=event_payload,
+        usuario=user,
+        dedup_key=dedup_key,
+    )
 
 
 def _find_or_create_contacto(row, *, empresa, user):
@@ -184,6 +209,7 @@ def _find_or_create_contacto(row, *, empresa, user):
 
 
 def import_clientes(*, uploaded_file, user, empresa):
+    """Importa clientes desde CSV creando o actualizando contacto base y ficha comercial."""
     _ensure_admin_user(user, empresa)
 
     rows = parse_csv_upload(
@@ -255,6 +281,7 @@ def import_clientes(*, uploaded_file, user, empresa):
 
 
 def import_proveedores(*, uploaded_file, user, empresa):
+    """Importa proveedores desde CSV creando o actualizando contacto base y ficha de compras."""
     _ensure_admin_user(user, empresa)
 
     rows = parse_csv_upload(
@@ -325,6 +352,7 @@ def import_proveedores(*, uploaded_file, user, empresa):
 
 
 def build_clientes_bulk_template(*, user, empresa):
+    """Genera la plantilla XLSX recomendada para carga masiva de clientes."""
     _ensure_admin_user(user, empresa)
 
     headers = [
@@ -378,6 +406,7 @@ def build_clientes_bulk_template(*, user, empresa):
 
 
 def build_proveedores_bulk_template(*, user, empresa):
+    """Genera la plantilla XLSX recomendada para carga masiva de proveedores."""
     _ensure_admin_user(user, empresa)
 
     headers = [

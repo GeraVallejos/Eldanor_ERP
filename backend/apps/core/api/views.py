@@ -11,7 +11,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework import status
-from rest_framework.exceptions import PermissionDenied
+from rest_framework.exceptions import NotAuthenticated, PermissionDenied
 from rest_framework.decorators import action
 from rest_framework.viewsets import ModelViewSet
 from rest_framework_simplejwt.views import TokenObtainPairView
@@ -27,6 +27,7 @@ from apps.core.api.serializer import (
     CuentaPorPagarSerializer,
     EmpresaUsuarioSerializer,
     GestionPermisosSerializer,
+    MonedaSerializer,
     TipoCambioSerializer,
     PlantillaPermisosSerializer,
     UsuarioEmpresaPermisosSerializer,
@@ -34,7 +35,7 @@ from apps.core.api.serializer import (
 from apps.core.api.auth import CustomTokenObtainPairSerializer
 from apps.core.permisos.constantes_permisos import Acciones, Modulos
 from apps.core.mixins import TenantViewSetMixin
-from apps.core.models import CuentaPorCobrar, CuentaPorPagar, TipoCambio
+from apps.core.models import CuentaPorCobrar, CuentaPorPagar, Moneda, TipoCambio
 from apps.core.permisos.plantillaPermisos import PlantillaPermisos
 from apps.core.permisos.permisoModulo import PermisoModulo
 from apps.core.permisos.permissions import TienePermisoModuloAccion, TieneRelacionActiva
@@ -45,6 +46,7 @@ from apps.core.permisos.services import (
     sincronizar_plantillas_base,
     validar_codigos_permisos,
 )
+from apps.core.exceptions import AuthorizationError, BusinessRuleError, ResourceNotFoundError
 from apps.core.services import CarteraService, TipoCambioService
 from apps.core.authentication import CookieJWTAuthentication
 
@@ -155,12 +157,15 @@ def _serialize_user(user, request=None):
 def _empresa_y_permiso_gestion(request):
     empresa = getattr(request.user, "empresa_activa", None)
     if not empresa:
-        return None, Response({"detail": "No hay empresa activa."}, status=status.HTTP_400_BAD_REQUEST)
+        raise BusinessRuleError("No hay empresa activa.", error_code="NO_ACTIVE_COMPANY")
 
     if not request.user.tiene_permiso(Modulos.ADMINISTRACION, Acciones.GESTIONAR_PERMISOS, empresa):
-        return None, Response({"detail": "No tiene permisos para gestionar permisos."}, status=status.HTTP_403_FORBIDDEN)
+        raise AuthorizationError(
+            "No tiene permisos para gestionar permisos.",
+            error_code="PERMISSION_DENIED",
+        )
 
-    return empresa, None
+    return empresa
 
 
 class EmpresasUsuarioView(APIView):
@@ -197,10 +202,7 @@ class CambiarEmpresaActivaView(APIView):
         if request.user.is_superuser:
             empresa = Empresa.objects.filter(id=empresa_id).first()
             if not empresa:
-                return Response(
-                    {"detail": "Empresa no encontrada."},
-                    status=status.HTTP_404_NOT_FOUND,
-                )
+                raise ResourceNotFoundError("Empresa no encontrada.")
             request.user.empresa_activa = empresa
         else:
             relacion = UserEmpresa.objects.filter(
@@ -210,9 +212,9 @@ class CambiarEmpresaActivaView(APIView):
             ).first()
 
             if not relacion:
-                return Response(
-                    {"detail": "No tienes acceso a esta empresa."},
-                    status=status.HTTP_403_FORBIDDEN
+                raise AuthorizationError(
+                    "No tienes acceso a esta empresa.",
+                    error_code="PERMISSION_DENIED",
                 )
 
             request.user.empresa_activa = relacion.empresa
@@ -237,9 +239,7 @@ class MiembrosEmpresaPermisosView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        empresa, error = _empresa_y_permiso_gestion(request)
-        if error:
-            return error
+        empresa = _empresa_y_permiso_gestion(request)
 
         relaciones = (
             UserEmpresa.objects
@@ -281,9 +281,7 @@ class GestionPermisosUsuarioEmpresaView(APIView):
         serializer = GestionPermisosSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        empresa, error = _empresa_y_permiso_gestion(request)
-        if error:
-            return error
+        empresa = _empresa_y_permiso_gestion(request)
 
         sincronizar_catalogo_permisos()
 
@@ -299,16 +297,14 @@ class GestionPermisosUsuarioEmpresaView(APIView):
         )
 
         if not relacion:
-            return Response(
-                {"detail": "Relación usuario-empresa no encontrada o inactiva."},
-                status=status.HTTP_404_NOT_FOUND,
-            )
+            raise ResourceNotFoundError("Relacion usuario-empresa no encontrada o inactiva.")
 
         codigos, invalidos = validar_codigos_permisos(serializer.validated_data["permisos"])
         if invalidos:
-            return Response(
-                {"detail": "Existen códigos de permiso inválidos.", "invalidos": invalidos},
-                status=status.HTTP_400_BAD_REQUEST,
+            raise BusinessRuleError(
+                "Existen codigos de permiso invalidos.",
+                error_code="VALIDATION_ERROR",
+                meta={"invalidos": invalidos},
             )
 
         permisos = list(PermisoModulo.objects.filter(codigo__in=codigos))
@@ -330,9 +326,7 @@ class PlantillasPermisosView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        empresa, error = _empresa_y_permiso_gestion(request)
-        if error:
-            return error
+        empresa = _empresa_y_permiso_gestion(request)
 
         _ = empresa
         sincronizar_plantillas_base()
@@ -350,9 +344,7 @@ class PlantillasPermisosView(APIView):
         return Response(PlantillaPermisosSerializer(data, many=True).data)
 
     def post(self, request):
-        empresa, error = _empresa_y_permiso_gestion(request)
-        if error:
-            return error
+        empresa = _empresa_y_permiso_gestion(request)
 
         _ = empresa
         serializer = PlantillaPermisosSerializer(data=request.data)
@@ -360,17 +352,15 @@ class PlantillasPermisosView(APIView):
 
         codigos, invalidos = validar_codigos_permisos(serializer.validated_data.get("permisos", []))
         if invalidos:
-            return Response(
-                {"detail": "Existen códigos de permiso inválidos.", "invalidos": invalidos},
-                status=status.HTTP_400_BAD_REQUEST,
+            raise BusinessRuleError(
+                "Existen codigos de permiso invalidos.",
+                error_code="VALIDATION_ERROR",
+                meta={"invalidos": invalidos},
             )
 
         codigo = serializer.validated_data["codigo"].strip().upper()
         if PlantillaPermisos.objects.filter(codigo=codigo).exists():
-            return Response(
-                {"detail": "Ya existe una plantilla con ese código."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            raise BusinessRuleError("Ya existe una plantilla con ese codigo.", error_code="VALIDATION_ERROR")
 
         plantilla = PlantillaPermisos.objects.create(
             codigo=codigo,
@@ -398,14 +388,12 @@ class PlantillaPermisosDetalleView(APIView):
     permission_classes = [IsAuthenticated]
 
     def patch(self, request, codigo):
-        empresa, error = _empresa_y_permiso_gestion(request)
-        if error:
-            return error
+        empresa = _empresa_y_permiso_gestion(request)
 
         _ = empresa
         plantilla = PlantillaPermisos.objects.filter(codigo=codigo.upper()).first()
         if not plantilla:
-            return Response({"detail": "Plantilla no encontrada."}, status=status.HTTP_404_NOT_FOUND)
+            raise ResourceNotFoundError("Plantilla no encontrada.")
 
         data = {
             "codigo": plantilla.codigo,
@@ -421,15 +409,16 @@ class PlantillaPermisosDetalleView(APIView):
 
         codigos, invalidos = validar_codigos_permisos(serializer.validated_data.get("permisos", []))
         if invalidos:
-            return Response(
-                {"detail": "Existen códigos de permiso inválidos.", "invalidos": invalidos},
-                status=status.HTTP_400_BAD_REQUEST,
+            raise BusinessRuleError(
+                "Existen codigos de permiso invalidos.",
+                error_code="VALIDATION_ERROR",
+                meta={"invalidos": invalidos},
             )
 
         nuevo_codigo = serializer.validated_data["codigo"].strip().upper()
         duplicado = PlantillaPermisos.objects.filter(codigo=nuevo_codigo).exclude(id=plantilla.id).exists()
         if duplicado:
-            return Response({"detail": "Ya existe una plantilla con ese código."}, status=status.HTTP_400_BAD_REQUEST)
+            raise BusinessRuleError("Ya existe una plantilla con ese codigo.", error_code="VALIDATION_ERROR")
 
         plantilla.codigo = nuevo_codigo
         plantilla.nombre = serializer.validated_data["nombre"]
@@ -455,9 +444,7 @@ class AplicarPlantillaPermisosView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        empresa, error = _empresa_y_permiso_gestion(request)
-        if error:
-            return error
+        empresa = _empresa_y_permiso_gestion(request)
 
         sincronizar_plantillas_base()
 
@@ -469,7 +456,7 @@ class AplicarPlantillaPermisosView(APIView):
             activa=True,
         ).first()
         if not plantilla:
-            return Response({"detail": "Plantilla no encontrada o inactiva."}, status=status.HTTP_404_NOT_FOUND)
+            raise ResourceNotFoundError("Plantilla no encontrada o inactiva.")
 
         relacion = (
             UserEmpresa.objects
@@ -482,16 +469,14 @@ class AplicarPlantillaPermisosView(APIView):
             .first()
         )
         if not relacion:
-            return Response(
-                {"detail": "Relación usuario-empresa no encontrada o inactiva."},
-                status=status.HTTP_404_NOT_FOUND,
-            )
+            raise ResourceNotFoundError("Relacion usuario-empresa no encontrada o inactiva.")
 
         codigos, invalidos = validar_codigos_permisos(plantilla.permisos)
         if invalidos:
-            return Response(
-                {"detail": "La plantilla contiene permisos inválidos.", "invalidos": invalidos},
-                status=status.HTTP_400_BAD_REQUEST,
+            raise BusinessRuleError(
+                "La plantilla contiene permisos invalidos.",
+                error_code="VALIDATION_ERROR",
+                meta={"invalidos": invalidos},
             )
 
         sincronizar_catalogo_permisos()
@@ -547,10 +532,7 @@ class CustomTokenRefreshView(APIView):
         refresh_token = refresh_in_body or refresh_in_cookie
 
         if not refresh_token:
-            return Response(
-                {"detail": "Refresh token no proporcionado."},
-                status=status.HTTP_401_UNAUTHORIZED,
-            )
+            raise NotAuthenticated("Refresh token no proporcionado.")
 
         # For browser cookie refresh, enforce CSRF on this unsafe endpoint.
         if not refresh_in_body and refresh_in_cookie:
@@ -604,14 +586,14 @@ class EmpresaLogoView(APIView):
     def get(self, request):
         empresa = getattr(request.user, "empresa_activa", None)
         if not empresa or not getattr(empresa, "logo", None):
-            return Response({"detail": "La empresa activa no tiene logo."}, status=status.HTTP_404_NOT_FOUND)
+            raise ResourceNotFoundError("La empresa activa no tiene logo.")
 
         try:
             empresa.logo.open("rb")
             content = empresa.logo.read()
             empresa.logo.close()
         except Exception:
-            return Response({"detail": "No se pudo cargar el logo de la empresa."}, status=status.HTTP_404_NOT_FOUND)
+            raise ResourceNotFoundError("No se pudo cargar el logo de la empresa.")
 
         content_type = mimetypes.guess_type(empresa.logo.name or "")[0] or "application/octet-stream"
 
@@ -674,6 +656,21 @@ class TipoCambioViewSet(TenantViewSetMixin, ModelViewSet):
             decimales=data.get("decimales", 2),
         )
         return Response({"monto_convertido": monto}, status=status.HTTP_200_OK)
+
+
+class MonedaViewSet(TenantViewSetMixin, ModelViewSet):
+    model = Moneda
+    serializer_class = MonedaSerializer
+    permission_classes = [IsAuthenticated, TieneRelacionActiva, TienePermisoModuloAccion]
+    permission_modulo = Modulos.TESORERIA
+    permission_action_map = {
+        "list": Acciones.VER,
+        "retrieve": Acciones.VER,
+        "create": Acciones.CONCILIAR,
+        "update": Acciones.CONCILIAR,
+        "partial_update": Acciones.CONCILIAR,
+        "destroy": Acciones.CONCILIAR,
+    }
 
 
 class CuentaPorCobrarViewSet(TenantViewSetMixin, ModelViewSet):

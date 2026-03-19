@@ -99,6 +99,26 @@ class TestGestionPermisosAPI:
         response = api_client.post(reverse("permisos-asignar"), payload, format="json")
 
         assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert response.data["error_code"] == "PERMISSION_DENIED"
+
+    def test_owner_recibe_error_normalizado_si_envia_permisos_invalidos(self, api_client, owner_usuario, vendedor_usuario):
+        _, relacion_vendedor = vendedor_usuario
+
+        token = obtener_token(owner_usuario)
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
+
+        response = api_client.post(
+            reverse("permisos-asignar"),
+            {
+                "relacion_id": str(relacion_vendedor.id),
+                "permisos": ["ERP.NO_EXISTE"],
+            },
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert response.data["error_code"] == "VALIDATION_ERROR"
+        assert response.data["meta"]["invalidos"] == ["ERP.NO_EXISTE"]
 
     def test_permiso_personalizado_cambia_permisos_efectivos(self, owner_usuario, vendedor_usuario):
         vendedor, relacion_vendedor = vendedor_usuario
