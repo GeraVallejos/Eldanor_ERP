@@ -44,6 +44,7 @@ class ProductoViewSet(TenantViewSetMixin, ModelViewSet ):
         "destroy": Acciones.BORRAR,
         "bulk_import": Acciones.CREAR,
         "bulk_template": Acciones.VER,
+        "precio": Acciones.VER,
     }
 
     @staticmethod

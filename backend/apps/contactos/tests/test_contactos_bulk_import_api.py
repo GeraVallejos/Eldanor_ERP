@@ -112,6 +112,40 @@ class TestContactosBulkImportApi:
         assert response.data["errors"] == []
         assert Cliente.all_objects.filter(empresa=empresa).count() == 1
 
+    def test_import_rechaza_rut_con_dv_invalido(self, api_client, admin_usuario, empresa):
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(admin_usuario)}")
+
+        csv_content = "\n".join([
+            "nombre,rut,email,tipo,activo",
+            "Cliente DV Malo,12345678-9,cliente_dv@test.com,EMPRESA,true",
+        ])
+        file = SimpleUploadedFile("clientes.csv", csv_content.encode("utf-8"), content_type="text/csv")
+
+        response = api_client.post(reverse("cliente-bulk-import"), {"file": file}, format="multipart")
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["created"] == 0
+        assert len(response.data["errors"]) == 1
+        assert "digito verificador" in response.data["errors"][0]["detail"].lower()
+        assert Cliente.all_objects.filter(empresa=empresa).count() == 0
+
+    def test_import_guarda_rut_formateado_chileno(self, api_client, admin_usuario, empresa):
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(admin_usuario)}")
+
+        csv_content = "\n".join([
+            "nombre,rut,email,tipo,activo",
+            "Cliente Formato,123456785,cliente_formato@test.com,EMPRESA,true",
+        ])
+        file = SimpleUploadedFile("clientes.csv", csv_content.encode("utf-8"), content_type="text/csv")
+
+        response = api_client.post(reverse("cliente-bulk-import"), {"file": file}, format="multipart")
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["created"] == 1
+        assert response.data["errors"] == []
+        contacto = Contacto.all_objects.get(empresa=empresa, email="cliente_formato@test.com")
+        assert contacto.rut == "12.345.678-5"
+
     def test_admin_puede_descargar_plantilla_xlsx_clientes(self, api_client, admin_usuario):
         api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(admin_usuario)}")
 

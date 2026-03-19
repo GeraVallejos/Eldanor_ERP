@@ -37,7 +37,7 @@ class TienePermisoModuloAccion(BasePermission):
     - permission_action_map (dict: action DRF -> acción de negocio)
     """
 
-    message = "No tiene permisos para ejecutar esta acción."
+    message = "No tiene permisos para ejecutar esta accion."
 
     def has_permission(self, request, view):
         user = request.user
@@ -53,9 +53,13 @@ class TienePermisoModuloAccion(BasePermission):
         drf_action = getattr(view, "action", None)
         accion = action_map.get(drf_action)
 
-        # Si la vista no declara mapping para la acción, no bloqueamos aquí.
-        if not modulo or not accion:
-            return True
+        # Politica fail-closed: toda accion debe estar mapeada explicitamente.
+        if not modulo:
+            return False
+
+        if not accion:
+            self.message = "La accion no esta mapeada en permission_action_map."
+            return False
 
         empresa = getattr(user, "empresa_activa", None)
         if not empresa:

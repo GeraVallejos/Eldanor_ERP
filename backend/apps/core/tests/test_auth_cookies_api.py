@@ -1,5 +1,6 @@
 import pytest
 from django.conf import settings
+from rest_framework.test import APIClient
 from rest_framework import status
 
 
@@ -60,13 +61,21 @@ class TestAuthCookiesAPI:
         assert response.cookies.get(settings.AUTH_COOKIE_ACCESS_NAME) is not None
 
     def test_logout_limpia_cookies(self, api_client, usuario):
-        api_client.post(
+        login_response = api_client.post(
             "/api/token/",
             {"email": usuario.email, "password": "pass1234"},
             format="json",
         )
 
-        response = api_client.post("/api/auth/logout/")
+        csrf_token = login_response.cookies.get("csrftoken")
+        assert csrf_token is not None
+
+        response = api_client.post(
+            "/api/auth/logout/",
+            {},
+            format="json",
+            HTTP_X_CSRFTOKEN=csrf_token.value,
+        )
 
         assert response.status_code == status.HTTP_204_NO_CONTENT
         access_cookie = response.cookies.get(settings.AUTH_COOKIE_ACCESS_NAME)
@@ -75,6 +84,24 @@ class TestAuthCookiesAPI:
         assert refresh_cookie is not None
         assert access_cookie.value == ""
         assert refresh_cookie.value == ""
+
+    def test_logout_sin_cookie_devuelve_401(self, api_client):
+        response = api_client.post("/api/auth/logout/", {}, format="json")
+
+        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+    def test_logout_cookie_sin_csrf_devuelve_403(self, api_client, usuario):
+        csrf_client = APIClient(enforce_csrf_checks=True)
+
+        csrf_client.post(
+            "/api/token/",
+            {"email": usuario.email, "password": "pass1234"},
+            format="json",
+        )
+
+        response = csrf_client.post("/api/auth/logout/", {}, format="json")
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
 
     def test_me_sin_cookie_devuelve_401(self, api_client):
         response = api_client.get("/api/auth/me/")

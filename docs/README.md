@@ -9,6 +9,7 @@
 - [Plantilla Tecnica de Modulo](modulo_template.md) — Lista de verificacion para documentar un modulo.
 - [Arquitectura de Excepciones](exception_architecture.md) — Capas limpias, subclases AppError y manejo global de errores.
 - [Importacion Masiva](bulk_import.md) — Endpoints de carga CSV/XLSX.
+- [CI/CD con GitHub Actions](ci_cd.md) — Pipeline de integracion continua, artifacts y deploy opcional por webhook.
 
 ## Uso recomendado
 

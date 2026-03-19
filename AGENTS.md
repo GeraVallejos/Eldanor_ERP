@@ -108,6 +108,7 @@ apps/nuevo_modulo/
 ### 2) Modelos
 
 - [ ] Entidad principal hereda `BaseModel`.
+- [ ] Si el modulo es documental (cabecera + items + totales + impuestos), evaluar herencia desde `apps.documentos.models` (`DocumentoBase`, `DocumentoTributableBase`, `DocumentoItemBase`).
 - [ ] Estados definidos con `choices`.
 - [ ] Relaciones con FK explicitas.
 - [ ] Indices compuestos en `Meta.indexes` para consultas frecuentes.
