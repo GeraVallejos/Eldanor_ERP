@@ -70,7 +70,9 @@ PERMISOS_CATALOGO = {
         Acciones.VER,
         Acciones.CREAR,
         Acciones.EDITAR,
+        Acciones.APROBAR,
         Acciones.ANULAR,
+        Acciones.BORRAR,
     ],
     Modulos.FACTURACION: [
         Acciones.VER,
