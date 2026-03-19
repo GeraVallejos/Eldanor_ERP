@@ -45,12 +45,45 @@ jobs:
                 per_page: 1,
               });
 
-              if (prs.length === 0) {
-                core.info('No hay PR abierto dev->main. Nada que mergear.');
+              let pr = prs[0];
+
+              // Si no existe PR, lo creamos automaticamente.
+              if (!pr) {
+                core.info('No hay PR abierto dev->main. Creando PR automatico...');
+                try {
+                  const { data: createdPr } = await github.rest.pulls.create({
+                    owner,
+                    repo,
+                    title: 'chore: sync dev into main',
+                    head: 'dev',
+                    base: 'main',
+                    body: [
+                      'PR auto-generado por workflow.',
+                      '',
+                      '- origen: dev',
+                      '- destino: main',
+                      '- accion: merge automatico cuando CI este en verde',
+                    ].join('\n'),
+                    draft: false,
+                  });
+                  pr = createdPr;
+                  core.info(`PR creado: #${pr.number}.`);
+                } catch (createError) {
+                  const msg = String(createError?.message || createError);
+                  if (msg.includes('No commits between') || msg.includes('A pull request already exists')) {
+                    core.info(`No se requiere crear PR nuevo: ${msg}`);
+                    return;
+                  }
+                  core.warning(`No se pudo crear PR dev->main: ${msg}`);
+                  return;
+                }
+              }
+
+              if (pr.draft) {
+                core.info(`PR #${pr.number} esta en draft. Se omite merge automatico.`);
                 return;
               }
 
-              const pr = prs[0];
               core.info(`Mergeando PR #${pr.number}...`);
 
               try {
