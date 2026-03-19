@@ -29,6 +29,7 @@ INSTALLED_APPS = [
 
     # Third Party
     "rest_framework",
+    "django_filters",
     "corsheaders",
     "axes",
     'storages',
@@ -141,6 +142,9 @@ REST_FRAMEWORK = {
     "EXCEPTION_HANDLER": "apps.core.api.exception_handler.custom_exception_handler",
     "DEFAULT_PERMISSION_CLASSES": (
         "rest_framework.permissions.IsAuthenticated",
+    ),
+    "DEFAULT_FILTER_BACKENDS": (
+        "django_filters.rest_framework.DjangoFilterBackend",
     ),
     "DEFAULT_VERSIONING_CLASS": "rest_framework.versioning.URLPathVersioning",
     "DEFAULT_VERSION": "v1",
