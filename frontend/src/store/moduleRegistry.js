@@ -5,6 +5,7 @@ import { inventarioStoreModule } from '@/modules/inventario/store'
 import { contactosStoreModule } from '@/modules/contactos/store'
 import { presupuestosStoreModule } from '@/modules/presupuestos/store'
 import { auditoriaStoreModule } from '@/modules/auditoria/store'
+import { ventasStoreModule } from '@/modules/ventas/store'
 import { uiStoreModule } from '@/modules/shared/ui/store'
 
 export const STORE_MODULES = [
@@ -15,6 +16,7 @@ export const STORE_MODULES = [
   contactosStoreModule,
   presupuestosStoreModule,
   auditoriaStoreModule,
+  ventasStoreModule,
   uiStoreModule,
 ]
 

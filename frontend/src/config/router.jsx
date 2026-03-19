@@ -22,6 +22,15 @@ import AuditoriaEventosPage from '@/modules/auditoria/pages/AuditoriaEventosPage
 import AuditoriaEventoDetailPage from '@/modules/auditoria/pages/AuditoriaEventoDetailPage'
 import InventarioKardexPage from '@/modules/inventario/pages/InventarioKardexPage'
 import InventarioResumenPage from '@/modules/inventario/pages/InventarioResumenPage'
+import VentasPedidosListPage from '@/modules/ventas/pages/VentasPedidosListPage'
+import VentasPedidosFormPage from '@/modules/ventas/pages/VentasPedidosFormPage'
+import VentasPedidosDetailPage from '@/modules/ventas/pages/VentasPedidosDetailPage'
+import VentasGuiasListPage from '@/modules/ventas/pages/VentasGuiasListPage'
+import VentasGuiasFormPage from '@/modules/ventas/pages/VentasGuiasFormPage'
+import VentasFacturasListPage from '@/modules/ventas/pages/VentasFacturasListPage'
+import VentasFacturasFormPage from '@/modules/ventas/pages/VentasFacturasFormPage'
+import VentasNotasListPage from '@/modules/ventas/pages/VentasNotasListPage'
+import VentasNotasFormPage from '@/modules/ventas/pages/VentasNotasFormPage'
 import ProductosCreatePage from '@/modules/productos/pages/ProductosCreatePage'
 import ProductosCategoriasPage from '@/modules/productos/pages/ProductosCategoriasPage'
 import ProductosImpuestosPage from '@/modules/productos/pages/ProductosImpuestosPage'
@@ -64,6 +73,19 @@ const router = createBrowserRouter([
           { path: 'auditoria/eventos/:id', element: <AuditoriaEventoDetailPage /> },
           { path: 'inventario/kardex', element: <InventarioKardexPage /> },
           { path: 'inventario/resumen', element: <InventarioResumenPage /> },
+          { path: 'ventas/pedidos', element: <VentasPedidosListPage /> },
+          { path: 'ventas/pedidos/nuevo', element: <VentasPedidosFormPage /> },
+          { path: 'ventas/pedidos/:id', element: <VentasPedidosDetailPage /> },
+          { path: 'ventas/pedidos/:id/editar', element: <VentasPedidosFormPage /> },
+          { path: 'ventas/guias', element: <VentasGuiasListPage /> },
+          { path: 'ventas/guias/nuevo', element: <VentasGuiasFormPage /> },
+          { path: 'ventas/guias/:id/editar', element: <VentasGuiasFormPage /> },
+          { path: 'ventas/facturas', element: <VentasFacturasListPage /> },
+          { path: 'ventas/facturas/nuevo', element: <VentasFacturasFormPage /> },
+          { path: 'ventas/facturas/:id/editar', element: <VentasFacturasFormPage /> },
+          { path: 'ventas/notas', element: <VentasNotasListPage /> },
+          { path: 'ventas/notas/nuevo', element: <VentasNotasFormPage /> },
+          { path: 'ventas/notas/:id/editar', element: <VentasNotasFormPage /> },
         ],
       },
     ],

@@ -14,7 +14,8 @@ import { useTableSorting } from '@/lib/tableSorting'
 import { cn } from '@/lib/utils'
 import { selectCurrentUser } from '@/modules/auth/authSlice'
 import PresupuestoPdfDocument from '@/modules/presupuestos/components/PresupuestoPdfDocument'
-import { canManagePresupuestoStatus, hasPermission } from '@/modules/shared/auth/permissions'
+import { canManagePresupuestoStatus } from '@/modules/shared/auth/permissions'
+import { usePermission } from '@/modules/shared/auth/usePermission'
 import { getCompanyDocumentBranding } from '@/modules/shared/documents/companyBranding'
 
 const FALLBACK_STATUS_LABELS = {
@@ -161,9 +162,9 @@ function PresupuestosListPage() {
     setPresupuestoToDelete(presupuesto)
   }
 
-  const canEditPresupuesto = hasPermission(currentUser, 'PRESUPUESTOS.EDITAR')
-  const canDeletePresupuesto = hasPermission(currentUser, 'PRESUPUESTOS.BORRAR')
-  const canCreatePresupuesto = hasPermission(currentUser, 'PRESUPUESTOS.CREAR')
+  const canEditPresupuesto = usePermission('PRESUPUESTOS.EDITAR')
+  const canDeletePresupuesto = usePermission('PRESUPUESTOS.BORRAR')
+  const canCreatePresupuesto = usePermission('PRESUPUESTOS.CREAR')
 
   const resolveStatusLabel = (statusCode) => {
     const normalized = String(statusCode || '').toUpperCase()

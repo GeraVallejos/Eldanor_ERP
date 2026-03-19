@@ -5,6 +5,7 @@ import { api } from '@/api/client'
 import { normalizeApiError } from '@/api/errors'
 import Button from '@/components/ui/Button'
 import { buttonVariants } from '@/components/ui/buttonVariants'
+import SearchableSelect from '@/components/ui/SearchableSelect'
 import { getChileDateSuffix } from '@/lib/dateTimeFormat'
 import { toIntegerString } from '@/lib/numberFormat'
 import { useNormalizedFormItems } from '@/hooks/useNormalizedFormItems'
@@ -178,11 +179,16 @@ function ComprasOrdenesCreatePage() {
     return proveedores.map((proveedor) => {
       const contacto = contactoById.get(String(proveedor.contacto))
       return {
-        id: String(proveedor.id),
+        value: String(proveedor.id),
         label: contacto?.nombre || `Proveedor #${proveedor.id}`,
       }
     })
   }, [proveedores, contactoById])
+
+  const productoOptions = useMemo(
+    () => productos.map((p) => ({ value: String(p.id), label: p.nombre || String(p.id) })),
+    [productos],
+  )
 
   const impuestoById = useMemo(() => {
     const map = new Map()
@@ -352,22 +358,17 @@ function ComprasOrdenesCreatePage() {
 
       <form className="space-y-4 rounded-md border border-border bg-card p-4" onSubmit={onSubmit}>
         <div className="grid gap-3 md:grid-cols-2">
-          <label className="text-sm">
-            Proveedor
-            <select
-              className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
+          <div className="text-sm">
+            <span className="font-medium">Proveedor</span>
+            <SearchableSelect
+              className="mt-1"
               value={form.proveedor}
-              onChange={(event) => updateField('proveedor', event.target.value)}
-              required
-            >
-              <option value="">Selecciona proveedor</option>
-              {proveedorOptions.map((option) => (
-                <option key={option.id} value={option.id}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
+              onChange={(v) => updateField('proveedor', v)}
+              options={proveedorOptions}
+              placeholder="Buscar proveedor..."
+              ariaLabel="Proveedor"
+            />
+          </div>
 
           <label className="text-sm">
             Numero asignado
@@ -422,22 +423,17 @@ function ComprasOrdenesCreatePage() {
 
           {items.map((item, index) => (
             <div key={`item-${index}`} className="grid gap-2 rounded-md border border-border p-3 md:grid-cols-6">
-              <label className="text-xs md:col-span-2">
-                Producto
-                <select
-                  className="mt-1 w-full rounded-md border border-input bg-background px-2 py-1.5 text-sm"
+              <div className="text-xs md:col-span-2">
+                <span>Producto</span>
+                <SearchableSelect
+                  className="mt-1"
                   value={item.producto}
-                  onChange={(event) => updateItemField(index, 'producto', event.target.value)}
-                  required
-                >
-                  <option value="">Selecciona producto</option>
-                  {productos.map((producto) => (
-                    <option key={producto.id} value={producto.id}>
-                      {producto.nombre}
-                    </option>
-                  ))}
-                </select>
-              </label>
+                  onChange={(v) => updateItemField(index, 'producto', v)}
+                  options={productoOptions}
+                  placeholder="Buscar producto..."
+                  ariaLabel={`Producto item ${index + 1}`}
+                />
+              </div>
 
               <label className="text-xs md:col-span-2">
                 Descripcion
