@@ -30,6 +30,21 @@ jobs:
           script: |
             const pr = context.payload.pull_request;
 
+            // Consultamos estado actual para evitar mutacion cuando GitHub marca el PR como inestable.
+            const { data: prData } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: pr.number,
+            });
+
+            const mergeableState = String(prData.mergeable_state || '').toLowerCase();
+            if (['dirty', 'blocked', 'behind', 'draft', 'unknown', 'unstable'].includes(mergeableState)) {
+              core.warning(
+                `Auto-merge no habilitado para PR #${pr.number}: estado actual ${mergeableState}.`,
+              );
+              return;
+            }
+
             try {
               await github.graphql(
                 `mutation($pullRequestId: ID!) {
@@ -50,6 +65,7 @@ jobs:
               const msg = String(error?.message || error);
 
               if (
+                msg.includes('unstable status') ||
                 msg.includes('Pull request is in clean status') ||
                 msg.includes('already enabled') ||
                 msg.includes('Auto merge is already enabled') ||
