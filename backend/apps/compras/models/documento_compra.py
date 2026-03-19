@@ -3,6 +3,7 @@ from django.conf import settings
 
 from apps.contactos.models import Proveedor
 from apps.core.models import BaseModel
+from apps.documentos.models import EstadoContable
 
 
 class TipoDocumentoCompra(models.TextChoices):
@@ -52,6 +53,11 @@ class DocumentoCompraProveedor(BaseModel):
         max_length=20,
         choices=EstadoDocumentoCompra.choices,
         default=EstadoDocumentoCompra.BORRADOR,
+    )
+    estado_contable = models.CharField(
+        max_length=20,
+        choices=EstadoContable.choices,
+        default=EstadoContable.NO_APLICA,
     )
 
     observaciones = models.TextField(blank=True)

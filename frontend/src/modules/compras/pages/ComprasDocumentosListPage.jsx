@@ -28,6 +28,13 @@ const ESTADO_LABELS = {
   ANULADO: 'Anulado',
 }
 
+const ESTADO_CONTABLE_LABELS = {
+  NO_APLICA: 'No aplica',
+  PENDIENTE: 'Pendiente',
+  CONTABILIZADO: 'Contabilizado',
+  ERROR: 'Error',
+}
+
 function normalizeListResponse(data) {
   if (Array.isArray(data)) return data
   if (Array.isArray(data?.results)) return data.results
@@ -400,6 +407,7 @@ function ComprasDocumentosListPage() {
                     Estado <span className="text-xs text-muted-foreground">{getSortIndicator('estado')}</span>
                   </button>
                 </th>
+                <th className="px-3 py-2 text-left font-medium">Estado contable</th>
                 <th className="px-3 py-2 text-right font-medium">
                   <button type="button" onClick={() => toggleSort('total')} className="inline-flex items-center gap-1 hover:text-primary">
                     Total <span className="text-xs text-muted-foreground">{getSortIndicator('total')}</span>
@@ -411,7 +419,7 @@ function ComprasDocumentosListPage() {
             <tbody>
               {filtered.length === 0 ? (
                 <tr>
-                  <td className="px-3 py-3 text-muted-foreground" colSpan={7}>
+                  <td className="px-3 py-3 text-muted-foreground" colSpan={8}>
                     No hay documentos de compra.
                   </td>
                 </tr>
@@ -428,6 +436,7 @@ function ComprasDocumentosListPage() {
                       <td className="px-3 py-2">{ctc?.nombre || '-'}</td>
                       <td className="px-3 py-2">{formatDateChile(doc.fecha_emision)}</td>
                       <td className="px-3 py-2">{ESTADO_LABELS[doc.estado] || doc.estado}</td>
+                      <td className="px-3 py-2 text-xs text-muted-foreground">{ESTADO_CONTABLE_LABELS[doc.estado_contable] || doc.estado_contable || '-'}</td>
                       <td className="px-3 py-2 text-right">{formatMoney(doc.total)}</td>
                       <td className="px-3 py-2">
                         <div className="flex flex-wrap justify-end gap-1">

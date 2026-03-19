@@ -3,7 +3,14 @@ from decimal import Decimal
 
 from apps.contactos.models.cliente import Cliente
 from apps.contactos.models.contacto import Contacto
-from apps.core.models import DomainEvent, OutboxEvent, UserEmpresa
+from apps.core.models import (
+    ConfiguracionTributaria,
+    DomainEvent,
+    OutboxEvent,
+    RangoFolioTributario,
+    TipoDocumentoTributario,
+    UserEmpresa,
+)
 from apps.core.models.cartera import CuentaPorCobrar
 from apps.core.tenant import set_current_empresa, set_current_user
 from apps.documentos.models import EstadoIntegracionTributaria
@@ -77,6 +84,64 @@ def producto(db, empresa, impuesto):
     return p
 
 
+@pytest.fixture
+def configuracion_sii(db, empresa, usuario_owner):
+    return ConfiguracionTributaria.all_objects.create(
+        empresa=empresa,
+        creado_por=usuario_owner,
+        ambiente="CERTIFICACION",
+        rut_emisor="76086428-5",
+        razon_social="Empresa Test Tributaria",
+        certificado_alias="cert-prueba",
+        certificado_activo=True,
+        resolucion_numero=80,
+        resolucion_fecha="2026-01-01",
+        email_intercambio_dte="dte@test.com",
+        proveedor_envio="INTERNO",
+        activa=True,
+    )
+
+
+@pytest.fixture
+def rangos_sii(db, empresa, usuario_owner, configuracion_sii):
+    _ = configuracion_sii
+    return [
+        RangoFolioTributario.all_objects.create(
+            empresa=empresa,
+            creado_por=usuario_owner,
+            tipo_documento=TipoDocumentoTributario.FACTURA_VENTA,
+            caf_nombre="CAF FACTURAS",
+            folio_desde=100,
+            folio_hasta=199,
+            fecha_autorizacion="2026-01-01",
+            fecha_vencimiento="2026-12-31",
+            activo=True,
+        ),
+        RangoFolioTributario.all_objects.create(
+            empresa=empresa,
+            creado_por=usuario_owner,
+            tipo_documento=TipoDocumentoTributario.NOTA_CREDITO_VENTA,
+            caf_nombre="CAF NC",
+            folio_desde=200,
+            folio_hasta=299,
+            fecha_autorizacion="2026-01-01",
+            fecha_vencimiento="2026-12-31",
+            activo=True,
+        ),
+        RangoFolioTributario.all_objects.create(
+            empresa=empresa,
+            creado_por=usuario_owner,
+            tipo_documento=TipoDocumentoTributario.GUIA_DESPACHO,
+            caf_nombre="CAF GUIAS",
+            folio_desde=300,
+            folio_hasta=399,
+            fecha_autorizacion="2026-01-01",
+            fecha_vencimiento="2026-12-31",
+            activo=True,
+        ),
+    ]
+
+
 def _crear_pedido_base(empresa, usuario_owner, cliente):
     set_current_empresa(empresa)
     set_current_user(usuario_owner)
@@ -136,7 +201,8 @@ class TestPedidoVentaService:
 @pytest.mark.django_db
 class TestGuiaDespachoService:
 
-    def test_confirmar_y_anular_guia(self, empresa, usuario_owner, cliente, producto, impuesto):
+    def test_confirmar_y_anular_guia(self, empresa, usuario_owner, cliente, producto, impuesto, rangos_sii):
+        _ = rangos_sii
         set_current_empresa(empresa)
         set_current_user(usuario_owner)
 
@@ -203,7 +269,10 @@ class TestGuiaDespachoService:
 @pytest.mark.django_db
 class TestFacturaNotaCreditoServices:
 
-    def test_emitir_factura_crea_cxc_y_anular_genera_nc(self, empresa, usuario_owner, cliente, producto, impuesto):
+    def test_emitir_factura_crea_cxc_y_anular_genera_nc(
+        self, empresa, usuario_owner, cliente, producto, impuesto, rangos_sii
+    ):
+        _ = rangos_sii
         set_current_empresa(empresa)
         set_current_user(usuario_owner)
 
@@ -240,6 +309,7 @@ class TestFacturaNotaCreditoServices:
         )
         assert factura.estado == EstadoFacturaVenta.EMITIDA
         assert factura.estado_tributario == EstadoIntegracionTributaria.EN_COLA
+        assert factura.folio_tributario == "100"
 
         assert DomainEvent.all_objects.filter(
             empresa=empresa,
@@ -272,10 +342,12 @@ class TestFacturaNotaCreditoServices:
         ).first()
         assert nc is not None
         assert nc.estado == EstadoNotaCreditoVenta.EMITIDA
+        assert nc.folio_tributario == "200"
 
     def test_emitir_nota_credito_manual_aplica_saldo_cxc(
-        self, empresa, usuario_owner, cliente, producto, impuesto
+        self, empresa, usuario_owner, cliente, producto, impuesto, rangos_sii
     ):
+        _ = rangos_sii
         set_current_empresa(empresa)
         set_current_user(usuario_owner)
 
@@ -348,12 +420,16 @@ class TestFacturaNotaCreditoServices:
             topic="sii.dte",
             event_name="nota_credito_venta.solicitar_emision",
         ).exists()
+        assert nota.folio_tributario == "200"
 
         referencia = f"FV-{factura.numero}-{str(factura.id)[:8]}"
         cxc = CuentaPorCobrar.all_objects.get(empresa=empresa, referencia=referencia)
         assert cxc.saldo < cxc.monto_total
 
-    def test_confirmar_guia_encola_integracion_tributaria(self, empresa, usuario_owner, cliente, producto, impuesto):
+    def test_confirmar_guia_encola_integracion_tributaria(
+        self, empresa, usuario_owner, cliente, producto, impuesto, rangos_sii
+    ):
+        _ = rangos_sii
         set_current_empresa(empresa)
         set_current_user(usuario_owner)
 

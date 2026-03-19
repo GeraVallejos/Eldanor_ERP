@@ -21,6 +21,13 @@ class EstadoIntegracionTributaria(models.TextChoices):
     RECHAZADO = "RECHAZADO", "Rechazado"
 
 
+class EstadoContable(models.TextChoices):
+    NO_APLICA = "NO_APLICA", "No aplica"
+    PENDIENTE = "PENDIENTE", "Pendiente"
+    CONTABILIZADO = "CONTABILIZADO", "Contabilizado"
+    ERROR = "ERROR", "Error"
+
+
 class DocumentoReferenciaMixin(models.Model):
     documento_tipo = models.CharField(
         max_length=50,
@@ -53,6 +60,11 @@ class DocumentoNumeradoBase(DocumentoBase):
 
 class DocumentoTributableBase(DocumentoNumeradoBase):
     impuestos = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    estado_contable = models.CharField(
+        max_length=20,
+        choices=EstadoContable.choices,
+        default=EstadoContable.NO_APLICA,
+    )
     estado_tributario = models.CharField(
         max_length=20,
         choices=EstadoIntegracionTributaria.choices,

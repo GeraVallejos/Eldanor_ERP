@@ -55,6 +55,32 @@ def vendedor_usuario(db, empresa):
     return user, relacion
 
 
+@pytest.fixture
+def admin_usuario(db, empresa):
+    from django.contrib.auth import get_user_model
+    from apps.core.permisos.permisoModulo import PermisoModulo
+    from apps.core.permisos.services import sincronizar_catalogo_permisos
+
+    User = get_user_model()
+    user = User.objects.create_user(
+        username="admin_perm",
+        email="admin_perm@test.com",
+        password="pass1234",
+        empresa_activa=empresa,
+    )
+
+    relacion = UserEmpresa.objects.create(
+        user=user,
+        empresa=empresa,
+        rol="ADMIN",
+        activo=True,
+    )
+
+    sincronizar_catalogo_permisos()
+    relacion.permisos.add(PermisoModulo.objects.get(codigo="TESORERIA.VER"))
+    return user, relacion
+
+
 @pytest.mark.django_db
 class TestGestionPermisosAPI:
     def test_owner_puede_ver_catalogo(self, api_client, owner_usuario):
@@ -144,3 +170,13 @@ class TestGestionPermisosAPI:
         assert len(response.data) >= 2
         assert any(item["rol"] == "OWNER" for item in response.data)
         assert any(item["rol"] == "VENDEDOR" for item in response.data)
+
+    def test_admin_mantiene_permisos_totales_aunque_tenga_personalizados(self, admin_usuario):
+        admin, relacion = admin_usuario
+
+        from apps.core.permisos.services import permisos_efectivos_relacion
+
+        efectivos = permisos_efectivos_relacion(relacion)
+
+        assert efectivos == ["*"]
+        assert admin.tiene_permiso(Modulos.COMPRAS, Acciones.APROBAR, admin.empresa_activa) is True

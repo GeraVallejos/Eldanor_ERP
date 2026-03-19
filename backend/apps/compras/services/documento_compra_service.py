@@ -19,7 +19,9 @@ from apps.compras.models import (
 from apps.core.exceptions import BusinessRuleError, ConflictError, ResourceNotFoundError
 from apps.core.models import EstadoCuenta, TipoDocumento
 from apps.core.services import CarteraService, SecuenciaService
+from apps.core.services.accounting_bridge import AccountingBridge
 from apps.documentos.models import TipoDocumentoReferencia
+from apps.documentos.models import EstadoContable
 from apps.inventario.models import MovimientoInventario
 from apps.inventario.models import TipoMovimiento
 from apps.inventario.services.inventario_service import InventarioService
@@ -501,6 +503,25 @@ class DocumentoCompraService:
             documento.confirmado_en = timezone.now()
             documento.save(update_fields=["estado", "confirmado_por", "confirmado_en"])
             CarteraService.registrar_cxp_desde_documento_compra(documento=documento, usuario=usuario)
+            AccountingBridge.request_entry(
+                empresa=empresa,
+                aggregate_type="DocumentoCompraProveedor",
+                aggregate_id=documento.id,
+                entry_payload={
+                    "fecha": str(documento.fecha_emision),
+                    "glosa": f"Documento de compra {documento.folio}",
+                    "referencia_tipo": "DOCUMENTO_COMPRA",
+                    "movimientos": [
+                        {"cuenta_codigo": "511100", "debe": str(documento.subtotal_neto), "haber": "0"},
+                        {"cuenta_codigo": "119200", "debe": str(documento.impuestos), "haber": "0"},
+                        {"cuenta_codigo": "211100", "debe": "0", "haber": str(documento.total)},
+                    ],
+                },
+                usuario=usuario,
+                dedup_key=f"dc-accounting:{documento.id}:transito",
+            )
+            documento.estado_contable = EstadoContable.PENDIENTE
+            documento.save(update_fields=["estado_contable", "actualizado_en"])
 
             DocumentoCompraService._registrar_auditoria_documento(
                 documento=documento,
@@ -540,6 +561,25 @@ class DocumentoCompraService:
 
         # Vincula impacto financiero para tesoreria/cartera futura.
         CarteraService.registrar_cxp_desde_documento_compra(documento=documento, usuario=usuario)
+        AccountingBridge.request_entry(
+            empresa=empresa,
+            aggregate_type="DocumentoCompraProveedor",
+            aggregate_id=documento.id,
+            entry_payload={
+                "fecha": str(documento.fecha_emision),
+                "glosa": f"Documento de compra {documento.folio}",
+                "referencia_tipo": "DOCUMENTO_COMPRA",
+                "movimientos": [
+                    {"cuenta_codigo": "511100", "debe": str(documento.subtotal_neto), "haber": "0"},
+                    {"cuenta_codigo": "119200", "debe": str(documento.impuestos), "haber": "0"},
+                    {"cuenta_codigo": "211100", "debe": "0", "haber": str(documento.total)},
+                ],
+            },
+            usuario=usuario,
+            dedup_key=f"dc-accounting:{documento.id}:confirmado",
+        )
+        documento.estado_contable = EstadoContable.PENDIENTE
+        documento.save(update_fields=["estado_contable", "actualizado_en"])
 
         DocumentoCompraService._registrar_auditoria_documento(
             documento=documento,

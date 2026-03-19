@@ -1,6 +1,15 @@
 from rest_framework import serializers
 from apps.core.models.empresa import Empresa
-from apps.core.models import CuentaPorCobrar, CuentaPorPagar, Moneda, TipoCambio
+from apps.core.models import (
+    ConfiguracionTributaria,
+    CuentaBancariaEmpresa,
+    CuentaPorCobrar,
+    CuentaPorPagar,
+    Moneda,
+    MovimientoBancario,
+    RangoFolioTributario,
+    TipoCambio,
+)
 
 
 
@@ -66,6 +75,42 @@ class MonedaSerializer(serializers.ModelSerializer):
         read_only_fields = ("id", "empresa", "creado_por", "creado_en", "actualizado_en")
 
 
+class ConfiguracionTributariaSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ConfiguracionTributaria
+        fields = "__all__"
+        read_only_fields = ("id", "empresa", "creado_por", "creado_en", "actualizado_en")
+
+
+class RangoFolioTributarioSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = RangoFolioTributario
+        fields = "__all__"
+        read_only_fields = ("id", "empresa", "creado_por", "creado_en", "actualizado_en")
+
+
+class CuentaBancariaEmpresaSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CuentaBancariaEmpresa
+        fields = "__all__"
+        read_only_fields = ("id", "empresa", "creado_por", "creado_en", "actualizado_en")
+
+
+class MovimientoBancarioSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = MovimientoBancario
+        fields = "__all__"
+        read_only_fields = (
+            "id",
+            "empresa",
+            "creado_por",
+            "creado_en",
+            "actualizado_en",
+            "conciliado",
+            "conciliado_en",
+        )
+
+
 class ConvertirMontoSerializer(serializers.Serializer):
     monto = serializers.DecimalField(max_digits=14, decimal_places=2)
     moneda_origen = serializers.CharField(max_length=3)
@@ -91,3 +136,15 @@ class CuentaPorPagarSerializer(serializers.ModelSerializer):
 class AplicarPagoSerializer(serializers.Serializer):
     monto = serializers.DecimalField(max_digits=14, decimal_places=2)
     fecha_pago = serializers.DateField()
+
+
+class ConciliarMovimientoBancarioSerializer(serializers.Serializer):
+    cuenta_por_cobrar = serializers.UUIDField(required=False)
+    cuenta_por_pagar = serializers.UUIDField(required=False)
+
+    def validate(self, attrs):
+        if bool(attrs.get("cuenta_por_cobrar")) == bool(attrs.get("cuenta_por_pagar")):
+            raise serializers.ValidationError(
+                "Debe indicar una cuenta por cobrar o una cuenta por pagar."
+            )
+        return attrs

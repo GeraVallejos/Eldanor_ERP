@@ -14,6 +14,7 @@ from rest_framework import status
 from rest_framework.exceptions import NotAuthenticated, PermissionDenied
 from rest_framework.decorators import action
 from rest_framework.viewsets import ModelViewSet
+from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
 from rest_framework_simplejwt.settings import api_settings
@@ -22,12 +23,17 @@ from apps.core.api.serializer import (
     AplicarPlantillaSerializer,
     AplicarPagoSerializer,
     CambiarEmpresaActivaSerializer,
+    ConciliarMovimientoBancarioSerializer,
+    ConfiguracionTributariaSerializer,
     ConvertirMontoSerializer,
+    CuentaBancariaEmpresaSerializer,
     CuentaPorCobrarSerializer,
     CuentaPorPagarSerializer,
     EmpresaUsuarioSerializer,
     GestionPermisosSerializer,
+    MovimientoBancarioSerializer,
     MonedaSerializer,
+    RangoFolioTributarioSerializer,
     TipoCambioSerializer,
     PlantillaPermisosSerializer,
     UsuarioEmpresaPermisosSerializer,
@@ -35,7 +41,6 @@ from apps.core.api.serializer import (
 from apps.core.api.auth import CustomTokenObtainPairSerializer
 from apps.core.permisos.constantes_permisos import Acciones, Modulos
 from apps.core.mixins import TenantViewSetMixin
-from apps.core.models import CuentaPorCobrar, CuentaPorPagar, Moneda, TipoCambio
 from apps.core.permisos.plantillaPermisos import PlantillaPermisos
 from apps.core.permisos.permisoModulo import PermisoModulo
 from apps.core.permisos.permissions import TienePermisoModuloAccion, TieneRelacionActiva
@@ -47,7 +52,25 @@ from apps.core.permisos.services import (
     validar_codigos_permisos,
 )
 from apps.core.exceptions import AuthorizationError, BusinessRuleError, ResourceNotFoundError
-from apps.core.services import CarteraService, TipoCambioService
+from apps.core.models import (
+    ConfiguracionTributaria,
+    CuentaBancariaEmpresa,
+    CuentaPorCobrar,
+    CuentaPorPagar,
+    Moneda,
+    MovimientoBancario,
+    RangoFolioTributario,
+    TipoCambio,
+)
+from apps.core.services import (
+    CarteraService,
+    TesoreriaBancariaService,
+    TipoCambioService,
+    build_movimientos_bancarios_template,
+    build_rangos_folios_template,
+    import_movimientos_bancarios,
+    import_rangos_folios_tributarios,
+)
 from apps.core.authentication import CookieJWTAuthentication
 
 
@@ -625,6 +648,59 @@ class EmpresaLogoView(APIView):
         return response
 
 
+class ConfiguracionTributariaViewSet(TenantViewSetMixin, ModelViewSet):
+    model = ConfiguracionTributaria
+    serializer_class = ConfiguracionTributariaSerializer
+    permission_classes = [IsAuthenticated, TieneRelacionActiva, TienePermisoModuloAccion]
+    permission_modulo = Modulos.FACTURACION
+    permission_action_map = {
+        "list": Acciones.VER,
+        "retrieve": Acciones.VER,
+        "create": Acciones.EDITAR,
+        "update": Acciones.EDITAR,
+        "partial_update": Acciones.EDITAR,
+        "destroy": Acciones.EDITAR,
+    }
+
+
+class RangoFolioTributarioViewSet(TenantViewSetMixin, ModelViewSet):
+    model = RangoFolioTributario
+    serializer_class = RangoFolioTributarioSerializer
+    permission_classes = [IsAuthenticated, TieneRelacionActiva, TienePermisoModuloAccion]
+    permission_modulo = Modulos.FACTURACION
+    permission_action_map = {
+        "list": Acciones.VER,
+        "retrieve": Acciones.VER,
+        "create": Acciones.EDITAR,
+        "update": Acciones.EDITAR,
+        "partial_update": Acciones.EDITAR,
+        "destroy": Acciones.EDITAR,
+        "bulk_import": Acciones.EDITAR,
+        "bulk_template": Acciones.VER,
+    }
+
+    @action(detail=False, methods=["post"], url_path="bulk_import", parser_classes=[MultiPartParser, FormParser])
+    def bulk_import(self, request):
+        self._set_tenant_context()
+        payload = import_rangos_folios_tributarios(
+            uploaded_file=request.FILES.get("file"),
+            user=request.user,
+            empresa=self.get_empresa(),
+        )
+        return Response(payload, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=["get"], url_path="bulk_template")
+    def bulk_template(self, request):
+        self._set_tenant_context()
+        content = build_rangos_folios_template(user=request.user, empresa=self.get_empresa())
+        response = HttpResponse(
+            content,
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        response["Content-Disposition"] = 'attachment; filename="plantilla_rangos_folios_sii.xlsx"'
+        return response
+
+
 class TipoCambioViewSet(TenantViewSetMixin, ModelViewSet):
     model = TipoCambio
     serializer_class = TipoCambioSerializer
@@ -671,6 +747,106 @@ class MonedaViewSet(TenantViewSetMixin, ModelViewSet):
         "partial_update": Acciones.CONCILIAR,
         "destroy": Acciones.CONCILIAR,
     }
+
+
+class CuentaBancariaEmpresaViewSet(TenantViewSetMixin, ModelViewSet):
+    model = CuentaBancariaEmpresa
+    serializer_class = CuentaBancariaEmpresaSerializer
+    permission_classes = [IsAuthenticated, TieneRelacionActiva, TienePermisoModuloAccion]
+    permission_modulo = Modulos.TESORERIA
+    permission_action_map = {
+        "list": Acciones.VER,
+        "retrieve": Acciones.VER,
+        "create": Acciones.CONCILIAR,
+        "update": Acciones.CONCILIAR,
+        "partial_update": Acciones.CONCILIAR,
+        "destroy": Acciones.CONCILIAR,
+    }
+
+
+class MovimientoBancarioViewSet(TenantViewSetMixin, ModelViewSet):
+    model = MovimientoBancario
+    serializer_class = MovimientoBancarioSerializer
+    permission_classes = [IsAuthenticated, TieneRelacionActiva, TienePermisoModuloAccion]
+    permission_modulo = Modulos.TESORERIA
+    permission_action_map = {
+        "list": Acciones.VER,
+        "retrieve": Acciones.VER,
+        "create": Acciones.CONCILIAR,
+        "update": Acciones.CONCILIAR,
+        "partial_update": Acciones.CONCILIAR,
+        "destroy": Acciones.CONCILIAR,
+        "conciliar": Acciones.CONCILIAR,
+        "bulk_import": Acciones.CONCILIAR,
+        "bulk_template": Acciones.VER,
+    }
+
+    def perform_create(self, serializer):
+        self._set_tenant_context()
+        movimiento = TesoreriaBancariaService.registrar_movimiento_manual(
+            cuenta_bancaria=serializer.validated_data["cuenta_bancaria"],
+            fecha=serializer.validated_data["fecha"],
+            referencia=serializer.validated_data.get("referencia", ""),
+            descripcion=serializer.validated_data.get("descripcion", ""),
+            tipo=serializer.validated_data["tipo"],
+            monto=serializer.validated_data["monto"],
+            usuario=self.request.user,
+        )
+        serializer.instance = movimiento
+
+    @action(detail=True, methods=["post"])
+    def conciliar(self, request, pk=None):
+        self._set_tenant_context()
+        movimiento = self.get_object()
+        serializer = ConciliarMovimientoBancarioSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        cuenta_por_cobrar = None
+        cuenta_por_pagar = None
+        if serializer.validated_data.get("cuenta_por_cobrar"):
+            cuenta_por_cobrar = CuentaPorCobrar.all_objects.filter(
+                empresa=self.get_empresa(),
+                id=serializer.validated_data["cuenta_por_cobrar"],
+            ).first()
+            if not cuenta_por_cobrar:
+                raise ResourceNotFoundError("Cuenta por cobrar no encontrada.")
+
+        if serializer.validated_data.get("cuenta_por_pagar"):
+            cuenta_por_pagar = CuentaPorPagar.all_objects.filter(
+                empresa=self.get_empresa(),
+                id=serializer.validated_data["cuenta_por_pagar"],
+            ).first()
+            if not cuenta_por_pagar:
+                raise ResourceNotFoundError("Cuenta por pagar no encontrada.")
+
+        movimiento = TesoreriaBancariaService.conciliar_movimiento(
+            movimiento=movimiento,
+            cuenta_por_cobrar=cuenta_por_cobrar,
+            cuenta_por_pagar=cuenta_por_pagar,
+            usuario=request.user,
+        )
+        return Response(self.get_serializer(movimiento).data, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=["post"], url_path="bulk_import", parser_classes=[MultiPartParser, FormParser])
+    def bulk_import(self, request):
+        self._set_tenant_context()
+        payload = import_movimientos_bancarios(
+            uploaded_file=request.FILES.get("file"),
+            user=request.user,
+            empresa=self.get_empresa(),
+        )
+        return Response(payload, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=["get"], url_path="bulk_template")
+    def bulk_template(self, request):
+        self._set_tenant_context()
+        content = build_movimientos_bancarios_template(user=request.user, empresa=self.get_empresa())
+        response = HttpResponse(
+            content,
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        response["Content-Disposition"] = 'attachment; filename="plantilla_movimientos_bancarios.xlsx"'
+        return response
 
 
 class CuentaPorCobrarViewSet(TenantViewSetMixin, ModelViewSet):

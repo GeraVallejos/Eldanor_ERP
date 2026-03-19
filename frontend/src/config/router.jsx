@@ -18,12 +18,16 @@ import ComprasDocumentosCreatePage from '@/modules/compras/pages/ComprasDocument
 import ComprasDocumentosDetailPage from '@/modules/compras/pages/ComprasDocumentosDetailPage'
 import ComprasRecepcionesListPage from '@/modules/compras/pages/ComprasRecepcionesListPage'
 import ComprasRecepcionesCreatePage from '@/modules/compras/pages/ComprasRecepcionesCreatePage'
+import ContabilidadAsientosPage from '@/modules/contabilidad/pages/ContabilidadAsientosPage'
+import ContabilidadPlanPage from '@/modules/contabilidad/pages/ContabilidadPlanPage'
 import AuditoriaEventosPage from '@/modules/auditoria/pages/AuditoriaEventosPage'
 import AuditoriaEventoDetailPage from '@/modules/auditoria/pages/AuditoriaEventoDetailPage'
 import AdministracionPermisosPage from '@/modules/administracion/pages/AdministracionPermisosPage'
+import AdministracionSiiPage from '@/modules/administracion/pages/AdministracionSiiPage'
 import InventarioBodegasPage from '@/modules/inventario/pages/InventarioBodegasPage'
 import InventarioKardexPage from '@/modules/inventario/pages/InventarioKardexPage'
 import InventarioResumenPage from '@/modules/inventario/pages/InventarioResumenPage'
+import TesoreriaBancosPage from '@/modules/tesoreria/pages/TesoreriaBancosPage'
 import TesoreriaCuentasPage from '@/modules/tesoreria/pages/TesoreriaCuentasPage'
 import TesoreriaMonedasPage from '@/modules/tesoreria/pages/TesoreriaMonedasPage'
 import TesoreriaTipoCambioPage from '@/modules/tesoreria/pages/TesoreriaTipoCambioPage'
@@ -76,12 +80,17 @@ const router = createBrowserRouter([
           { path: 'compras/recepciones', element: <ComprasRecepcionesListPage /> },
           { path: 'compras/recepciones/nuevo', element: <ComprasRecepcionesCreatePage /> },
           { path: 'compras/recepciones/:id/editar', element: <ComprasRecepcionesCreatePage /> },
+          { path: 'contabilidad/plan-cuentas', element: <ContabilidadPlanPage /> },
+          { path: 'contabilidad/asientos', element: <ContabilidadAsientosPage /> },
           { path: 'auditoria/eventos', element: <AuditoriaEventosPage /> },
           { path: 'auditoria/eventos/:id', element: <AuditoriaEventoDetailPage /> },
           { path: 'administracion/permisos', element: <AdministracionPermisosPage /> },
+          { path: 'administracion/sii', element: <AdministracionSiiPage /> },
+          { path: 'contabilidad/sii', element: <AdministracionSiiPage /> },
           { path: 'inventario/bodegas', element: <InventarioBodegasPage /> },
           { path: 'inventario/kardex', element: <InventarioKardexPage /> },
           { path: 'inventario/resumen', element: <InventarioResumenPage /> },
+          { path: 'tesoreria/bancos', element: <TesoreriaBancosPage /> },
           { path: 'tesoreria/cartera', element: <TesoreriaCuentasPage /> },
           { path: 'tesoreria/monedas', element: <TesoreriaMonedasPage /> },
           { path: 'tesoreria/tipos-cambio', element: <TesoreriaTipoCambioPage /> },

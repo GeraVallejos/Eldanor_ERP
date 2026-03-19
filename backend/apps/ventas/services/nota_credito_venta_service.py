@@ -5,8 +5,10 @@ from django.utils import timezone
 
 from apps.core.exceptions import BusinessRuleError, ConflictError, ResourceNotFoundError
 from apps.core.services import CarteraService, DomainEventService, OutboxService, SecuenciaService
+from apps.core.services.accounting_bridge import AccountingBridge
 from apps.core.models import TipoDocumento
 from apps.core.models.cartera import CuentaPorCobrar
+from apps.documentos.models import EstadoContable
 from apps.documentos.services.integracion_tributaria_service import IntegracionTributariaService
 from apps.ventas.models import (
     EstadoFacturaVenta,
@@ -163,6 +165,25 @@ class NotaCreditoVentaService:
         nota.emitido_por = usuario
         nota.emitido_en = timezone.now()
         nota.save(update_fields=["estado", "emitido_por", "emitido_en"])
+        AccountingBridge.request_entry(
+            empresa=empresa,
+            aggregate_type="NotaCreditoVenta",
+            aggregate_id=nota.id,
+            entry_payload={
+                "fecha": str(nota.fecha_emision),
+                "glosa": f"Nota de credito {nota.numero}",
+                "referencia_tipo": "NOTA_CREDITO_VENTA",
+                "movimientos": [
+                    {"cuenta_codigo": "411100", "debe": str(nota.subtotal), "haber": "0"},
+                    {"cuenta_codigo": "213100", "debe": str(nota.impuestos), "haber": "0"},
+                    {"cuenta_codigo": "112100", "debe": "0", "haber": str(nota.total)},
+                ],
+            },
+            usuario=usuario,
+            dedup_key=f"ncv-accounting:{nota.id}:emitida",
+        )
+        nota.estado_contable = EstadoContable.PENDIENTE
+        nota.save(update_fields=["estado_contable", "actualizado_en"])
         IntegracionTributariaService.solicitar_emision(
             documento=nota,
             usuario=usuario,
