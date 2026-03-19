@@ -14,6 +14,8 @@ class ContactoSerializer(serializers.ModelSerializer):
 
 
 class ClienteSerializer(serializers.ModelSerializer):
+    contacto_nombre = serializers.CharField(source='contacto.nombre', read_only=True)
+
     class Meta:
         model = Cliente
         fields = "__all__"

@@ -52,8 +52,15 @@ describe('compras/CreatePage', () => {
 
     renderWithProviders(<ComprasOrdenesCreatePage />)
 
-    await userEvent.selectOptions(await screen.findByLabelText('Proveedor'), 'p-1')
-    await userEvent.selectOptions(screen.getAllByLabelText('Producto')[0], 'prod-1')
+    // Select proveedor in SearchableSelect
+    const proveedorInput = await screen.findByLabelText('Proveedor')
+    await userEvent.type(proveedorInput, 'Proveedor')
+    await userEvent.click(await screen.findByRole('button', { name: 'Proveedor Uno' }))
+
+    // Select producto in SearchableSelect (items section)
+    const productoInputs = screen.getAllByLabelText(/Producto item/)
+    await userEvent.type(productoInputs[0], 'Producto')
+    await userEvent.click(await screen.findByRole('button', { name: 'Producto A' }))
 
     await userEvent.click(screen.getByRole('button', { name: 'Crear orden' }))
 

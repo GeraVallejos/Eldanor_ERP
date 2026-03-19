@@ -5,7 +5,9 @@ import {
   PackagePlus,
   ShoppingBag,
   ShieldCheck,
+  CircleDollarSign,
 } from 'lucide-react'
+import { hasPermission } from '@/modules/shared/auth/permissions'
 
 const NAV_MODULES = [
   {
@@ -125,6 +127,39 @@ const NAV_MODULES = [
       },
     ],
   },
+  {
+    id: 'ventas',
+    label: 'Ventas',
+    icon: CircleDollarSign,
+    enabled: true,
+    requiredPermissions: ['VENTAS.VER'],
+    children: [
+      {
+        id: 'ventas-pedidos',
+        label: 'Pedidos',
+        to: '/ventas/pedidos',
+        enabled: true,
+      },
+      {
+        id: 'ventas-guias',
+        label: 'Guias de despacho',
+        to: '/ventas/guias',
+        enabled: true,
+      },
+      {
+        id: 'ventas-facturas',
+        label: 'Facturas',
+        to: '/ventas/facturas',
+        enabled: true,
+      },
+      {
+        id: 'ventas-notas',
+        label: 'Notas de credito',
+        to: '/ventas/notas',
+        enabled: true,
+      },
+    ],
+  },
 ]
 
 function hasRequiredPermissions(userPermissions, requiredPermissions) {
@@ -132,21 +167,8 @@ function hasRequiredPermissions(userPermissions, requiredPermissions) {
     return true
   }
 
-  const normalizedUserPermissions = userPermissions.map((permission) => String(permission || '').trim().toUpperCase())
-
-  return requiredPermissions.every((permission) => {
-    const target = String(permission || '').trim().toUpperCase()
-    if (!target) {
-      return true
-    }
-
-    if (normalizedUserPermissions.includes('*') || normalizedUserPermissions.includes(target)) {
-      return true
-    }
-
-    const [moduleCode] = target.split('.')
-    return Boolean(moduleCode) && normalizedUserPermissions.includes(`${moduleCode}.*`)
-  })
+  const mockUser = { permissions: userPermissions }
+  return requiredPermissions.every((permission) => hasPermission(mockUser, permission))
 }
 
 function hasRequiredRoles(userRoles, requiredRoles) {
