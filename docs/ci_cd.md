@@ -13,16 +13,20 @@ Esta guia describe la automatizacion configurada para este ERP y como usarla.
 - Auto-merge: [automerge.yml](../.github/workflows/automerge.yml)
   - Habilita auto-merge para PR `dev -> main`.
   - GitHub hace el merge solo cuando todos los checks requeridos estan en verde.
+- Auto-PR: [auto-pr-dev-main.yml](../.github/workflows/auto-pr-dev-main.yml)
+  - Crea automaticamente PR `dev -> main` cuando haces push a `dev`.
+  - Si ya existe PR abierto, no crea duplicados.
+  - Si no hay commits nuevos entre `dev` y `main`, finaliza sin error.
 - Branch protection automatizada: [branch-protection.yml](../.github/workflows/branch-protection.yml)
   - Workflow manual que configura reglas de proteccion en `main`.
   - Exige checks Backend/Frontend en verde y aprobacion de PR.
 
 ## Flujo recomendado
 
-1. Crear rama feature y subir cambios.
-2. Abrir Pull Request.
-3. Esperar pipeline CI en verde.
-4. Hacer merge a `main`.
+1. Crear rama feature y fusionar a `dev`.
+2. Hacer push a `dev`.
+3. El workflow Auto-PR crea (o reutiliza) PR `dev -> main`.
+4. CI corre sobre ese PR y Auto-merge lo fusiona cuando todo queda en verde.
 5. CD genera artifacts y, si hay webhook configurado, dispara despliegue.
 
 ## Configuracion minima de secretos
@@ -43,13 +47,17 @@ Para que funcione correctamente:
 
 Con eso, el workflow habilita auto-merge y GitHub fusiona automaticamente cuando CI queda en verde.
 
+## Requisitos para auto-PR
+
+No requiere secretos adicionales. Usa `GITHUB_TOKEN` nativo con permisos de `pull-requests: write`.
+
 ## Automatizar branch protection
 
 1. Ejecutar workflow manual **Configure Branch Protection** desde Actions.
 2. Verificar que `main` quede con:
   - checks requeridos: `Backend Tests`, `Frontend Lint and Tests`
-  - al menos 1 aprobacion
   - rechazo de force push y delete
+3. Si trabajas solo, puedes dejar aprobaciones requeridas en 0 para no bloquear auto-merge.
 
 ## Settings usados en CI
 
