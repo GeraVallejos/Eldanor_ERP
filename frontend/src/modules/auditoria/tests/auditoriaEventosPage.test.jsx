@@ -58,7 +58,8 @@ describe('auditoria/AuditoriaEventosPage', () => {
     const summaryMatches = await screen.findAllByText('Factura confirmada')
     expect(summaryMatches.length).toBeGreaterThanOrEqual(1)
 
-    await userEvent.click(screen.getByRole('button', { name: 'Verificar integridad' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Herramientas' }))
+    await userEvent.click(screen.getByRole('button', { name: /Verificar integridad/i }))
 
     expect(await screen.findByText('Estado: Valida')).toBeInTheDocument()
     expect(screen.getByText('Total eventos revisados: 18')).toBeInTheDocument()

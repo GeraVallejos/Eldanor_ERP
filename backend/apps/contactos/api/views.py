@@ -85,6 +85,7 @@ class ContactoViewSet(ContactosAuditoriaMixin, ContactosInactiveFilterMixin, Ten
         "partial_update": Acciones.EDITAR,
         "destroy": Acciones.BORRAR,
         "bulk_import": Acciones.CREAR,
+        "bulk_template": Acciones.VER,
     }
 
     def get_queryset(self):
@@ -223,6 +224,7 @@ class ProveedorViewSet(ContactosAuditoriaMixin, ContactosInactiveFilterMixin, Te
         "partial_update": Acciones.EDITAR,
         "destroy": Acciones.BORRAR,
         "bulk_import": Acciones.CREAR,
+        "bulk_template": Acciones.VER,
     }
 
     def get_queryset(self):

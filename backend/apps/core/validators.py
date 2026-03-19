@@ -1,13 +1,37 @@
 import re
 from django.core.exceptions import ValidationError
 
+
+def _normalizar_rut_limpio(rut_valor: str) -> str:
+    if not rut_valor:
+        return ""
+    return "".join(x for x in str(rut_valor) if x.isdigit() or x.upper() == "K").upper()
+
+
+def calcular_dv_rut(cuerpo: str) -> str:
+    if not cuerpo or not str(cuerpo).isdigit():
+        raise ValidationError("Cuerpo de RUT invalido.")
+
+    serie = list(map(int, reversed(str(cuerpo))))
+    factores = [2, 3, 4, 5, 6, 7]
+    acumulado = 0
+
+    for idx, digito in enumerate(serie):
+        acumulado += digito * factores[idx % len(factores)]
+
+    resto = 11 - (acumulado % 11)
+    if resto == 11:
+        return "0"
+    if resto == 10:
+        return "K"
+    return str(resto)
+
+
 def formatear_rut(rut_sucio: str) -> str:
     if not rut_sucio:
         return rut_sucio
 
-    limpio = "".join(
-        x for x in rut_sucio if x.isdigit() or x.upper() == "K"
-    ).upper()
+    limpio = _normalizar_rut_limpio(rut_sucio)
 
     if len(limpio) < 2:
         return limpio
@@ -22,13 +46,30 @@ def formatear_rut(rut_sucio: str) -> str:
 
     return f"{cuerpo_con_puntos}-{dv}"
 
-def validar_rut(rut: str):
+
+def validar_rut(rut: str, *, validar_dv=False):
     """
     Valida formato de RUT chileno.
+    Si validar_dv=True, tambien valida el digito verificador.
     """
-    rut_regex = r'^\d{1,2}\.?\d{3}\.?\d{3}-[\dkK]$'
-    if not re.match(rut_regex, rut):
+    rut_normalizado = formatear_rut(rut)
+    rut_regex = r"^\d{1,2}\.?\d{3}\.?\d{3}-[\dkK]$"
+    if not re.match(rut_regex, rut_normalizado):
         raise ValidationError(f'RUT inválido: {rut}')
+
+    if validar_dv:
+        limpio = _normalizar_rut_limpio(rut_normalizado)
+        cuerpo = limpio[:-1]
+        dv_ingresado = limpio[-1]
+        dv_esperado = calcular_dv_rut(cuerpo)
+
+        if dv_ingresado != dv_esperado:
+            raise ValidationError(f"RUT invalido: digito verificador no coincide para {rut_normalizado}.")
+
+
+def validar_rut_con_dv(rut: str):
+    """Valida formato y digito verificador de RUT chileno."""
+    validar_rut(rut, validar_dv=True)
 
 def validar_rut_unico_por_modelo(modelo, empresa, rut, instance_id=None):
     """

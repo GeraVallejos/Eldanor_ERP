@@ -9,7 +9,7 @@ from apps.core.permisos.constantes_permisos import Acciones, Modulos
 from apps.core.roles import RolUsuario
 from apps.core.services.csv_import import parse_csv_upload
 from apps.core.services.xlsx_template import build_xlsx_template
-from apps.core.validators import formatear_rut
+from apps.core.validators import formatear_rut, validar_rut_con_dv
 
 
 def _to_bool(raw_value, *, default=True):
@@ -53,7 +53,9 @@ def _normalize_rut(value):
     raw = _normalize_text(value)
     if not raw:
         return ""
-    return formatear_rut(raw)
+    rut_formateado = formatear_rut(raw)
+    validar_rut_con_dv(rut_formateado)
+    return rut_formateado
 
 
 def _normalize_tipo_contacto(raw_value):

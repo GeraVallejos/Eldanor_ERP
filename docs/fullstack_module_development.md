@@ -106,6 +106,37 @@ class VentaItem(BaseModel):
         return self.cantidad * self.precio_unitario
 ```
 
+  ### 2b.1 Recomendacion de consistencia: integrar `apps/documentos`
+
+  Si el nuevo modulo representa un **documento comercial** (cotizacion, orden, factura, guia, nota, etc.), conviene heredar las bases de `apps.documentos.models` para estandarizar estructura y comportamiento.
+
+  Uso recomendado:
+
+  ```python
+  from apps.documentos.models import DocumentoTributableBase, DocumentoItemBase
+
+
+  class Venta(DocumentoTributableBase):
+    # Hereda: estado, observaciones, subtotal, total, numero, impuestos
+    cliente = models.ForeignKey("contactos.Cliente", on_delete=models.PROTECT)
+    fecha_emision = models.DateField()
+
+
+  class VentaItem(DocumentoItemBase):
+    # Hereda: producto, descripcion, cantidad, precio_unitario, impuesto, subtotal, total
+    venta = models.ForeignKey(Venta, on_delete=models.CASCADE, related_name="items")
+  ```
+
+  Checklist rapido de decision:
+  - Si el modulo tiene cabecera + items + totales + impuestos, **usar `DocumentoTributableBase` y `DocumentoItemBase`**.
+  - Si no tiene naturaleza documental (ej. configuraciones, catalogos, entidades maestras), usar `BaseModel` directamente.
+  - Si requiere trazabilidad documental (`documento_tipo`, `documento_id`) para inventario o referencias cruzadas, usar `DocumentoReferenciaMixin` o `TipoDocumentoReferencia`.
+
+  Estado actual del proyecto:
+  - `Presupuesto` ya hereda `DocumentoBase`.
+  - `OrdenCompra` hereda `DocumentoTributableBase` y `OrdenCompraItem` hereda `DocumentoItemBase`.
+  - Esto confirma que `apps/documentos` **si esta en uso** y es parte de la estandarizacion del dominio.
+
 **2c. Servicios** (`apps/ventas/services/venta_service.py`)
 ```python
 from django.db import transaction

@@ -46,6 +46,7 @@ from apps.core.permisos.services import (
     validar_codigos_permisos,
 )
 from apps.core.services import CarteraService, TipoCambioService
+from apps.core.authentication import CookieJWTAuthentication
 
 
 logger = logging.getLogger(__name__)
@@ -581,9 +582,17 @@ class MeView(APIView):
 
 
 class LogoutView(APIView):
-    permission_classes = []
+    authentication_classes = [CookieJWTAuthentication]
+    permission_classes = [IsAuthenticated]
 
     def post(self, request):
+        has_auth_cookie = bool(
+            request.COOKIES.get(settings.AUTH_COOKIE_ACCESS_NAME)
+            or request.COOKIES.get(settings.AUTH_COOKIE_REFRESH_NAME)
+        )
+        if has_auth_cookie:
+            _enforce_csrf(request)
+
         response = Response(status=status.HTTP_204_NO_CONTENT)
         _clear_auth_cookies(response)
         return response
