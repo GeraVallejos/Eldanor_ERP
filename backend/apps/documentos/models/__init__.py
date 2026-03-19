@@ -3,6 +3,7 @@ from .documento_base import (
 	DocumentoNumeradoBase,
 	DocumentoReferenciaMixin,
 	DocumentoTributableBase,
+	EstadoIntegracionTributaria,
 	TipoDocumentoReferencia,
 )
 from .documento_base_item import DocumentoItemBase

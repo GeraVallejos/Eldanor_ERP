@@ -7,6 +7,7 @@ from apps.core.exceptions import BusinessRuleError, ConflictError, ResourceNotFo
 from apps.core.services import DomainEventService, OutboxService, SecuenciaService
 from apps.core.models import TipoDocumento
 from apps.documentos.models import TipoDocumentoReferencia
+from apps.documentos.services.integracion_tributaria_service import IntegracionTributariaService
 from apps.inventario.models import TipoMovimiento
 from apps.ventas.models import (
     EstadoGuiaDespacho,
@@ -96,6 +97,12 @@ class GuiaDespachoService:
         guia.confirmado_por = usuario
         guia.confirmado_en = timezone.now()
         guia.save(update_fields=["estado", "confirmado_por", "confirmado_en"])
+        IntegracionTributariaService.solicitar_emision(
+            documento=guia,
+            usuario=usuario,
+            tipo_documento="GUIA_DESPACHO",
+            payload_extra={"cliente_id": str(guia.cliente_id)},
+        )
 
         cls.registrar_historial(
             guia=guia,

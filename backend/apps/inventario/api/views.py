@@ -28,7 +28,7 @@ class BodegaViewSet(TenantViewSetMixin, ModelViewSet):
     model = Bodega
     serializer_class = BodegaSerializer
     permission_classes = [IsAuthenticated, TieneRelacionActiva, TienePermisoModuloAccion]
-    permission_modulo = Modulos.PRODUCTOS
+    permission_modulo = Modulos.INVENTARIO
     permission_action_map = {
         "list": Acciones.VER,
         "retrieve": Acciones.VER,
@@ -43,7 +43,7 @@ class StockProductoViewSet(TenantViewSetMixin, ModelViewSet):
     model = StockProducto
     serializer_class = StockProductoSerializer
     permission_classes = [IsAuthenticated, TieneRelacionActiva, TienePermisoModuloAccion]
-    permission_modulo = Modulos.PRODUCTOS
+    permission_modulo = Modulos.INVENTARIO
     permission_action_map = {
         "list": Acciones.VER,
         "retrieve": Acciones.VER,
@@ -175,7 +175,7 @@ class MovimientoInventarioViewSet(TenantViewSetMixin, ModelViewSet):
     model = MovimientoInventario
     serializer_class = MovimientoInventarioSerializer
     permission_classes = [IsAuthenticated, TieneRelacionActiva, TienePermisoModuloAccion]
-    permission_modulo = Modulos.PRODUCTOS
+    permission_modulo = Modulos.INVENTARIO
     permission_action_map = {
         "list": Acciones.VER,
         "retrieve": Acciones.VER,
@@ -253,7 +253,7 @@ class InventorySnapshotViewSet(TenantViewSetMixin, ModelViewSet):
     model = InventorySnapshot
     serializer_class = InventorySnapshotSerializer
     permission_classes = [IsAuthenticated, TieneRelacionActiva, TienePermisoModuloAccion]
-    permission_modulo = Modulos.PRODUCTOS
+    permission_modulo = Modulos.INVENTARIO
     permission_action_map = {
         "list": Acciones.VER,
         "retrieve": Acciones.VER,

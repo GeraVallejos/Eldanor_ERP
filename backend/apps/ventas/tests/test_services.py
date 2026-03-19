@@ -3,9 +3,10 @@ from decimal import Decimal
 
 from apps.contactos.models.cliente import Cliente
 from apps.contactos.models.contacto import Contacto
-from apps.core.models import UserEmpresa
+from apps.core.models import DomainEvent, OutboxEvent, UserEmpresa
 from apps.core.models.cartera import CuentaPorCobrar
 from apps.core.tenant import set_current_empresa, set_current_user
+from apps.documentos.models import EstadoIntegracionTributaria
 from apps.productos.models import Impuesto, Producto
 from apps.ventas.models import (
     EstadoFacturaVenta,
@@ -238,6 +239,18 @@ class TestFacturaNotaCreditoServices:
             usuario=usuario_owner,
         )
         assert factura.estado == EstadoFacturaVenta.EMITIDA
+        assert factura.estado_tributario == EstadoIntegracionTributaria.EN_COLA
+
+        assert DomainEvent.all_objects.filter(
+            empresa=empresa,
+            aggregate_id=factura.id,
+            event_type="tributario.factura_venta.solicitado",
+        ).exists()
+        assert OutboxEvent.all_objects.filter(
+            empresa=empresa,
+            topic="sii.dte",
+            event_name="factura_venta.solicitar_emision",
+        ).exists()
 
         referencia = f"FV-{factura.numero}-{str(factura.id)[:8]}"
         cxc = CuentaPorCobrar.all_objects.filter(empresa=empresa, referencia=referencia).first()
@@ -324,7 +337,83 @@ class TestFacturaNotaCreditoServices:
             usuario=usuario_owner,
         )
         assert nota.estado == EstadoNotaCreditoVenta.EMITIDA
+        assert nota.estado_tributario == EstadoIntegracionTributaria.EN_COLA
+        assert DomainEvent.all_objects.filter(
+            empresa=empresa,
+            aggregate_id=nota.id,
+            event_type="tributario.nota_credito_venta.solicitado",
+        ).exists()
+        assert OutboxEvent.all_objects.filter(
+            empresa=empresa,
+            topic="sii.dte",
+            event_name="nota_credito_venta.solicitar_emision",
+        ).exists()
 
         referencia = f"FV-{factura.numero}-{str(factura.id)[:8]}"
         cxc = CuentaPorCobrar.all_objects.get(empresa=empresa, referencia=referencia)
         assert cxc.saldo < cxc.monto_total
+
+    def test_confirmar_guia_encola_integracion_tributaria(self, empresa, usuario_owner, cliente, producto, impuesto):
+        set_current_empresa(empresa)
+        set_current_user(usuario_owner)
+
+        pedido = _crear_pedido_base(empresa, usuario_owner, cliente)
+        pedido_item = PedidoVentaItem.all_objects.create(
+            empresa=empresa,
+            creado_por=usuario_owner,
+            pedido_venta=pedido,
+            producto=producto,
+            descripcion=producto.nombre,
+            cantidad=Decimal("1"),
+            precio_unitario=Decimal("1000"),
+            impuesto=impuesto,
+            impuesto_porcentaje=Decimal("19"),
+        )
+        PedidoVentaService.recalcular_totales(pedido=pedido)
+        PedidoVentaService.confirmar_pedido(
+            pedido_id=pedido.id,
+            empresa=empresa,
+            usuario=usuario_owner,
+        )
+
+        guia = GuiaDespachoService.crear_guia(
+            datos={
+                "cliente": cliente,
+                "pedido_venta": pedido,
+                "fecha_despacho": "2026-01-02",
+            },
+            empresa=empresa,
+            usuario=usuario_owner,
+        )
+        GuiaDespachoItem.all_objects.create(
+            empresa=empresa,
+            creado_por=usuario_owner,
+            guia_despacho=guia,
+            pedido_item=pedido_item,
+            producto=producto,
+            descripcion=producto.nombre,
+            cantidad=Decimal("1"),
+            precio_unitario=Decimal("1000"),
+            impuesto=impuesto,
+            impuesto_porcentaje=Decimal("19"),
+        )
+        GuiaDespachoService.recalcular_totales(guia=guia)
+
+        guia = GuiaDespachoService.confirmar_guia(
+            guia_id=guia.id,
+            empresa=empresa,
+            usuario=usuario_owner,
+            bodega_id=None,
+        )
+
+        assert guia.estado_tributario == EstadoIntegracionTributaria.EN_COLA
+        assert DomainEvent.all_objects.filter(
+            empresa=empresa,
+            aggregate_id=guia.id,
+            event_type="tributario.guia_despacho.solicitado",
+        ).exists()
+        assert OutboxEvent.all_objects.filter(
+            empresa=empresa,
+            topic="sii.dte",
+            event_name="guia_despacho.solicitar_emision",
+        ).exists()

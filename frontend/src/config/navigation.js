@@ -1,7 +1,9 @@
 import {
+  Banknote,
   Boxes,
   ClipboardList,
   Handshake,
+  KeyRound,
   PackagePlus,
   ShoppingBag,
   ShieldCheck,
@@ -32,6 +34,12 @@ const NAV_MODULES = [
         id: 'productos-impuestos',
         label: 'Impuestos',
         to: '/productos/impuestos',
+        enabled: true,
+      },
+      {
+        id: 'productos-listas-precio',
+        label: 'Listas de precio',
+        to: '/productos/listas-precio',
         enabled: true,
       },
     ],
@@ -75,8 +83,14 @@ const NAV_MODULES = [
     label: 'Inventario',
     icon: Boxes,
     enabled: true,
-    requiredPermissions: ['PRODUCTOS.VER'],
+    requiredPermissions: ['INVENTARIO.VER'],
     children: [
+      {
+        id: 'inventario-bodegas',
+        label: 'Bodegas',
+        to: '/inventario/bodegas',
+        enabled: true,
+      },
       {
         id: 'inventario-kardex',
         label: 'Kardex',
@@ -92,6 +106,33 @@ const NAV_MODULES = [
     ],
   },
   {
+    id: 'tesoreria',
+    label: 'Tesoreria',
+    icon: Banknote,
+    enabled: true,
+    requiredPermissions: ['TESORERIA.VER'],
+    children: [
+      {
+        id: 'tesoreria-cartera',
+        label: 'Cartera',
+        to: '/tesoreria/cartera',
+        enabled: true,
+      },
+      {
+        id: 'tesoreria-monedas',
+        label: 'Monedas',
+        to: '/tesoreria/monedas',
+        enabled: true,
+      },
+      {
+        id: 'tesoreria-tipos-cambio',
+        label: 'Tipos de cambio',
+        to: '/tesoreria/tipos-cambio',
+        enabled: true,
+      },
+    ],
+  },
+  {
     id: 'auditoria',
     label: 'Auditoria',
     icon: ShieldCheck,
@@ -102,6 +143,21 @@ const NAV_MODULES = [
         id: 'auditoria-eventos',
         label: 'Eventos',
         to: '/auditoria/eventos',
+        enabled: true,
+      },
+    ],
+  },
+  {
+    id: 'administracion',
+    label: 'Administracion',
+    icon: KeyRound,
+    enabled: true,
+    requiredPermissions: ['ADMINISTRACION.GESTIONAR_PERMISOS'],
+    children: [
+      {
+        id: 'administracion-permisos',
+        label: 'Permisos',
+        to: '/administracion/permisos',
         enabled: true,
       },
     ],
@@ -181,7 +237,11 @@ function hasRequiredRoles(userRoles, requiredRoles) {
 
 export function resolveNavigation(user) {
   const userPermissions = Array.isArray(user?.permissions) ? user.permissions : []
-  const userRoles = Array.isArray(user?.roles) ? user.roles : []
+  const userRoles = Array.isArray(user?.roles)
+    ? user.roles
+    : user?.rol
+      ? [user.rol]
+      : []
 
   return NAV_MODULES
     .filter((module) => module.enabled !== false)

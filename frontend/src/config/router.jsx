@@ -20,8 +20,13 @@ import ComprasRecepcionesListPage from '@/modules/compras/pages/ComprasRecepcion
 import ComprasRecepcionesCreatePage from '@/modules/compras/pages/ComprasRecepcionesCreatePage'
 import AuditoriaEventosPage from '@/modules/auditoria/pages/AuditoriaEventosPage'
 import AuditoriaEventoDetailPage from '@/modules/auditoria/pages/AuditoriaEventoDetailPage'
+import AdministracionPermisosPage from '@/modules/administracion/pages/AdministracionPermisosPage'
+import InventarioBodegasPage from '@/modules/inventario/pages/InventarioBodegasPage'
 import InventarioKardexPage from '@/modules/inventario/pages/InventarioKardexPage'
 import InventarioResumenPage from '@/modules/inventario/pages/InventarioResumenPage'
+import TesoreriaCuentasPage from '@/modules/tesoreria/pages/TesoreriaCuentasPage'
+import TesoreriaMonedasPage from '@/modules/tesoreria/pages/TesoreriaMonedasPage'
+import TesoreriaTipoCambioPage from '@/modules/tesoreria/pages/TesoreriaTipoCambioPage'
 import VentasPedidosListPage from '@/modules/ventas/pages/VentasPedidosListPage'
 import VentasPedidosFormPage from '@/modules/ventas/pages/VentasPedidosFormPage'
 import VentasPedidosDetailPage from '@/modules/ventas/pages/VentasPedidosDetailPage'
@@ -34,6 +39,7 @@ import VentasNotasFormPage from '@/modules/ventas/pages/VentasNotasFormPage'
 import ProductosCreatePage from '@/modules/productos/pages/ProductosCreatePage'
 import ProductosCategoriasPage from '@/modules/productos/pages/ProductosCategoriasPage'
 import ProductosImpuestosPage from '@/modules/productos/pages/ProductosImpuestosPage'
+import ProductosListasPrecioPage from '@/modules/productos/pages/ProductosListasPrecioPage'
 import ProductosListPage from '@/modules/productos/pages/ProductosListPage'
 import NotFoundPage from '@/modules/shared/pages/NotFoundPage'
 
@@ -58,6 +64,7 @@ const router = createBrowserRouter([
           { path: 'productos/nuevo', element: <ProductosCreatePage /> },
           { path: 'productos/categorias', element: <ProductosCategoriasPage /> },
           { path: 'productos/impuestos', element: <ProductosImpuestosPage /> },
+          { path: 'productos/listas-precio', element: <ProductosListasPrecioPage /> },
           { path: 'compras/ordenes', element: <ComprasOrdenesListPage /> },
           { path: 'compras/ordenes/nuevo', element: <ComprasOrdenesCreatePage /> },
           { path: 'compras/ordenes/:id', element: <ComprasOrdenesDetailPage /> },
@@ -71,8 +78,13 @@ const router = createBrowserRouter([
           { path: 'compras/recepciones/:id/editar', element: <ComprasRecepcionesCreatePage /> },
           { path: 'auditoria/eventos', element: <AuditoriaEventosPage /> },
           { path: 'auditoria/eventos/:id', element: <AuditoriaEventoDetailPage /> },
+          { path: 'administracion/permisos', element: <AdministracionPermisosPage /> },
+          { path: 'inventario/bodegas', element: <InventarioBodegasPage /> },
           { path: 'inventario/kardex', element: <InventarioKardexPage /> },
           { path: 'inventario/resumen', element: <InventarioResumenPage /> },
+          { path: 'tesoreria/cartera', element: <TesoreriaCuentasPage /> },
+          { path: 'tesoreria/monedas', element: <TesoreriaMonedasPage /> },
+          { path: 'tesoreria/tipos-cambio', element: <TesoreriaTipoCambioPage /> },
           { path: 'ventas/pedidos', element: <VentasPedidosListPage /> },
           { path: 'ventas/pedidos/nuevo', element: <VentasPedidosFormPage /> },
           { path: 'ventas/pedidos/:id', element: <VentasPedidosDetailPage /> },

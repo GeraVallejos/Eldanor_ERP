@@ -1,20 +1,20 @@
 import os
 from pathlib import Path
 
-# Defaults seguros para ejecutar CI sin secretos de produccion.
-os.environ.setdefault("SECRET_KEY_DJANGO", "ci-secret-key-erp-2026-long-enough-for-jwt-signing")
-os.environ.setdefault("DEBUG", "True")
-os.environ.setdefault("ALLOWED_HOSTS", "localhost,127.0.0.1,testserver")
-os.environ.setdefault("DB_NAME", "ci")
-os.environ.setdefault("DB_USER", "ci")
-os.environ.setdefault("DB_PASSWORD", "ci")
-os.environ.setdefault("DB_HOST", "127.0.0.1")
-os.environ.setdefault("DB_PORT", "3306")
-os.environ.setdefault("AWS_ACCESS_KEY_ID", "ci")
-os.environ.setdefault("AWS_SECRET_ACCESS_KEY", "ci")
-os.environ.setdefault("AWS_STORAGE_BUCKET_NAME", "ci-bucket")
-os.environ.setdefault("AWS_S3_ENDPOINT_URL", "https://example.invalid")
-os.environ.setdefault("AWS_S3_REGION_NAME", "us-east-1")
+# Defaults seguros para ejecutar CI sin depender del entorno local del desarrollador.
+os.environ["SECRET_KEY_DJANGO"] = "ci-secret-key-erp-2026-long-enough-for-jwt-signing"
+os.environ["DEBUG"] = "True"
+os.environ["ALLOWED_HOSTS"] = "localhost,127.0.0.1,testserver"
+os.environ["DB_NAME"] = "ci"
+os.environ["DB_USER"] = "ci"
+os.environ["DB_PASSWORD"] = "ci"
+os.environ["DB_HOST"] = "127.0.0.1"
+os.environ["DB_PORT"] = "3306"
+os.environ["AWS_ACCESS_KEY_ID"] = "ci"
+os.environ["AWS_SECRET_ACCESS_KEY"] = "ci"
+os.environ["AWS_STORAGE_BUCKET_NAME"] = "ci-bucket"
+os.environ["AWS_S3_ENDPOINT_URL"] = "https://example.invalid"
+os.environ["AWS_S3_REGION_NAME"] = "us-east-1"
 
 from .settings import *  # noqa: F401,F403
 

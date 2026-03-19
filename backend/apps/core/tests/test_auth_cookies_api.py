@@ -60,6 +60,13 @@ class TestAuthCookiesAPI:
         assert response.data["detail"] == "Sesion renovada."
         assert response.cookies.get(settings.AUTH_COOKIE_ACCESS_NAME) is not None
 
+    def test_refresh_sin_cookie_devuelve_error_normalizado(self, api_client):
+        response = api_client.post("/api/token/refresh/", {}, format="json")
+
+        assert response.status_code == status.HTTP_401_UNAUTHORIZED
+        assert response.data["error_code"] == "NOT_AUTHENTICATED"
+        assert "detail" in response.data
+
     def test_logout_limpia_cookies(self, api_client, usuario):
         login_response = api_client.post(
             "/api/token/",
@@ -89,6 +96,7 @@ class TestAuthCookiesAPI:
         response = api_client.post("/api/auth/logout/", {}, format="json")
 
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
+        assert response.data["error_code"] == "NOT_AUTHENTICATED"
 
     def test_logout_cookie_sin_csrf_devuelve_403(self, api_client, usuario):
         csrf_client = APIClient(enforce_csrf_checks=True)
@@ -102,8 +110,10 @@ class TestAuthCookiesAPI:
         response = csrf_client.post("/api/auth/logout/", {}, format="json")
 
         assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert response.data["error_code"] == "PERMISSION_DENIED"
 
     def test_me_sin_cookie_devuelve_401(self, api_client):
         response = api_client.get("/api/auth/me/")
 
         assert response.status_code == status.HTTP_401_UNAUTHORIZED
+        assert response.data["error_code"] == "NOT_AUTHENTICATED"

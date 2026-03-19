@@ -120,3 +120,4 @@ class TestPlantillasPermisosAPI:
         response = api_client.get(reverse("permisos-plantillas"))
 
         assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert response.data["error_code"] == "PERMISSION_DENIED"
