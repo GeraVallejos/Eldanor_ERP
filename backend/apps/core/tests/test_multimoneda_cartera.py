@@ -1,4 +1,4 @@
-from datetime import date
+﻿from datetime import date
 from decimal import Decimal
 
 import pytest
@@ -61,7 +61,7 @@ class TestMultimonedaCartera:
         contacto = Contacto.objects.create(
             empresa=empresa,
             nombre="Cliente CxC",
-            rut="11122333-4",
+            rut="11122333-5",
             email="cliente_cxc@test.com",
         )
         cliente = Cliente.objects.create(empresa=empresa, contacto=contacto)
@@ -80,3 +80,5 @@ class TestMultimonedaCartera:
 
         assert cuenta.saldo == Decimal("150000")
         assert CuentaPorCobrar.all_objects.filter(empresa=empresa, referencia="CXC-0001").exists()
+
+

@@ -1,4 +1,4 @@
-from datetime import date
+﻿from datetime import date
 from decimal import Decimal
 
 import pytest
@@ -41,7 +41,7 @@ def proveedor(db, empresa):
     contacto = Contacto.objects.create(
         empresa=empresa,
         nombre="Proveedor Documentos",
-        rut="77888999-0",
+        rut="77888999-4",
         email="proveedor_docs@test.com",
     )
     return Proveedor.objects.create(empresa=empresa, contacto=contacto)
@@ -223,8 +223,8 @@ class TestDocumentoCompraService:
         )
 
         assert doc.estado == EstadoDocumentoCompra.CONFIRMADO
-        # Sin guía ni recepción previa: la factura actúa como documento de entrada
-        # (caso Chile: proveedor solo emite factura, sin guía de despacho).
+        # Sin guÃ­a ni recepciÃ³n previa: la factura actÃºa como documento de entrada
+        # (caso Chile: proveedor solo emite factura, sin guÃ­a de despacho).
         assert MovimientoInventario.all_objects.filter(
             empresa=empresa,
             producto=producto_factura,
@@ -333,8 +333,8 @@ class TestDocumentoCompraService:
 
         factura.refresh_from_db()
         assert factura.estado == EstadoDocumentoCompra.ANULADO
-        # Factura sin entrada física previa generó 1 movimiento de entrada al confirmar
-        # y 1 movimiento compensatorio (salida) al anular → total 2 movimientos.
+        # Factura sin entrada fÃ­sica previa generÃ³ 1 movimiento de entrada al confirmar
+        # y 1 movimiento compensatorio (salida) al anular â†’ total 2 movimientos.
         assert MovimientoInventario.all_objects.filter(
             empresa=empresa,
             documento_tipo="FACTURA_COMPRA",
@@ -713,3 +713,5 @@ class TestDocumentoCompraService:
         assert stock_final.stock == Decimal("10.00")
         assert stock_final.valor_stock == valor_base
         assert producto.costo_promedio == costo_base
+
+

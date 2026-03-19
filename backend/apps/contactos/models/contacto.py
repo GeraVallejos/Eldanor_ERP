@@ -1,6 +1,6 @@
 from django.db import models
 from apps.core.models import BaseModel
-from apps.core.validators import formatear_rut, normalizar_texto, validar_rut
+from apps.core.validators import formatear_rut, normalizar_texto, validar_rut_con_dv
 from django.core.exceptions import ValidationError
 
 
@@ -56,7 +56,7 @@ class Contacto(BaseModel):
 
         if self.rut:
             self.rut = formatear_rut(self.rut)
-            validar_rut(self.rut)
+            validar_rut_con_dv(self.rut)
 
     def __str__(self):
         # Si el RUT existe, lo mostramos, si no, solo el nombre

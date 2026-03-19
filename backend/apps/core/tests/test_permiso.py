@@ -1,4 +1,4 @@
-import pytest
+﻿import pytest
 from django.contrib.auth import get_user_model
 from apps.core.models import Empresa, UserEmpresa, PermisoModulo
 from apps.core.roles import RolUsuario
@@ -133,7 +133,7 @@ def cliente(empresa):
     contacto = Contacto.objects.create(
         empresa=empresa,
         nombre="Cliente Test",
-        rut="12345678-9",
+        rut="12345678-5",
         email="cliente@test.com"
     )
 
@@ -160,7 +160,7 @@ def cliente_empresa_b(empresa_b):
     contacto = Contacto.objects.create(
         empresa=empresa_b,
         nombre="Cliente B",
-        rut="98765432-1",
+        rut="98765432-5",
         email="cliente_b@test.com"
     )
 
@@ -354,7 +354,7 @@ class TestPermisos:
             creado_por=usuario
         )
 
-        # 🔥 Agregar item SOLO al presupuesto A
+        # ðŸ”¥ Agregar item SOLO al presupuesto A
         PresupuestoItem.objects.create(
             presupuesto=presupuesto_a,
             producto=producto,
@@ -416,3 +416,4 @@ class TestPermisos:
 
         assert usuario.tiene_permiso(Modulos.PRODUCTOS, Acciones.VER, empresa)
         assert usuario.tiene_permiso(Modulos.PRODUCTOS, Acciones.BORRAR, empresa)
+

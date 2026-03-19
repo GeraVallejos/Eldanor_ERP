@@ -1,4 +1,4 @@
-from datetime import date
+﻿from datetime import date
 from decimal import Decimal
 
 import pytest
@@ -37,7 +37,7 @@ def proveedor(db, empresa):
     contacto = Contacto.objects.create(
         empresa=empresa,
         nombre="Proveedor Compras",
-        rut="11222333-4",
+        rut="11222333-9",
         email="proveedor@test.com",
     )
     return Proveedor.objects.create(empresa=empresa, contacto=contacto)
@@ -622,7 +622,7 @@ class TestComprasApi:
         # Enviar la orden (pasa a ENVIADA)
         OrdenCompra.all_objects.filter(id=orden_id).update(estado="ENVIADA")
 
-        # Intentar PATCH sobre una OC ENVIADA → debe fallar con 409
+        # Intentar PATCH sobre una OC ENVIADA â†’ debe fallar con 409
         patch_resp = api_client.patch(
             reverse("orden-compra-detail", args=[orden_id]),
             {"observaciones": "modificacion no permitida"},
@@ -658,7 +658,7 @@ class TestComprasApi:
         )
         assert doc_resp.status_code == status.HTTP_201_CREATED, doc_resp.data
 
-        # La OC debe haber avanzado a ENVIADA automáticamente
+        # La OC debe haber avanzado a ENVIADA automÃ¡ticamente
         orden_actualizada = OrdenCompra.all_objects.get(id=orden_id)
         assert orden_actualizada.estado == "ENVIADA"
 
@@ -1030,7 +1030,7 @@ class TestComprasApi:
         assert orden.estado == "RECIBIDA"
 
     def test_confirmar_guia_parcial_actualiza_estado_oc_a_parcial(self, api_client, owner_usuario, proveedor, empresa):
-        """Confirmar una guía que cubre solo parte de la OC debe dejarla en PARCIAL."""
+        """Confirmar una guÃ­a que cubre solo parte de la OC debe dejarla en PARCIAL."""
         api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
 
         producto = Producto.objects.create(
@@ -1186,3 +1186,5 @@ class TestComprasApi:
         second = api_client.post(reverse("documento-compra-list"), payload, format="json")
         assert second.status_code == status.HTTP_400_BAD_REQUEST
         assert "folio" in second.data
+
+

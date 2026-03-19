@@ -1,4 +1,4 @@
-import pytest
+﻿import pytest
 import io
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -154,3 +154,5 @@ class TestContactosBulkImportApi:
         assert response.status_code == status.HTTP_200_OK
         assert response["Content-Type"] == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         assert "attachment; filename=\"plantilla_clientes.xlsx\"" in response["Content-Disposition"]
+
+

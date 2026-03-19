@@ -1,4 +1,4 @@
-from datetime import date
+﻿from datetime import date
 from decimal import Decimal
 
 import pytest
@@ -49,7 +49,7 @@ def proveedor(db, empresa):
     contacto = Contacto.objects.create(
         empresa=empresa,
         nombre="Proveedor Productos API",
-        rut="10111222-3",
+        rut="10111222-5",
         email="proveedor_productos@test.com",
     )
     return Proveedor.objects.create(empresa=empresa, contacto=contacto)
@@ -240,3 +240,5 @@ class TestProductoApi:
         assert resp.status_code == status.HTTP_200_OK, resp.data
         producto.refresh_from_db()
         assert producto.activo is True
+
+

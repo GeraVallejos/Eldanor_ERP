@@ -13,6 +13,9 @@ Esta guia describe la automatizacion configurada para este ERP y como usarla.
 - Auto-merge: [automerge.yml](../.github/workflows/automerge.yml)
   - Habilita auto-merge para PR `dev -> main`.
   - GitHub hace el merge solo cuando todos los checks requeridos estan en verde.
+- Branch protection automatizada: [branch-protection.yml](../.github/workflows/branch-protection.yml)
+  - Workflow manual que configura reglas de proteccion en `main`.
+  - Exige checks Backend/Frontend en verde y aprobacion de PR.
 
 ## Flujo recomendado
 
@@ -39,6 +42,14 @@ Para que funcione correctamente:
 3. Abrir PR desde `dev` hacia `main`.
 
 Con eso, el workflow habilita auto-merge y GitHub fusiona automaticamente cuando CI queda en verde.
+
+## Automatizar branch protection
+
+1. Ejecutar workflow manual **Configure Branch Protection** desde Actions.
+2. Verificar que `main` quede con:
+  - checks requeridos: `Backend Tests`, `Frontend Lint and Tests`
+  - al menos 1 aprobacion
+  - rechazo de force push y delete
 
 ## Settings usados en CI
 

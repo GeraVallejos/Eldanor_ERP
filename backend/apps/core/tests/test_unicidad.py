@@ -1,4 +1,4 @@
-import pytest
+﻿import pytest
 from django.test import RequestFactory
 from apps.core.tenant import set_current_empresa
 from apps.core.models import Empresa
@@ -29,14 +29,14 @@ def user_con_empresa(db, empresa_activa):
 @pytest.mark.django_db
 def test_context_leak_entre_peticiones(user_con_empresa, db):
     """
-    Verifica que el contexto se limpie después de una petición 
+    Verifica que el contexto se limpie despuÃ©s de una peticiÃ³n 
     y no afecte a la siguiente.
     """
     from apps.core.middleware import EmpresaMiddleware
     from apps.core.tenant import get_current_empresa
     factory = RequestFactory()
 
-    # 1. Simular Petición A (Usuario Autenticado)
+    # 1. Simular PeticiÃ³n A (Usuario Autenticado)
     request_a = factory.get('/')
     request_a.user = user_con_empresa
     middleware = EmpresaMiddleware(lambda r: None)
@@ -45,21 +45,21 @@ def test_context_leak_entre_peticiones(user_con_empresa, db):
     # Al salir del middleware, el contexto DEBE ser None (por el set(None) que pusimos)
     assert get_current_empresa() is None
 
-    # 2. Simular Petición B (Usuario Anónimo o sin empresa)
+    # 2. Simular PeticiÃ³n B (Usuario AnÃ³nimo o sin empresa)
     request_b = factory.get('/')
     from django.contrib.auth.models import AnonymousUser
     request_b.user = AnonymousUser()
     
     middleware(request_b)
     
-    # Verificamos que no heredó la empresa de la petición anterior
+    # Verificamos que no heredÃ³ la empresa de la peticiÃ³n anterior
     assert get_current_empresa() is None
 
 
 @pytest.mark.django_db
 def test_unicidad_cruzada_rut_cliente():
     """
-    Verifica que el RUT sea único por empresa a nivel de Contacto,
+    Verifica que el RUT sea Ãºnico por empresa a nivel de Contacto,
     lo que protege indirectamente a los Clientes.
     """
     
@@ -69,7 +69,7 @@ def test_unicidad_cruzada_rut_cliente():
     
     contacto_a = Contacto.objects.create(
         nombre="CLIENTE A", 
-        rut="12.345.678-K", 
+        rut="12.345.678-5", 
         empresa=emp_a
     )
     Cliente.objects.create(contacto=contacto_a)
@@ -80,26 +80,26 @@ def test_unicidad_cruzada_rut_cliente():
     
     contacto_b = Contacto.objects.create(
         nombre="CLIENTE B", 
-        rut="12.345.678-K", 
+        rut="12.345.678-5", 
         empresa=emp_b
     )
     cliente_b = Cliente.objects.create(contacto=contacto_b)
     
-    assert cliente_b.pk is not None  # Se guardó correctamente en empresa B
+    assert cliente_b.pk is not None  # Se guardÃ³ correctamente en empresa B
 
     # 3. Intentar duplicar RUT en la MISMA Empresa B (Debe fallar en el Contacto)
     with pytest.raises(ValidationError):
-        # El clean() del modelo Contacto detectará el duplicado antes de llegar a Cliente
+        # El clean() del modelo Contacto detectarÃ¡ el duplicado antes de llegar a Cliente
         nuevo_contacto = Contacto(
             nombre="CLIENTE B DUPLICADO", 
-            rut="12.345.678-K", 
+            rut="12.345.678-5", 
             empresa=emp_b
         )
-        nuevo_contacto.full_clean() # Gatilla la validación de unicidad
+        nuevo_contacto.full_clean() # Gatilla la validaciÃ³n de unicidad
 
 
 @pytest.mark.django_db
-def test_intrusión_de_datos_bloqueada(db):
+def test_intrusion_de_datos_bloqueada(db):
     """
     Verifica que no se pueda acceder a un objeto de otra empresa
     incluso conociendo su ID (UUID).
@@ -121,3 +121,4 @@ def test_intrusión_de_datos_bloqueada(db):
     # 3. Empresa B intenta 'adivinar' o acceder al ID de la Empresa A
     with pytest.raises(ObjectDoesNotExist):
         ModelPrueba.objects.get(id=id_secreto)
+

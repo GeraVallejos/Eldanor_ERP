@@ -1,4 +1,4 @@
-from decimal import Decimal, InvalidOperation
+﻿from decimal import Decimal, InvalidOperation
 
 from apps.contactos.models import Cliente, Contacto, Proveedor
 from apps.contactos.models.contacto import TipoContacto
@@ -397,7 +397,7 @@ def build_proveedores_bulk_template(*, user, empresa):
 
     sample = [
         "Aceros del Sur Ltda",
-        "22333444-6",
+        "22333444-K",
         "ventas@acerosdelsur.cl",
         "EMPRESA",
         "Aceros del Sur Ltda",
@@ -426,3 +426,5 @@ def build_proveedores_bulk_template(*, user, empresa):
         instructions=instructions,
         sheet_name="Proveedores",
     )
+
+

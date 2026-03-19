@@ -1,6 +1,6 @@
 import uuid
 from django.db import models
-from apps.core.validators import formatear_rut, normalizar_texto, validar_rut
+from apps.core.validators import formatear_rut, normalizar_texto, validar_rut_con_dv
 from apps.core.storage.public_storage import PublicMediaStorage
 from apps.core.utils.optimizador_imagen import optimize_image
 
@@ -116,7 +116,7 @@ class Empresa(models.Model):
 
         if self.rut:
             self.rut = formatear_rut(self.rut)
-            validar_rut(self.rut)
+            validar_rut_con_dv(self.rut)
 
     def __str__(self):
         return self.nombre

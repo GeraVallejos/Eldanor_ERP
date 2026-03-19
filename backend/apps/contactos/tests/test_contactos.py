@@ -1,4 +1,4 @@
-import pytest
+﻿import pytest
 from django.core.exceptions import ValidationError
 from apps.contactos.models import Contacto, Cliente, Proveedor, Direccion, CuentaBancaria
 from apps.core.tenant import set_current_empresa
@@ -11,13 +11,13 @@ class TestModuloContactos:
         contacto = Contacto.objects.create(
             empresa=empresa,
             nombre="Juan Perez",
-            rut="18123123k"
+            rut="181231238"
         )
-        assert contacto.rut == "18.123.123-K"
+        assert contacto.rut == "18.123.123-8"
 
     def test_un_contacto_puede_ser_cliente_y_proveedor(self, empresa):
         set_current_empresa(empresa)
-        contacto = Contacto.objects.create(empresa=empresa, nombre="Sodimac", rut="99.555.444-3")
+        contacto = Contacto.objects.create(empresa=empresa, nombre="Sodimac", rut="99.555.444-5")
         
         Cliente.objects.create(contacto=contacto, limite_credito=1000000)
         Proveedor.objects.create(contacto=contacto, giro="Venta materiales")
@@ -39,10 +39,10 @@ class TestModuloContactos:
 
     def test_direccion_unica_por_tipo(self, empresa):
         set_current_empresa(empresa)
-        contacto = Contacto.objects.create(empresa=empresa, nombre="Test", rut="11.111.111-K")
+        contacto = Contacto.objects.create(empresa=empresa, nombre="Test", rut="11.111.111-1")
         Direccion.objects.create(contacto=contacto, tipo="DESPACHO", direccion="Calle 1", comuna="Stgo", ciudad="Stgo")
         
-        # Aquí sí suele saltar IntegrityError porque es un Constraint de Meta
+        # AquÃ­ sÃ­ suele saltar IntegrityError porque es un Constraint de Meta
         with pytest.raises(ValidationError):
             Direccion.objects.create(contacto=contacto, tipo="DESPACHO", direccion="Calle 2", comuna="Stgo", ciudad="Stgo")
 
@@ -56,9 +56,11 @@ class TestModuloContactos:
             tipo_cuenta="CORRIENTE",
             numero_cuenta="123456",
             titular="Pedro",
-            rut_titular="15555444k" 
+            rut_titular="155554444" 
         )
         
         # Recargamos de la DB para asegurar que el save() hizo su magia
         cuenta.refresh_from_db()
-        assert cuenta.rut_titular == "15.555.444-K"
+        assert cuenta.rut_titular == "15.555.444-4"
+
+

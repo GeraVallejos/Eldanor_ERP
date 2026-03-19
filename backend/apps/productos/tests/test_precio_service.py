@@ -1,4 +1,4 @@
-from datetime import date
+﻿from datetime import date
 from decimal import Decimal
 
 import pytest
@@ -25,7 +25,7 @@ class TestPrecioComercialService:
         contacto = Contacto.objects.create(
             empresa=empresa,
             nombre="Cliente Lista",
-            rut="14141414-1",
+            rut="14141414-3",
             email="cliente_lista@test.com",
         )
         cliente = Cliente.objects.create(empresa=empresa, contacto=contacto)
@@ -105,3 +105,5 @@ class TestPrecioComercialService:
 
         assert resultado["moneda"].codigo == "USD"
         assert resultado["precio"] == Decimal("9.50")
+
+

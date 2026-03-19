@@ -1,4 +1,4 @@
-from datetime import date
+﻿from datetime import date
 from decimal import Decimal
 
 import pytest
@@ -45,7 +45,7 @@ class TestPrecioApi:
         contacto = Contacto.objects.create(
             empresa=empresa,
             nombre="Cliente Precio API",
-            rut="14141414-2",
+            rut="14141414-3",
             email="cliente_precio_api@test.com",
         )
         cliente = Cliente.objects.create(empresa=empresa, contacto=contacto)
@@ -91,3 +91,5 @@ class TestPrecioApi:
         assert resp.data["fuente"] == "LISTA_PRECIO"
         assert resp.data["moneda"] == "USD"
         assert Decimal(str(resp.data["precio"])) == Decimal("9.50")
+
+
