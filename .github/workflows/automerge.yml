@@ -46,7 +46,8 @@ jobs:
                 core.warning(`No se pudo consultar estado del PR #${pr.number}: ${e.message}`);
               }
 
-              if (['dirty', 'blocked', 'behind', 'draft', 'unknown', 'unstable'].includes(mergeableState)) {
+              // 'behind' es normal despues de un merge; dejamos que GitHub lo resuelva.
+              if (['dirty', 'blocked', 'draft'].includes(mergeableState)) {
                 core.warning(
                   `Auto-merge no habilitado para PR #${pr.number}: estado actual ${mergeableState}.`,
                 );
@@ -58,7 +59,7 @@ jobs:
                   `mutation($pullRequestId: ID!) {
                     enablePullRequestAutoMerge(input: {
                       pullRequestId: $pullRequestId,
-                      mergeMethod: SQUASH
+                      mergeMethod: MERGE
                     }) {
                       pullRequest {
                         number
