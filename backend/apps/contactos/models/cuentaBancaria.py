@@ -1,5 +1,5 @@
 from django.db import models
-from apps.core.validators import formatear_rut, normalizar_texto, validar_rut
+from apps.core.validators import formatear_rut, normalizar_texto, validar_rut_con_dv
 from apps.core.models.base import BaseModel
 from apps.core.mixins import TenantRelationValidationMixin
 
@@ -46,7 +46,7 @@ class CuentaBancaria(TenantRelationValidationMixin, BaseModel):
 
         if self.rut_titular:
             self.rut_titular = formatear_rut(self.rut_titular)
-            validar_rut(self.rut_titular)
+            validar_rut_con_dv(self.rut_titular)
 
     def save(self, *args, **kwargs):
 

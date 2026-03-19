@@ -1,0 +1,74 @@
+name: Auto PR Dev to Main
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+on:
+  push:
+    branches:
+      - dev
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  ensure-pr:
+    name: Ensure dev->main PR exists
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Create or reuse PR dev->main
+        uses: actions/github-script@v8
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const base = 'main';
+            const head = 'dev';
+
+            const { data: openPrs } = await github.rest.pulls.list({
+              owner,
+              repo,
+              state: 'open',
+              base,
+              head: `${owner}:${head}`,
+              per_page: 1,
+            });
+
+            if (openPrs.length > 0) {
+              core.info(`Ya existe PR abierto dev->main: #${openPrs[0].number}`);
+              return;
+            }
+
+            try {
+              const { data: pr } = await github.rest.pulls.create({
+                owner,
+                repo,
+                title: 'chore: sync dev into main',
+                head,
+                base,
+                body: [
+                  'PR auto-generado por workflow.',
+                  '',
+                  '- origen: dev',
+                  '- destino: main',
+                  '- accion: validar CI y auto-merge si corresponde',
+                ].join('\n'),
+                draft: false,
+              });
+
+              core.info(`PR creado: #${pr.number}`);
+            } catch (error) {
+              const msg = String(error?.message || error);
+
+              // Caso habitual: no hay commits nuevos entre dev y main.
+              if (msg.includes('No commits between')) {
+                core.info('No hay cambios nuevos entre dev y main. No se crea PR.');
+                return;
+              }
+
+              throw error;
+            }
