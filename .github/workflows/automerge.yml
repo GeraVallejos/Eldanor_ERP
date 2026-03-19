@@ -1,5 +1,8 @@
 name: Auto Merge Dev to Main
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 on:
   pull_request_target:
     types:
@@ -22,7 +25,7 @@ jobs:
 
     steps:
       - name: Enable auto-merge for dev PR
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             const pr = context.payload.pull_request;
@@ -49,11 +52,16 @@ jobs:
               if (
                 msg.includes('Pull request is in clean status') ||
                 msg.includes('already enabled') ||
-                msg.includes('Auto merge is already enabled')
+                msg.includes('Auto merge is already enabled') ||
+                msg.includes('Resource not accessible by integration') ||
+                msg.includes('Auto merge is not allowed') ||
+                msg.includes('enable auto-merge') ||
+                msg.includes('is in draft')
               ) {
-                core.info(`Auto-merge ya estaba habilitado para PR #${pr.number}.`);
+                core.warning(`No se pudo habilitar auto-merge para PR #${pr.number}: ${msg}`);
                 return;
               }
 
-              throw error;
+              // No bloquea el PR por fallas de automatizacion.
+              core.warning(`Auto-merge no habilitado para PR #${pr.number}: ${msg}`);
             }
