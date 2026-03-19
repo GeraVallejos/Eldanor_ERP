@@ -8,6 +8,7 @@ import {
   ShoppingBag,
   ShieldCheck,
   CircleDollarSign,
+  Landmark,
 } from 'lucide-react'
 import { hasPermission } from '@/modules/shared/auth/permissions'
 
@@ -113,6 +114,12 @@ const NAV_MODULES = [
     requiredPermissions: ['TESORERIA.VER'],
     children: [
       {
+        id: 'tesoreria-bancos',
+        label: 'Bancos y conciliacion',
+        to: '/tesoreria/bancos',
+        enabled: true,
+      },
+      {
         id: 'tesoreria-cartera',
         label: 'Cartera',
         to: '/tesoreria/cartera',
@@ -129,6 +136,35 @@ const NAV_MODULES = [
         label: 'Tipos de cambio',
         to: '/tesoreria/tipos-cambio',
         enabled: true,
+      },
+    ],
+  },
+  {
+    id: 'contabilidad',
+    label: 'Contabilidad',
+    icon: Landmark,
+    enabled: true,
+    children: [
+      {
+        id: 'contabilidad-plan-cuentas',
+        label: 'Plan de cuentas',
+        to: '/contabilidad/plan-cuentas',
+        enabled: true,
+        requiredPermissions: ['CONTABILIDAD.VER'],
+      },
+      {
+        id: 'contabilidad-asientos',
+        label: 'Asientos',
+        to: '/contabilidad/asientos',
+        enabled: true,
+        requiredPermissions: ['CONTABILIDAD.VER'],
+      },
+      {
+        id: 'contabilidad-sii',
+        label: 'SII y DTE',
+        to: '/contabilidad/sii',
+        enabled: true,
+        requiredPermissions: ['FACTURACION.VER'],
       },
     ],
   },

@@ -6,7 +6,9 @@ from django.utils import timezone
 
 from apps.core.exceptions import BusinessRuleError, ConflictError, ResourceNotFoundError
 from apps.core.services import CarteraService, DomainEventService, OutboxService, SecuenciaService
+from apps.core.services.accounting_bridge import AccountingBridge
 from apps.core.models import TipoDocumento
+from apps.documentos.models import EstadoContable
 from apps.documentos.services.integracion_tributaria_service import IntegracionTributariaService
 from apps.ventas.models import (
     EstadoFacturaVenta,
@@ -102,6 +104,25 @@ class FacturaVentaService:
             moneda=None,
             usuario=usuario,
         )
+        AccountingBridge.request_entry(
+            empresa=empresa,
+            aggregate_type="FacturaVenta",
+            aggregate_id=factura.id,
+            entry_payload={
+                "fecha": str(factura.fecha_emision),
+                "glosa": f"Factura de venta {factura.numero}",
+                "referencia_tipo": "FACTURA_VENTA",
+                "movimientos": [
+                    {"cuenta_codigo": "112100", "debe": str(factura.total), "haber": "0"},
+                    {"cuenta_codigo": "411100", "debe": "0", "haber": str(factura.subtotal)},
+                    {"cuenta_codigo": "213100", "debe": "0", "haber": str(factura.impuestos)},
+                ],
+            },
+            usuario=usuario,
+            dedup_key=f"fv-accounting:{factura.id}:emitida",
+        )
+        factura.estado_contable = EstadoContable.PENDIENTE
+        factura.save(update_fields=["estado_contable", "actualizado_en"])
 
         # Marcar pedido vinculado como FACTURADO.
         if factura.pedido_venta_id:

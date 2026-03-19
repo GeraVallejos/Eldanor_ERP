@@ -12,6 +12,13 @@ import { formatMoney } from '@/modules/ventas/utils'
 import EstadoVentaBadge from '@/modules/ventas/components/EstadoVentaBadge'
 import { usePermissions } from '@/modules/shared/auth/usePermission'
 
+const ESTADO_CONTABLE_LABELS = {
+  NO_APLICA: 'No aplica',
+  PENDIENTE: 'Pendiente',
+  CONTABILIZADO: 'Contabilizado',
+  ERROR: 'Error',
+}
+
 function VentasFacturasListPage() {
   const [search, setSearch] = useState('')
   const [updatingId, setUpdatingId] = useState(null)
@@ -81,6 +88,7 @@ function VentasFacturasListPage() {
               <th className="px-3 py-2 text-left">Numero</th>
               <th className="px-3 py-2 text-left">Cliente</th>
               <th className="px-3 py-2 text-left">Estado</th>
+              <th className="px-3 py-2 text-left">Estado contable</th>
               <th className="px-3 py-2 text-left">Fecha emision</th>
               <th className="px-3 py-2 text-right">Total</th>
               <th className="px-3 py-2 text-right">Acciones</th>
@@ -92,6 +100,7 @@ function VentasFacturasListPage() {
                 <td className="px-3 py-2">{row.numero || '-'}</td>
                 <td className="px-3 py-2 text-muted-foreground">{row.cliente_nombre || '-'}</td>
                 <td className="px-3 py-2"><EstadoVentaBadge estado={row.estado} /></td>
+                <td className="px-3 py-2 text-xs text-muted-foreground">{ESTADO_CONTABLE_LABELS[row.estado_contable] || row.estado_contable || '-'}</td>
                 <td className="px-3 py-2">{formatDateChile(row.fecha_emision)}</td>
                 <td className="px-3 py-2 text-right">{formatMoney(row.total)}</td>
                 <td className="px-3 py-2">
@@ -108,7 +117,7 @@ function VentasFacturasListPage() {
               </tr>
             ))}
             {filtered.length === 0 ? (
-              <tr><td colSpan={6} className="px-3 py-6 text-center text-muted-foreground">Sin facturas.</td></tr>
+              <tr><td colSpan={7} className="px-3 py-6 text-center text-muted-foreground">Sin facturas.</td></tr>
             ) : null}
           </tbody>
         </table>

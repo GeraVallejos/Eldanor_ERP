@@ -86,6 +86,9 @@ def permisos_efectivos_relacion(relacion):
     Devuelve permisos efectivos para mostrar en API.
     Si hay permisos personalizados, usa esos; si no, aplica rol.
     """
+    if relacion.rol in {"OWNER", "ADMIN"}:
+        return ["*"]
+
     personalizados = sorted(
         {
             (p.codigo or "").strip().upper()

@@ -4,10 +4,13 @@ from django.urls import path
 from apps.core.api.views import (
     AplicarPlantillaPermisosView,
     CambiarEmpresaActivaView,
+    ConfiguracionTributariaViewSet,
+    CuentaBancariaEmpresaViewSet,
     CuentaPorCobrarViewSet,
     CuentaPorPagarViewSet,
     LogoutView,
     MeView,
+    MovimientoBancarioViewSet,
     CustomTokenRefreshView,
     CustomTokenObtainPairView,
     EmpresasUsuarioView,
@@ -18,13 +21,18 @@ from apps.core.api.views import (
     GestionPermisosUsuarioEmpresaView,
     EmpresaLogoView,
     MonedaViewSet,
+    RangoFolioTributarioViewSet,
     TipoCambioViewSet,
 )
 
 
 router = DefaultRouter()
+router.register(r"configuracion-tributaria", ConfiguracionTributariaViewSet, basename="configuracion-tributaria")
+router.register(r"rangos-folios-tributarios", RangoFolioTributarioViewSet, basename="rango-folio-tributario")
 router.register(r"monedas", MonedaViewSet, basename="moneda")
 router.register(r"tipos-cambio", TipoCambioViewSet, basename="tipo-cambio")
+router.register(r"cuentas-bancarias", CuentaBancariaEmpresaViewSet, basename="cuenta-bancaria")
+router.register(r"movimientos-bancarios", MovimientoBancarioViewSet, basename="movimiento-bancario")
 router.register(r"cuentas-por-cobrar", CuentaPorCobrarViewSet, basename="cuenta-por-cobrar")
 router.register(r"cuentas-por-pagar", CuentaPorPagarViewSet, basename="cuenta-por-pagar")
 

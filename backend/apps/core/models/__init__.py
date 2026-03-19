@@ -4,6 +4,19 @@ from .base import BaseModel
 from .moneda import Moneda
 from .tipo_cambio import TipoCambio
 from .cartera import CuentaPorCobrar, CuentaPorPagar, EstadoCuenta
+from .integracion_tributaria import (
+    AmbienteTributario,
+    ConfiguracionTributaria,
+    RangoFolioTributario,
+    TipoDocumentoTributario,
+)
+from .tesoreria_bancaria import (
+    CuentaBancariaEmpresa,
+    MovimientoBancario,
+    OrigenMovimientoBancario,
+    TipoCuentaBancoEmpresa,
+    TipoMovimientoBancario,
+)
 from .testModel import ModelPrueba
 from .secuencia import SecuenciaDocumento, TipoDocumento
 from ..permisos.permisoModulo import PermisoModulo

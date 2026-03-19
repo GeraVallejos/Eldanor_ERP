@@ -7,7 +7,12 @@ from rest_framework import status
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from apps.contactos.models import Cliente, Contacto
-from apps.core.models import UserEmpresa
+from apps.core.models import (
+    ConfiguracionTributaria,
+    RangoFolioTributario,
+    TipoDocumentoTributario,
+    UserEmpresa,
+)
 from apps.productos.models import Impuesto, Producto
 
 
@@ -58,10 +63,55 @@ def producto(db, empresa, impuesto):
     )
 
 
+@pytest.fixture
+def rangos_sii(db, empresa, owner_usuario):
+    ConfiguracionTributaria.all_objects.create(
+        empresa=empresa,
+        creado_por=owner_usuario,
+        ambiente="CERTIFICACION",
+        rut_emisor="76086428-5",
+        razon_social="Empresa Test API Tributaria",
+        certificado_alias="cert-api",
+        certificado_activo=True,
+        resolucion_numero=80,
+        resolucion_fecha="2026-01-01",
+        email_intercambio_dte="dte_api@test.com",
+        proveedor_envio="INTERNO",
+        activa=True,
+    )
+    return [
+        RangoFolioTributario.all_objects.create(
+            empresa=empresa,
+            creado_por=owner_usuario,
+            tipo_documento=TipoDocumentoTributario.FACTURA_VENTA,
+            caf_nombre="CAF FACTURAS API",
+            folio_desde=100,
+            folio_hasta=199,
+            fecha_autorizacion="2026-01-01",
+            fecha_vencimiento="2026-12-31",
+            activo=True,
+        ),
+        RangoFolioTributario.all_objects.create(
+            empresa=empresa,
+            creado_por=owner_usuario,
+            tipo_documento=TipoDocumentoTributario.NOTA_CREDITO_VENTA,
+            caf_nombre="CAF NC API",
+            folio_desde=200,
+            folio_hasta=299,
+            fecha_autorizacion="2026-01-01",
+            fecha_vencimiento="2026-12-31",
+            activo=True,
+        ),
+    ]
+
+
 @pytest.mark.django_db
 class TestVentasApi:
 
-    def test_flujo_pedido_factura_nota_credito(self, api_client, owner_usuario, cliente, producto, impuesto):
+    def test_flujo_pedido_factura_nota_credito(
+        self, api_client, owner_usuario, cliente, producto, impuesto, rangos_sii
+    ):
+        _ = rangos_sii
         api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
 
         # 1) Crear pedido
