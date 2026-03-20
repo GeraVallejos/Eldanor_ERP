@@ -16,6 +16,7 @@ const PresupuestoTrazabilidadPage = lazy(() => import('@/modules/presupuestos/pa
 const ComprasOrdenesListPage = lazy(() => import('@/modules/compras/pages/ComprasOrdenesListPage'))
 const ComprasOrdenesCreatePage = lazy(() => import('@/modules/compras/pages/ComprasOrdenesCreatePage'))
 const ComprasOrdenesDetailPage = lazy(() => import('@/modules/compras/pages/ComprasOrdenesDetailPage'))
+const ComprasTrazabilidadPage = lazy(() => import('@/modules/compras/pages/ComprasTrazabilidadPage'))
 const ComprasDocumentosListPage = lazy(() => import('@/modules/compras/pages/ComprasDocumentosListPage'))
 const ComprasDocumentosCreatePage = lazy(() => import('@/modules/compras/pages/ComprasDocumentosCreatePage'))
 const ComprasDocumentosDetailPage = lazy(() => import('@/modules/compras/pages/ComprasDocumentosDetailPage'))
@@ -87,6 +88,7 @@ const router = createBrowserRouter([
           { path: 'compras/ordenes', element: page(ComprasOrdenesListPage) },
           { path: 'compras/ordenes/nuevo', element: page(ComprasOrdenesCreatePage) },
           { path: 'compras/ordenes/:id', element: page(ComprasOrdenesDetailPage) },
+          { path: 'compras/ordenes/:id/trazabilidad', element: page(ComprasTrazabilidadPage) },
           { path: 'compras/ordenes/:id/editar', element: page(ComprasOrdenesCreatePage) },
           { path: 'compras/documentos', element: page(ComprasDocumentosListPage) },
           { path: 'compras/documentos/nuevo', element: page(ComprasDocumentosCreatePage) },

@@ -300,6 +300,12 @@ function ComprasOrdenesDetailPage() {
           >
             Volver
           </Link>
+          <Link
+            to={`/compras/ordenes/${orden.id}/trazabilidad`}
+            className={cn(buttonVariants({ variant: 'outline', size: 'md' }))}
+          >
+            Seguimiento
+          </Link>
         </div>
       </div>
 

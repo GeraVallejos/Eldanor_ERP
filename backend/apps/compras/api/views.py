@@ -119,6 +119,7 @@ class OrdenCompraViewSet(ComprasAuditoriaMixin, TenantViewSetMixin, ModelViewSet
         "eliminar_sin_documentos": Acciones.BORRAR,
         "corregir": Acciones.EDITAR,
         "duplicar": Acciones.CREAR,
+        "trazabilidad": Acciones.VER,
     }
 
     @staticmethod
@@ -242,6 +243,68 @@ class OrdenCompraViewSet(ComprasAuditoriaMixin, TenantViewSetMixin, ModelViewSet
         )
         serializer = self.get_serializer(orden)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["get"])
+    def trazabilidad(self, request, pk=None):
+        orden = self.get_object()
+
+        recepciones = (
+            RecepcionCompra.all_objects.filter(empresa=orden.empresa, orden_compra=orden)
+            .order_by("-fecha", "-creado_en")
+        )
+        documentos = (
+            DocumentoCompraProveedor.all_objects.filter(empresa=orden.empresa, orden_compra=orden)
+            .order_by("-fecha_emision", "-creado_en")
+        )
+
+        recepcion_ids = {str(recepcion.id) for recepcion in recepciones}
+
+        data = {
+            "orden_compra": {
+                "id": str(orden.id),
+                "numero": orden.numero,
+                "estado": orden.estado,
+                "fecha_emision": orden.fecha_emision,
+                "fecha_entrega": orden.fecha_entrega,
+                "proveedor_id": str(orden.proveedor_id),
+                "total": orden.total,
+            },
+            "resumen": {
+                "recepciones_total": len(recepciones),
+                "recepciones_confirmadas": sum(1 for recepcion in recepciones if recepcion.estado == EstadoRecepcion.CONFIRMADA),
+                "documentos_total": len(documentos),
+                "documentos_confirmados": sum(1 for documento in documentos if documento.estado == EstadoDocumentoCompra.CONFIRMADO),
+                "documentos_con_recepcion": sum(
+                    1 for documento in documentos if documento.recepcion_compra_id and str(documento.recepcion_compra_id) in recepcion_ids
+                ),
+            },
+            "recepciones": [
+                {
+                    "id": str(recepcion.id),
+                    "fecha": recepcion.fecha,
+                    "estado": recepcion.estado,
+                    "observaciones": recepcion.observaciones,
+                }
+                for recepcion in recepciones
+            ],
+            "documentos": [
+                {
+                    "id": str(documento.id),
+                    "tipo_documento": documento.tipo_documento,
+                    "folio": documento.folio,
+                    "serie": documento.serie,
+                    "estado": documento.estado,
+                    "fecha_emision": documento.fecha_emision,
+                    "fecha_recepcion": documento.fecha_recepcion,
+                    "total": documento.total,
+                    "recepcion_compra_id": str(documento.recepcion_compra_id) if documento.recepcion_compra_id else None,
+                    "documento_origen_id": str(documento.documento_origen_id) if documento.documento_origen_id else None,
+                }
+                for documento in documentos
+            ],
+        }
+
+        return Response(data, status=status.HTTP_200_OK)
 
 
 class OrdenCompraItemViewSet(TenantViewSetMixin, ModelViewSet):
