@@ -461,6 +461,13 @@ function ComprasOrdenesListPage() {
                             Ver
                           </Link>
 
+                          <Link
+                            to={`/compras/ordenes/${orden.id}/trazabilidad`}
+                            className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'h-8 px-3 text-xs')}
+                          >
+                            Seguimiento
+                          </Link>
+
                           {orden.estado === 'BORRADOR' ? (
                             <Link
                               to={`/compras/documentos/nuevo?orden_compra=${orden.id}`}
