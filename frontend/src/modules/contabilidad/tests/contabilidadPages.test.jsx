@@ -56,6 +56,7 @@ describe('contabilidad/pages integration', () => {
 
     server.use(
       http.get('*/plan-cuentas/', async () => HttpResponse.json(cuentas)),
+      http.get('*/configuracion-cuentas-contables/', async () => HttpResponse.json([])),
       http.post('*/plan-cuentas/seed_base/', async () => {
         cuentas = [
           ...cuentas,
@@ -119,6 +120,7 @@ describe('contabilidad/pages integration', () => {
         ]),
       ),
       http.get('*/asientos-contables/', async () => HttpResponse.json(asientos)),
+      http.get('*/asientos-contables/errores/', async () => HttpResponse.json([])),
       http.post('*/asientos-contables/procesar_solicitudes/', async () => {
         procesadas += 1
         return HttpResponse.json({ processed: 1 })

@@ -6,6 +6,7 @@ from rest_framework.test import APIClient
 
 from apps.core.models import Empresa
 from apps.core.tenant import set_current_empresa, set_current_user
+from apps.core.validators import calcular_dv_rut
 from apps.productos.models import Categoria
 
 
@@ -18,12 +19,18 @@ def limpiar_tenant_contexto():
     set_current_user(None)
 
 
+def _build_test_rut(prefix: str) -> str:
+    base = f"{prefix}{uuid.uuid4().int % 1000000:06d}"
+    cuerpo = str(int(base))
+    return f"{int(cuerpo):,}".replace(",", ".") + f"-{calcular_dv_rut(cuerpo)}"
+
+
 @pytest.fixture
 def empresa(db):
     uid = uuid.uuid4().hex[:8]
     return Empresa.objects.create(
         nombre=f"EMPRESA TEST {uid}",
-        rut=f"{uid[:6]}-{uid[6]}",
+        rut=_build_test_rut("76"),
         email=f"empresa_{uid}@test.com",
     )
 
@@ -33,7 +40,7 @@ def empresa_a(db):
     uid = uuid.uuid4().hex[:8]
     return Empresa.objects.create(
         nombre=f"EMPRESA A {uid}",
-        rut=f"{uid[:6]}-{uid[6]}",
+        rut=_build_test_rut("77"),
         email=f"empresa_a_{uid}@test.com",
     )
 
@@ -43,7 +50,7 @@ def empresa_b(db):
     uid = uuid.uuid4().hex[:8]
     return Empresa.objects.create(
         nombre=f"EMPRESA B {uid}",
-        rut=f"{uid[:6]}-{uid[6]}",
+        rut=_build_test_rut("78"),
         email=f"empresa_b_{uid}@test.com",
     )
 
