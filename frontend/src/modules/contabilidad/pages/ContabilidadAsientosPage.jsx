@@ -384,7 +384,7 @@ function ContabilidadAsientosPage() {
                               {contabilizandoId === asiento.id ? 'Procesando...' : 'Contabilizar'}
                             </Button>
                           ) : null}
-                          {!canManage && asiento.estado === 'CONTABILIZADO' ? (
+                          {asiento.estado === 'CONTABILIZADO' ? (
                             <span className="self-center text-xs text-muted-foreground">Listo</span>
                           ) : null}
                         </div>
