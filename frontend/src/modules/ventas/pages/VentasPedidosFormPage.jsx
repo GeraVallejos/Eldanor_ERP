@@ -22,6 +22,7 @@ function emptyItem() {
     descuento: '0',
     impuesto: '',
     impuesto_porcentaje: '0',
+    presupuesto_item_origen: '',
   }
 }
 
@@ -94,6 +95,7 @@ function VentasPedidosFormPage() {
                 descuento: toIntegerString(row.descuento || 0),
                 impuesto: row.impuesto ? String(row.impuesto) : '',
                 impuesto_porcentaje: toIntegerString(row.impuesto_porcentaje || 0),
+                presupuesto_item_origen: row.presupuesto_item_origen ? String(row.presupuesto_item_origen) : '',
               }))
             : [emptyItem()],
         )
@@ -101,12 +103,13 @@ function VentasPedidosFormPage() {
         const next = await ventasApi.getOne(ventasApi.endpoints.pedidos, 'siguiente_numero')
         setNumeroPreview(String(next?.numero || '-'))
         if (presupuestoId) {
-          const [{ data: presupuesto }, { data: presupuestoItemsData }] = await Promise.all([
+          const [{ data: presupuesto }, { data: trazabilidad }] = await Promise.all([
             api.get(`/presupuestos/${presupuestoId}/`, { suppressGlobalErrorToast: true }),
-            api.get('/presupuesto-items/', { suppressGlobalErrorToast: true }),
+            api.get(`/presupuestos/${presupuestoId}/trazabilidad/`, { suppressGlobalErrorToast: true }),
           ])
-          const presupuestoItems = (Array.isArray(presupuestoItemsData?.results) ? presupuestoItemsData.results : Array.isArray(presupuestoItemsData) ? presupuestoItemsData : [])
-            .filter((row) => String(row.presupuesto) === String(presupuestoId))
+          const presupuestoItems = Array.isArray(trazabilidad?.consumo?.items)
+            ? trazabilidad.consumo.items.filter((row) => Number(row.cantidad_disponible || 0) > 0)
+            : []
           setPresupuestoOrigenId(String(presupuesto.id))
           setForm({
             cliente: String(presupuesto.cliente || ''),
@@ -118,13 +121,14 @@ function VentasPedidosFormPage() {
           setItems(
             presupuestoItems.length > 0
               ? presupuestoItems.map((row) => ({
-                  producto: String(row.producto || ''),
+                  producto: String(row.producto_id || row.producto || ''),
                   descripcion: row.descripcion || '',
-                  cantidad: toQuantityString(row.cantidad || 1),
+                  cantidad: toQuantityString(row.cantidad_disponible || row.cantidad || 1),
                   precio_unitario: toIntegerString(row.precio_unitario || 0),
                   descuento: toIntegerString(row.descuento || 0),
                   impuesto: row.impuesto ? String(row.impuesto) : '',
                   impuesto_porcentaje: toIntegerString(row.impuesto_porcentaje || 0),
+                  presupuesto_item_origen: String(row.id),
                 }))
               : [emptyItem()],
           )
@@ -252,6 +256,7 @@ function VentasPedidosFormPage() {
             descuento: Number(row.descuento || 0),
             impuesto: row.impuesto || null,
             impuesto_porcentaje: Number(row.impuesto_porcentaje || impuestoById.get(String(row.impuesto))?.porcentaje || 0),
+            presupuesto_item_origen: row.presupuesto_item_origen || null,
             subtotal: rowTotals.subtotal,
             total: rowTotals.total,
           })
@@ -390,6 +395,11 @@ function VentasPedidosFormPage() {
                 </select>
                 <Button type="button" variant="destructive" size="sm" onClick={() => removeItem(index)}>Quitar</Button>
               </div>
+              {row.presupuesto_item_origen ? (
+                <p className="text-xs text-muted-foreground md:col-span-6">
+                  Item vinculado al presupuesto origen.
+                </p>
+              ) : null}
             </div>
           ))}
         </div>

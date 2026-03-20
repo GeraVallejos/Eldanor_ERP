@@ -24,6 +24,15 @@ class FacturaVentaItem(TenantRelationValidationMixin, DocumentoItemBase):
         related_name="factura_venta_items",
     )
 
+    presupuesto_item_origen = models.ForeignKey(
+        "presupuestos.PresupuestoItem",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="factura_venta_items",
+        help_text="Item de presupuesto origen para trazabilidad comercial y control de consumo.",
+    )
+
     guia_item = models.ForeignKey(
         "ventas.GuiaDespachoItem",
         on_delete=models.SET_NULL,
@@ -47,11 +56,12 @@ class FacturaVentaItem(TenantRelationValidationMixin, DocumentoItemBase):
         help_text="Tasa de impuesto desnormalizada al momento de emisión.",
     )
 
-    tenant_fk_fields = ["factura_venta", "producto", "impuesto", "guia_item"]
+    tenant_fk_fields = ["factura_venta", "producto", "impuesto", "guia_item", "presupuesto_item_origen"]
 
     class Meta:
         indexes = [
             models.Index(fields=["empresa", "factura_venta"]),
+            models.Index(fields=["empresa", "presupuesto_item_origen"]),
         ]
 
     def save(self, *args, **kwargs):

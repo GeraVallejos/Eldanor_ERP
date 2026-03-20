@@ -14,7 +14,7 @@ import { ventasApi } from '@/modules/ventas/store/api'
 import { usePermission } from '@/modules/shared/auth/usePermission'
 
 function emptyItem() {
-  return { producto: '', descripcion: '', cantidad: '1', precio_unitario: '0', descuento: '0', impuesto: '', impuesto_porcentaje: '0' }
+  return { producto: '', descripcion: '', cantidad: '1', precio_unitario: '0', descuento: '0', impuesto: '', impuesto_porcentaje: '0', presupuesto_item_origen: '' }
 }
 
 function VentasFacturasFormPage() {
@@ -79,17 +79,19 @@ function VentasFacturasFormPage() {
           descuento: toIntegerString(row.descuento || 0),
           impuesto: row.impuesto ? String(row.impuesto) : '',
           impuesto_porcentaje: toIntegerString(row.impuesto_porcentaje || 0),
+          presupuesto_item_origen: row.presupuesto_item_origen ? String(row.presupuesto_item_origen) : '',
         })) : [emptyItem()])
       } else {
         const next = await ventasApi.getOne(ventasApi.endpoints.facturas, 'siguiente_numero')
         setNumeroPreview(String(next?.numero || '-'))
         if (presupuestoId) {
-          const [{ data: presupuesto }, { data: presupuestoItemsData }] = await Promise.all([
+          const [{ data: presupuesto }, { data: trazabilidad }] = await Promise.all([
             api.get(`/presupuestos/${presupuestoId}/`, { suppressGlobalErrorToast: true }),
-            api.get('/presupuesto-items/', { suppressGlobalErrorToast: true }),
+            api.get(`/presupuestos/${presupuestoId}/trazabilidad/`, { suppressGlobalErrorToast: true }),
           ])
-          const presupuestoItems = (Array.isArray(presupuestoItemsData?.results) ? presupuestoItemsData.results : Array.isArray(presupuestoItemsData) ? presupuestoItemsData : [])
-            .filter((row) => String(row.presupuesto) === String(presupuestoId))
+          const presupuestoItems = Array.isArray(trazabilidad?.consumo?.items)
+            ? trazabilidad.consumo.items.filter((row) => Number(row.cantidad_disponible || 0) > 0)
+            : []
           setPresupuestoOrigenId(String(presupuesto.id))
           setForm({
             cliente: String(presupuesto.cliente || ''),
@@ -102,13 +104,14 @@ function VentasFacturasFormPage() {
           setItems(
             presupuestoItems.length
               ? presupuestoItems.map((row) => ({
-                  producto: String(row.producto || ''),
+                  producto: String(row.producto_id || row.producto || ''),
                   descripcion: row.descripcion || '',
-                  cantidad: toQuantityString(row.cantidad || 1),
+                  cantidad: toQuantityString(row.cantidad_disponible || row.cantidad || 1),
                   precio_unitario: toIntegerString(row.precio_unitario || 0),
                   descuento: toIntegerString(row.descuento || 0),
                   impuesto: row.impuesto ? String(row.impuesto) : '',
                   impuesto_porcentaje: toIntegerString(row.impuesto_porcentaje || 0),
+                  presupuesto_item_origen: String(row.id),
                 }))
               : [emptyItem()],
           )
@@ -217,6 +220,7 @@ function VentasFacturasFormPage() {
         descuento: Number(row.descuento || 0),
         impuesto: row.impuesto || null,
         impuesto_porcentaje: Number(row.impuesto_porcentaje || 0),
+        presupuesto_item_origen: row.presupuesto_item_origen || null,
         subtotal: totals[index].subtotal,
         total: totals[index].total,
       })))
@@ -297,6 +301,11 @@ function VentasFacturasFormPage() {
                 </select>
                 <Button type="button" variant="destructive" size="sm" onClick={() => setItems((prev) => (prev.length <= 1 ? prev : prev.filter((_, i) => i !== index)))}>Quitar</Button>
               </div>
+              {row.presupuesto_item_origen ? (
+                <p className="text-xs text-muted-foreground md:col-span-6">
+                  Item vinculado al presupuesto origen.
+                </p>
+              ) : null}
             </div>
           ))}
         </div>

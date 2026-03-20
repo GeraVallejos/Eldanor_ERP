@@ -12,6 +12,7 @@ const ProveedoresListPage = lazy(() => import('@/modules/contactos/pages/Proveed
 const PresupuestosCreatePage = lazy(() => import('@/modules/presupuestos/pages/PresupuestosCreatePage'))
 const PresupuestosEditPage = lazy(() => import('@/modules/presupuestos/pages/PresupuestosEditPage'))
 const PresupuestosListPage = lazy(() => import('@/modules/presupuestos/pages/PresupuestosListPage'))
+const PresupuestoTrazabilidadPage = lazy(() => import('@/modules/presupuestos/pages/PresupuestoTrazabilidadPage'))
 const ComprasOrdenesListPage = lazy(() => import('@/modules/compras/pages/ComprasOrdenesListPage'))
 const ComprasOrdenesCreatePage = lazy(() => import('@/modules/compras/pages/ComprasOrdenesCreatePage'))
 const ComprasOrdenesDetailPage = lazy(() => import('@/modules/compras/pages/ComprasOrdenesDetailPage'))
@@ -77,6 +78,7 @@ const router = createBrowserRouter([
           { path: 'presupuestos', element: page(PresupuestosListPage) },
           { path: 'presupuestos/nuevo', element: page(PresupuestosCreatePage) },
           { path: 'presupuestos/:id/editar', element: page(PresupuestosEditPage) },
+          { path: 'presupuestos/:id/trazabilidad', element: page(PresupuestoTrazabilidadPage) },
           { path: 'productos', element: page(ProductosListPage) },
           { path: 'productos/nuevo', element: page(ProductosCreatePage) },
           { path: 'productos/categorias', element: page(ProductosCategoriasPage) },

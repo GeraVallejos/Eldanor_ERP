@@ -29,6 +29,8 @@ class PresupuestoViewSet(TenantViewSetMixin, ModelViewSet):
         "anular": Acciones.ANULAR,
         "cambiar_estado": Acciones.VER,
         "catalogo_estados": Acciones.VER,
+        "clonar": Acciones.CREAR,
+        "trazabilidad": Acciones.VER,
     }
 
     def create(self, request, *args, **kwargs):
@@ -111,6 +113,23 @@ class PresupuestoViewSet(TenantViewSetMixin, ModelViewSet):
             },
             status=status.HTTP_200_OK,
         )
+
+    @action(detail=True, methods=["post"])
+    def clonar(self, request, pk=None):
+        presupuesto = self.get_object()
+        nuevo_presupuesto = PresupuestoService.clonar_presupuesto(
+            presupuesto_id=presupuesto.id,
+            empresa=request.user.empresa_activa,
+            usuario=request.user,
+        )
+        serializer = self.get_serializer(nuevo_presupuesto)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["get"])
+    def trazabilidad(self, request, pk=None):
+        presupuesto = self.get_object()
+        data = PresupuestoService.construir_trazabilidad_comercial(presupuesto=presupuesto)
+        return Response(data, status=status.HTTP_200_OK)
     
 
 class PresupuestoItemViewSet(TenantViewSetMixin, ModelViewSet):

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { useSelector } from 'react-redux'
 import { pdf } from '@react-pdf/renderer'
 import { toast } from 'sonner'
@@ -34,6 +34,12 @@ const FALLBACK_STATUS_TRANSITIONS = {
   ANULADO: [],
 }
 
+const USO_COMERCIAL_LABELS = {
+  NO_UTILIZADO: 'Sin uso',
+  PARCIALMENTE_UTILIZADO: 'Parcial',
+  TOTALMENTE_UTILIZADO: 'Completo',
+}
+
 function normalizeListResponse(data) {
   if (Array.isArray(data)) {
     return data
@@ -51,6 +57,7 @@ function formatMoney(value) {
 }
 
 function PresupuestosListPage() {
+  const navigate = useNavigate()
   const currentUser = useSelector(selectCurrentUser)
   const [presupuestos, setPresupuestos] = useState([])
   const [clientes, setClientes] = useState([])
@@ -65,6 +72,7 @@ function PresupuestosListPage() {
   const [presupuestoToChangeStatus, setPresupuestoToChangeStatus] = useState(null)
   const [nextStatusValue, setNextStatusValue] = useState('')
   const [presupuestoToDelete, setPresupuestoToDelete] = useState(null)
+  const [cloningId, setCloningId] = useState(null)
 
   const loadData = async () => {
     setStatus('loading')
@@ -173,6 +181,11 @@ function PresupuestosListPage() {
     return statusLabels[normalized] || normalized || '-'
   }
 
+  const resolveUsageLabel = (usageCode) => {
+    const normalized = String(usageCode || '').toUpperCase()
+    return USO_COMERCIAL_LABELS[normalized] || '-'
+  }
+
   const getStatusOptions = (presupuesto) => {
     const currentStatus = String(presupuesto?.estado || '').toUpperCase()
     const availableTransitions = statusTransitions[currentStatus] || []
@@ -260,6 +273,20 @@ function PresupuestosListPage() {
       toast.error(normalizeApiError(error, { fallback: 'No se pudo eliminar el presupuesto.' }))
     } finally {
       setDeletingId(null)
+    }
+  }
+
+  const clonePresupuesto = async (presupuesto) => {
+    setCloningId(presupuesto.id)
+
+    try {
+      const { data } = await api.post(`/presupuestos/${presupuesto.id}/clonar/`, {}, { suppressGlobalErrorToast: true })
+      toast.success('Presupuesto clonado correctamente.')
+      navigate(`/presupuestos/${data.id}/editar`)
+    } catch (error) {
+      toast.error(normalizeApiError(error, { fallback: 'No se pudo clonar el presupuesto.' }))
+    } finally {
+      setCloningId(null)
     }
   }
 
@@ -371,6 +398,7 @@ function PresupuestosListPage() {
                     Estado <span className="text-xs text-muted-foreground">{getSortIndicator('estado')}</span>
                   </button>
                 </th>
+                <th className="px-3 py-2 text-left font-medium">Uso comercial</th>
                 <th className="px-3 py-2 text-left font-medium">
                   <button type="button" onClick={() => toggleSort('total')} className="inline-flex items-center gap-1 hover:text-primary">
                     Total <span className="text-xs text-muted-foreground">{getSortIndicator('total')}</span>
@@ -384,7 +412,7 @@ function PresupuestosListPage() {
             <tbody>
               {presupuestos.length === 0 ? (
                 <tr>
-                  <td className="px-3 py-3 text-muted-foreground" colSpan={7}>
+                  <td className="px-3 py-3 text-muted-foreground" colSpan={8}>
                     No hay presupuestos cargados.
                   </td>
                 </tr>
@@ -400,6 +428,7 @@ function PresupuestosListPage() {
                     <td className="px-3 py-2">{presupuesto.fecha || '-'}</td>
                     <td className="px-3 py-2">{presupuesto.fecha_vencimiento || '-'}</td>
                     <td className="px-3 py-2">{resolveStatusLabel(presupuesto.estado)}</td>
+                    <td className="px-3 py-2">{resolveUsageLabel(presupuesto.estado_uso_comercial)}</td>
                     <td className="px-3 py-2">{formatMoney(presupuesto.total ?? 0)}</td>
                     <td className="px-2 py-2" style={{ minWidth: '280px' }}>
                       <div className="flex flex-wrap items-center justify-end gap-2">
@@ -433,7 +462,7 @@ function PresupuestosListPage() {
                           </Button>
                         ) : null}
 
-                        {presupuesto.estado === 'APROBADO' && canCreatePedidoVenta ? (
+                        {presupuesto.estado === 'APROBADO' && canCreatePedidoVenta && presupuesto.puede_generar_documentos ? (
                           <Link
                             to={`/ventas/pedidos/nuevo?presupuesto=${presupuesto.id}`}
                             className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'h-7 px-2 text-xs')}
@@ -442,13 +471,32 @@ function PresupuestosListPage() {
                           </Link>
                         ) : null}
 
-                        {presupuesto.estado === 'APROBADO' && canCreateFacturaVenta ? (
+                        {presupuesto.estado === 'APROBADO' && canCreateFacturaVenta && presupuesto.puede_generar_documentos ? (
                           <Link
                             to={`/ventas/facturas/nuevo?presupuesto=${presupuesto.id}`}
                             className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'h-7 px-2 text-xs')}
                           >
                             Crear factura
                           </Link>
+                        ) : null}
+
+                        <Link
+                          to={`/presupuestos/${presupuesto.id}/trazabilidad`}
+                          className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'h-7 px-2 text-xs')}
+                        >
+                          Seguimiento
+                        </Link>
+
+                        {presupuesto.estado === 'APROBADO' && presupuesto.puede_generar_documentos === false && canCreatePresupuesto ? (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={cloningId === presupuesto.id}
+                            onClick={() => clonePresupuesto(presupuesto)}
+                            className="h-7 px-2 text-xs"
+                          >
+                            {cloningId === presupuesto.id ? 'Clonando...' : 'Clonar'}
+                          </Button>
                         ) : null}
 
                         {canDeletePresupuesto ? (
