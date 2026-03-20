@@ -21,6 +21,14 @@ class FacturaVenta(AuditDiffMixin, TenantRelationValidationMixin, DocumentoTribu
         related_name="facturas_venta",
     )
 
+    presupuesto_origen = models.ForeignKey(
+        "presupuestos.Presupuesto",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="facturas_venta_generadas",
+    )
+
     pedido_venta = models.ForeignKey(
         "ventas.PedidoVenta",
         on_delete=models.SET_NULL,
@@ -79,7 +87,7 @@ class FacturaVenta(AuditDiffMixin, TenantRelationValidationMixin, DocumentoTribu
 
     anulado_en = models.DateTimeField(null=True, blank=True)
 
-    tenant_fk_fields = ["cliente", "pedido_venta", "guia_despacho"]
+    tenant_fk_fields = ["cliente", "pedido_venta", "guia_despacho", "presupuesto_origen"]
 
     class Meta:
         constraints = [
@@ -95,6 +103,7 @@ class FacturaVenta(AuditDiffMixin, TenantRelationValidationMixin, DocumentoTribu
             models.Index(fields=["empresa", "fecha_emision"]),
             models.Index(fields=["empresa", "fecha_vencimiento"]),
             models.Index(fields=["empresa", "pedido_venta"]),
+            models.Index(fields=["empresa", "presupuesto_origen"]),
         ]
         ordering = ["-fecha_emision"]
 

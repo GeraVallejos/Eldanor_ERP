@@ -18,10 +18,10 @@ function buildReferenceLink(asiento) {
 
   switch (asiento.referencia_tipo) {
     case 'FACTURA_VENTA':
-      return { label: 'Abrir factura de venta', to: `/ventas/facturas/${referenceId}/editar` }
+      return { label: 'Ir a listado de facturas', to: '/ventas/facturas' }
     case 'NOTA_CREDITO_VENTA':
     case 'NOTA_CREDITO_VENTA_REVERSA':
-      return { label: 'Abrir nota de credito', to: `/ventas/notas/${referenceId}/editar` }
+      return { label: 'Ir a listado de notas de credito', to: '/ventas/notas' }
     case 'DOCUMENTO_COMPRA':
     case 'DOCUMENTO_COMPRA_REVERSA':
       return { label: 'Abrir documento de compra', to: `/compras/documentos/${referenceId}` }

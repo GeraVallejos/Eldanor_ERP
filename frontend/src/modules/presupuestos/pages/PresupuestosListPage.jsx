@@ -165,6 +165,8 @@ function PresupuestosListPage() {
   const canEditPresupuesto = usePermission('PRESUPUESTOS.EDITAR')
   const canDeletePresupuesto = usePermission('PRESUPUESTOS.BORRAR')
   const canCreatePresupuesto = usePermission('PRESUPUESTOS.CREAR')
+  const canCreatePedidoVenta = usePermission('VENTAS.CREAR')
+  const canCreateFacturaVenta = usePermission('VENTAS.CREAR')
 
   const resolveStatusLabel = (statusCode) => {
     const normalized = String(statusCode || '').toUpperCase()
@@ -429,6 +431,24 @@ function PresupuestosListPage() {
                           >
                             {isStatusUpdating ? 'Guardando...' : 'Cambiar estado'}
                           </Button>
+                        ) : null}
+
+                        {presupuesto.estado === 'APROBADO' && canCreatePedidoVenta ? (
+                          <Link
+                            to={`/ventas/pedidos/nuevo?presupuesto=${presupuesto.id}`}
+                            className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'h-7 px-2 text-xs')}
+                          >
+                            Crear pedido
+                          </Link>
+                        ) : null}
+
+                        {presupuesto.estado === 'APROBADO' && canCreateFacturaVenta ? (
+                          <Link
+                            to={`/ventas/facturas/nuevo?presupuesto=${presupuesto.id}`}
+                            className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'h-7 px-2 text-xs')}
+                          >
+                            Crear factura
+                          </Link>
                         ) : null}
 
                         {canDeletePresupuesto ? (

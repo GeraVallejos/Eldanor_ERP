@@ -27,6 +27,7 @@ function formatEstadoContable(value) {
     PENDIENTE: 'Pendiente',
     CONTABILIZADO: 'Contabilizado',
     ERROR: 'Error',
+    REVERSADO: 'Reversado',
   }
   return mapping[value] || value || '-'
 }
@@ -36,6 +37,7 @@ function TesoreriaBancosPage() {
   const canConciliar = usePermission('TESORERIA.CONCILIAR')
   const [loading, setLoading] = useState(true)
   const [savingCuenta, setSavingCuenta] = useState(false)
+  const [savingMovimiento, setSavingMovimiento] = useState(false)
   const [conciliando, setConciliando] = useState(false)
   const [cuentas, setCuentas] = useState([])
   const [movimientos, setMovimientos] = useState([])
@@ -53,6 +55,14 @@ function TesoreriaBancosPage() {
     moneda: '',
     saldo_referencial: '0',
     activa: true,
+  })
+  const [movimientoForm, setMovimientoForm] = useState({
+    cuenta_bancaria: '',
+    fecha: new Date().toISOString().slice(0, 10),
+    referencia: '',
+    descripcion: '',
+    tipo: 'CREDITO',
+    monto: '0',
   })
   const [conciliacion, setConciliacion] = useState({
     movimientoId: '',
@@ -85,6 +95,10 @@ function TesoreriaBancosPage() {
       setMonedas(normalizeListResponse(monedasData))
 
       setSelectedCuenta((current) => current || String(cuentasNormalizadas[0]?.id || ''))
+      setMovimientoForm((prev) => ({
+        ...prev,
+        cuenta_bancaria: prev.cuenta_bancaria || String(cuentasNormalizadas[0]?.id || ''),
+      }))
     } catch (error) {
       toast.error(normalizeApiError(error, { fallback: 'No se pudo cargar la operacion bancaria.' }))
     } finally {
@@ -151,6 +165,28 @@ function TesoreriaBancosPage() {
       toast.error(normalizeApiError(error, { fallback: 'No se pudo crear la cuenta bancaria.' }))
     } finally {
       setSavingCuenta(false)
+    }
+  }
+
+  const handleMovimientoSubmit = async (event) => {
+    event.preventDefault()
+    setSavingMovimiento(true)
+    try {
+      await api.post('/movimientos-bancarios/', movimientoForm, { suppressGlobalErrorToast: true })
+      toast.success('Movimiento bancario registrado correctamente.')
+      setMovimientoForm((prev) => ({
+        ...prev,
+        fecha: new Date().toISOString().slice(0, 10),
+        referencia: '',
+        descripcion: '',
+        tipo: 'CREDITO',
+        monto: '0',
+      }))
+      await loadData()
+    } catch (error) {
+      toast.error(normalizeApiError(error, { fallback: 'No se pudo registrar el movimiento bancario.' }))
+    } finally {
+      setSavingMovimiento(false)
     }
   }
 
@@ -266,6 +302,53 @@ function TesoreriaBancosPage() {
         </form>
       ) : null}
 
+      {canConciliar ? (
+        <form className="grid gap-3 rounded-xl border border-border bg-card p-4 md:grid-cols-2 xl:grid-cols-6" onSubmit={handleMovimientoSubmit}>
+          <div className="md:col-span-2 xl:col-span-6">
+            <h3 className="text-lg font-semibold">Registrar movimiento manual</h3>
+            <p className="text-sm text-muted-foreground">
+              Sirve para cargos, abonos, comisiones, intereses y otros movimientos bancarios que aun no vienen por importacion.
+            </p>
+          </div>
+          <label className="text-sm">
+            Cuenta bancaria
+            <select className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2" value={movimientoForm.cuenta_bancaria} onChange={(event) => setMovimientoForm((prev) => ({ ...prev, cuenta_bancaria: event.target.value }))} required>
+              <option value="">Seleccione</option>
+              {cuentasActivas.map((cuenta) => <option key={cuenta.id} value={cuenta.id}>{formatCuentaLabel(cuenta)}</option>)}
+            </select>
+          </label>
+          <label className="text-sm">
+            Fecha
+            <input type="date" className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2" value={movimientoForm.fecha} onChange={(event) => setMovimientoForm((prev) => ({ ...prev, fecha: event.target.value }))} required />
+          </label>
+          <label className="text-sm">
+            Tipo
+            <select className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2" value={movimientoForm.tipo} onChange={(event) => setMovimientoForm((prev) => ({ ...prev, tipo: event.target.value }))}>
+              <option value="CREDITO">Credito</option>
+              <option value="DEBITO">Debito</option>
+            </select>
+          </label>
+          <label className="text-sm">
+            Referencia
+            <input className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2" value={movimientoForm.referencia} onChange={(event) => setMovimientoForm((prev) => ({ ...prev, referencia: event.target.value }))} placeholder="Ejemplo: COMISION MARZO" />
+          </label>
+          <label className="text-sm xl:col-span-2">
+            Descripcion
+            <input className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2" value={movimientoForm.descripcion} onChange={(event) => setMovimientoForm((prev) => ({ ...prev, descripcion: event.target.value }))} placeholder="Detalle breve del cargo o abono" />
+          </label>
+          <label className="text-sm">
+            Monto
+            <input type="number" min="0" step="1" inputMode="numeric" className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2" value={movimientoForm.monto} onChange={(event) => setMovimientoForm((prev) => ({ ...prev, monto: toIntegerString(event.target.value) }))} required />
+            <span className="mt-1 block text-xs text-muted-foreground">{formatCurrencyCLP(movimientoForm.monto || 0)}</span>
+          </label>
+          <div className="flex items-end">
+            <Button type="submit" disabled={savingMovimiento || !movimientoForm.cuenta_bancaria}>
+              {savingMovimiento ? 'Guardando...' : 'Registrar movimiento'}
+            </Button>
+          </div>
+        </form>
+      ) : null}
+
       {conciliacion.movimientoId ? (
         <form className="grid gap-3 rounded-xl border border-border bg-card p-4 md:grid-cols-4" onSubmit={handleConciliar}>
           <label className="text-sm">
@@ -323,7 +406,7 @@ function TesoreriaBancosPage() {
           <div className="mb-3 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <h3 className="text-lg font-semibold">Movimientos bancarios</h3>
-              <p className="text-sm text-muted-foreground">Revision simple de cartola y conciliacion.</p>
+              <p className="text-sm text-muted-foreground">Revision simple de cartola, cargos, abonos y conciliacion.</p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <label className="inline-flex items-center gap-2 text-sm text-muted-foreground">

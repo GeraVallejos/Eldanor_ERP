@@ -460,8 +460,11 @@ class ContabilidadService:
                 continue
             saldo = Decimal(fila["saldo"])
             item = {
+                "cuenta_id": fila["cuenta_id"],
                 "codigo": fila["codigo"],
                 "nombre": fila["nombre"],
+                "debe": Decimal(fila["debe"]),
+                "haber": Decimal(fila["haber"]),
                 "saldo": saldo,
             }
             if cuenta.tipo == TipoCuentaContable.INGRESO:

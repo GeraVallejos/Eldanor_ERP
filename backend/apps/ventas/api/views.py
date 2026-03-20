@@ -10,6 +10,7 @@ from apps.core.permisos.constantes_permisos import Acciones, Modulos
 from apps.core.permisos.permissions import TienePermisoModuloAccion, TieneRelacionActiva
 from apps.core.services import SecuenciaService
 from apps.core.models import TipoDocumento
+from apps.core.exceptions import BusinessRuleError
 
 from apps.ventas.api.filters import (
     FacturaVentaFilter,
@@ -46,6 +47,7 @@ from apps.ventas.services import (
     NotaCreditoVentaService,
     PedidoVentaService,
 )
+from apps.presupuestos.models import EstadoPresupuesto
 
 
 class VentasAuditoriaMixin:
@@ -91,7 +93,7 @@ class PedidoVentaViewSet(VentasAuditoriaMixin, TenantViewSetMixin, ModelViewSet)
     }
 
     def get_queryset(self):
-        return super().get_queryset().select_related("cliente__contacto", "lista_precio")
+        return super().get_queryset().select_related("cliente__contacto", "lista_precio", "presupuesto_origen")
 
     def perform_create(self, serializer):
         self._set_tenant_context()
@@ -105,6 +107,12 @@ class PedidoVentaViewSet(VentasAuditoriaMixin, TenantViewSetMixin, ModelViewSet)
         serializer.is_valid(raise_exception=True)
         self._set_tenant_context()
         empresa = self.get_empresa()
+        presupuesto_origen = serializer.validated_data.get("presupuesto_origen")
+        if presupuesto_origen:
+            if presupuesto_origen.empresa_id != empresa.id:
+                raise BusinessRuleError("El presupuesto origen no pertenece a la empresa activa.")
+            if presupuesto_origen.estado != EstadoPresupuesto.APROBADO:
+                raise BusinessRuleError("Solo se puede crear un pedido desde un presupuesto aprobado.")
         pedido = PedidoVentaService.crear_pedido(
             datos=serializer.validated_data,
             empresa=empresa,
@@ -402,13 +410,19 @@ class FacturaVentaViewSet(VentasAuditoriaMixin, TenantViewSetMixin, ModelViewSet
 
     def get_queryset(self):
         return super().get_queryset().select_related(
-            "cliente__contacto", "pedido_venta", "guia_despacho"
+            "cliente__contacto", "pedido_venta", "guia_despacho", "presupuesto_origen"
         )
 
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         self._set_tenant_context()
+        presupuesto_origen = serializer.validated_data.get("presupuesto_origen")
+        if presupuesto_origen:
+            if presupuesto_origen.empresa_id != self.get_empresa().id:
+                raise BusinessRuleError("El presupuesto origen no pertenece a la empresa activa.")
+            if presupuesto_origen.estado != EstadoPresupuesto.APROBADO:
+                raise BusinessRuleError("Solo se puede crear una factura desde un presupuesto aprobado.")
         factura = FacturaVentaService.crear_factura(
             datos=serializer.validated_data,
             empresa=self.get_empresa(),
