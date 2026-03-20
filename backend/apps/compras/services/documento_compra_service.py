@@ -512,9 +512,9 @@ class DocumentoCompraService:
                     "glosa": f"Documento de compra {documento.folio}",
                     "referencia_tipo": "DOCUMENTO_COMPRA",
                     "movimientos": [
-                        {"cuenta_codigo": "511100", "debe": str(documento.subtotal_neto), "haber": "0"},
-                        {"cuenta_codigo": "119200", "debe": str(documento.impuestos), "haber": "0"},
-                        {"cuenta_codigo": "211100", "debe": "0", "haber": str(documento.total)},
+                        {"cuenta_clave": "COMPRAS", "debe": str(documento.subtotal_neto), "haber": "0"},
+                        {"cuenta_clave": "IVA_CREDITO", "debe": str(documento.impuestos), "haber": "0"},
+                        {"cuenta_clave": "PROVEEDORES", "debe": "0", "haber": str(documento.total)},
                     ],
                 },
                 usuario=usuario,
@@ -570,9 +570,9 @@ class DocumentoCompraService:
                 "glosa": f"Documento de compra {documento.folio}",
                 "referencia_tipo": "DOCUMENTO_COMPRA",
                 "movimientos": [
-                    {"cuenta_codigo": "511100", "debe": str(documento.subtotal_neto), "haber": "0"},
-                    {"cuenta_codigo": "119200", "debe": str(documento.impuestos), "haber": "0"},
-                    {"cuenta_codigo": "211100", "debe": "0", "haber": str(documento.total)},
+                    {"cuenta_clave": "COMPRAS", "debe": str(documento.subtotal_neto), "haber": "0"},
+                    {"cuenta_clave": "IVA_CREDITO", "debe": str(documento.impuestos), "haber": "0"},
+                    {"cuenta_clave": "PROVEEDORES", "debe": "0", "haber": str(documento.total)},
                 ],
             },
             usuario=usuario,
@@ -662,6 +662,31 @@ class DocumentoCompraService:
             cuenta_por_pagar.estado = EstadoCuenta.ANULADA
             cuenta_por_pagar.saldo = Decimal("0")
             cuenta_por_pagar.save(update_fields=["estado", "saldo"])
+
+        if estado_anterior == EstadoDocumentoCompra.CONFIRMADO and documento.estado_contable in {
+            EstadoContable.PENDIENTE,
+            EstadoContable.CONTABILIZADO,
+        }:
+            AccountingBridge.request_entry(
+                empresa=empresa,
+                aggregate_type="DocumentoCompraProveedor",
+                aggregate_id=documento.id,
+                entry_payload={
+                    "fecha": str(timezone.localdate()),
+                    "glosa": f"Reversa documento de compra {documento.folio}",
+                    "referencia_tipo": "DOCUMENTO_COMPRA_REVERSA",
+                    "estado_contable_objetivo": EstadoContable.REVERSADO,
+                    "movimientos": [
+                        {"cuenta_clave": "PROVEEDORES", "debe": str(documento.total), "haber": "0"},
+                        {"cuenta_clave": "COMPRAS", "debe": "0", "haber": str(documento.subtotal_neto)},
+                        {"cuenta_clave": "IVA_CREDITO", "debe": "0", "haber": str(documento.impuestos)},
+                    ],
+                },
+                usuario=usuario,
+                dedup_key=f"dc-accounting:{documento.id}:anulado",
+            )
+            documento.estado_contable = EstadoContable.PENDIENTE
+            documento.save(update_fields=["estado_contable", "actualizado_en"])
 
         DocumentoCompraService._actualizar_estado_orden(empresa=empresa, orden_compra=documento.orden_compra)
 

@@ -107,8 +107,8 @@ class TesoreriaBancariaService:
                     "glosa": f"Cobro conciliado {movimiento.referencia or movimiento.id}",
                     "referencia_tipo": "MOVIMIENTO_BANCARIO",
                     "movimientos": [
-                        {"cuenta_codigo": "111200", "debe": str(movimiento.monto), "haber": "0"},
-                        {"cuenta_codigo": "112100", "debe": "0", "haber": str(movimiento.monto)},
+                        {"cuenta_clave": "BANCO", "debe": str(movimiento.monto), "haber": "0"},
+                        {"cuenta_clave": "CLIENTES", "debe": "0", "haber": str(movimiento.monto)},
                     ],
                 },
                 usuario=usuario,
@@ -124,8 +124,8 @@ class TesoreriaBancariaService:
                     "glosa": f"Pago conciliado {movimiento.referencia or movimiento.id}",
                     "referencia_tipo": "MOVIMIENTO_BANCARIO",
                     "movimientos": [
-                        {"cuenta_codigo": "211100", "debe": str(movimiento.monto), "haber": "0"},
-                        {"cuenta_codigo": "111200", "debe": "0", "haber": str(movimiento.monto)},
+                        {"cuenta_clave": "PROVEEDORES", "debe": str(movimiento.monto), "haber": "0"},
+                        {"cuenta_clave": "BANCO", "debe": "0", "haber": str(movimiento.monto)},
                     ],
                 },
                 usuario=usuario,

@@ -106,3 +106,28 @@ class CarteraService:
         cuenta.estado = estado
         cuenta.save(update_fields=["saldo", "estado"])
         return cuenta
+
+    @staticmethod
+    @transaction.atomic
+    def revertir_pago_cuenta(*, cuenta, monto, fecha_referencia):
+        """Revierte un pago aplicado y recompone saldo/estado de la cuenta."""
+        monto = Decimal(str(monto or 0))
+        if monto <= 0:
+            raise BusinessRuleError("El monto a revertir debe ser mayor a cero.")
+
+        nuevo_saldo = (Decimal(cuenta.saldo or 0) + monto).quantize(Decimal("0.01"))
+        if nuevo_saldo > Decimal(cuenta.monto_total or 0):
+            raise BusinessRuleError("La reversa excede el monto total original de la cuenta.")
+
+        estado = CarteraService._estado_por_saldo(
+            saldo=nuevo_saldo,
+            fecha_vencimiento=cuenta.fecha_vencimiento,
+            hoy=fecha_referencia,
+        )
+        if nuevo_saldo < Decimal(cuenta.monto_total or 0) and nuevo_saldo > 0:
+            estado = EstadoCuenta.PARCIAL if cuenta.fecha_vencimiento >= fecha_referencia else EstadoCuenta.VENCIDA
+
+        cuenta.saldo = nuevo_saldo
+        cuenta.estado = estado
+        cuenta.save(update_fields=["saldo", "estado"])
+        return cuenta
