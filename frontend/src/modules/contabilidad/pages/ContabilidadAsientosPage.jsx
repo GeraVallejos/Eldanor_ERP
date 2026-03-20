@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
 import { api } from '@/api/client'
 import { normalizeApiError } from '@/api/errors'
 import Button from '@/components/ui/Button'
+import { buttonVariants } from '@/components/ui/buttonVariants'
 import { formatCurrencyCLP, toIntegerString } from '@/lib/numberFormat'
+import { cn } from '@/lib/utils'
 import { usePermission } from '@/modules/shared/auth/usePermission'
 
 function normalizeListResponse(data) {
@@ -174,7 +177,7 @@ function ContabilidadAsientosPage() {
     <section className="space-y-5">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
         <div>
-          <h2 className="text-2xl font-semibold">Asientos, centralizacion y excepciones</h2>
+          <h2 className="text-2xl font-semibold">Asientos contables</h2>
           <p className="text-sm text-muted-foreground">
             Panel contable para ingreso manual, contabilizacion, procesamiento de integraciones y control de fallos pendientes.
           </p>
@@ -363,19 +366,28 @@ function ContabilidadAsientosPage() {
                       <td className="px-3 py-2">{formatCurrencyCLP(asiento.total_haber)}</td>
                       <td className="px-3 py-2">{asiento.estado}</td>
                       <td className="px-3 py-2">
-                        {canManage && asiento.estado === 'BORRADOR' ? (
-                          <Button
-                            type="button"
-                            variant="outline"
-                            className="h-8 px-2 text-xs"
-                            onClick={() => handleContabilizar(asiento.id)}
-                            disabled={contabilizandoId === asiento.id}
+                        <div className="flex flex-wrap gap-2">
+                          <Link
+                            to={`/contabilidad/asientos/${asiento.id}`}
+                            className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'h-8 px-2 text-xs')}
                           >
-                            {contabilizandoId === asiento.id ? 'Procesando...' : 'Contabilizar'}
-                          </Button>
-                        ) : (
-                          <span className="text-xs text-muted-foreground">{asiento.estado === 'CONTABILIZADO' ? 'Listo' : '-'}</span>
-                        )}
+                            Ver detalle
+                          </Link>
+                          {canManage && asiento.estado === 'BORRADOR' ? (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              className="h-8 px-2 text-xs"
+                              onClick={() => handleContabilizar(asiento.id)}
+                              disabled={contabilizandoId === asiento.id}
+                            >
+                              {contabilizandoId === asiento.id ? 'Procesando...' : 'Contabilizar'}
+                            </Button>
+                          ) : null}
+                          {!canManage && asiento.estado === 'CONTABILIZADO' ? (
+                            <span className="self-center text-xs text-muted-foreground">Listo</span>
+                          ) : null}
+                        </div>
                       </td>
                     </tr>
                   ))

@@ -201,7 +201,7 @@ function ContabilidadPlanPage() {
     <section className="space-y-5">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
         <div>
-          <h2 className="text-2xl font-semibold">Plan de cuentas y parametrizacion</h2>
+          <h2 className="text-2xl font-semibold">Plan de cuentas</h2>
           <p className="text-sm text-muted-foreground">
             Vista contable para construir el plan, revisar jerarquias y mapear cuentas funcionales usadas por ventas, compras y tesoreria.
           </p>
