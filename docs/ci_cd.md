@@ -6,7 +6,7 @@ Esta guia describe la automatizacion configurada para este ERP y como usarla.
 
 - CI: [ci.yml](../.github/workflows/ci.yml)
   - Backend: instala dependencias de CI, valida `permission_action_map` y ejecuta `pytest`.
-  - Frontend: ejecuta `npm ci`, `npm run lint` y `npm run test:run`.
+  - Frontend: ejecuta `npm ci`, `npm run lint`, `npm run test:run` y `npm run build`.
 - CD: [cd.yml](../.github/workflows/cd.yml)
   - Build en `main` (o manual) y publicacion de artifacts (`frontend-dist`, `backend-source`).
   - Deploy opcional por webhook si existe el secreto `DEPLOY_WEBHOOK_URL`.
