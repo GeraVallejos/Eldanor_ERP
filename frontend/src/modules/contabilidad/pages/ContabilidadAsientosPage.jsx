@@ -26,9 +26,11 @@ function ContabilidadAsientosPage() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [processing, setProcessing] = useState(false)
+  const [reprocessing, setReprocessing] = useState(false)
   const [contabilizandoId, setContabilizandoId] = useState('')
   const [cuentas, setCuentas] = useState([])
   const [asientos, setAsientos] = useState([])
+  const [errores, setErrores] = useState([])
   const [form, setForm] = useState({
     fecha: new Date().toISOString().slice(0, 10),
     glosa: '',
@@ -38,19 +40,25 @@ function ContabilidadAsientosPage() {
   const loadData = useCallback(async () => {
     setLoading(true)
     try {
-      const [{ data: cuentasData }, { data: asientosData }] = await Promise.all([
+      const requests = [
         api.get('/plan-cuentas/', { suppressGlobalErrorToast: true }),
         api.get('/asientos-contables/', { suppressGlobalErrorToast: true }),
-      ])
-      const cuentasList = normalizeListResponse(cuentasData)
+      ]
+      if (canManage) {
+        requests.push(api.get('/asientos-contables/errores/', { suppressGlobalErrorToast: true }))
+      }
+
+      const responses = await Promise.all(requests)
+      const cuentasList = normalizeListResponse(responses[0].data)
       setCuentas(cuentasList.filter((item) => item.activa && item.acepta_movimientos))
-      setAsientos(normalizeListResponse(asientosData))
+      setAsientos(normalizeListResponse(responses[1].data))
+      setErrores(canManage ? normalizeListResponse(responses[2]?.data) : [])
     } catch (error) {
       toast.error(normalizeApiError(error, { fallback: 'No se pudo cargar la informacion contable.' }))
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [canManage])
 
   useEffect(() => {
     if (!canView) {
@@ -63,7 +71,8 @@ function ContabilidadAsientosPage() {
     borradores: asientos.filter((item) => item.estado === 'BORRADOR').length,
     contabilizados: asientos.filter((item) => item.estado === 'CONTABILIZADO').length,
     integraciones: asientos.filter((item) => item.origen === 'INTEGRACION').length,
-  }), [asientos])
+    errores: errores.length,
+  }), [asientos, errores])
 
   const rows = form.movimientos_data
   const totalDebe = rows.reduce((acc, item) => acc + Number(item.debe || 0), 0)
@@ -131,6 +140,19 @@ function ContabilidadAsientosPage() {
     }
   }
 
+  const handleReprocesar = async () => {
+    setReprocessing(true)
+    try {
+      const { data } = await api.post('/asientos-contables/reprocesar_errores/', {}, { suppressGlobalErrorToast: true })
+      toast.success(`Errores reenviados: ${data.processed || 0}.`)
+      await loadData()
+    } catch (error) {
+      toast.error(normalizeApiError(error, { fallback: 'No se pudieron reprocesar los errores contables.' }))
+    } finally {
+      setReprocessing(false)
+    }
+  }
+
   const handleContabilizar = async (asientoId) => {
     setContabilizandoId(asientoId)
     try {
@@ -152,44 +174,73 @@ function ContabilidadAsientosPage() {
     <section className="space-y-5">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
         <div>
-          <h2 className="text-2xl font-semibold">Asientos contables</h2>
-          <p className="text-sm text-muted-foreground">Registro manual simple y procesamiento de asientos generados por ventas, compras y tesoreria.</p>
+          <h2 className="text-2xl font-semibold">Asientos, centralizacion y excepciones</h2>
+          <p className="text-sm text-muted-foreground">
+            Panel contable para ingreso manual, contabilizacion, procesamiento de integraciones y control de fallos pendientes.
+          </p>
         </div>
         {canManage ? (
-          <Button type="button" onClick={handleProcesar} disabled={processing}>
-            {processing ? 'Procesando...' : 'Procesar solicitudes'}
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" variant="outline" onClick={handleReprocesar} disabled={reprocessing || errores.length === 0}>
+              {reprocessing ? 'Reprocesando...' : 'Reprocesar errores'}
+            </Button>
+            <Button type="button" onClick={handleProcesar} disabled={processing}>
+              {processing ? 'Procesando...' : 'Procesar solicitudes'}
+            </Button>
+          </div>
         ) : null}
       </div>
 
-      <div className="grid gap-3 md:grid-cols-3">
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         <div className="rounded-xl border border-border bg-card p-4">
           <p className="text-xs uppercase tracking-wide text-muted-foreground">Borradores</p>
           <p className="mt-2 text-2xl font-semibold">{stats.borradores}</p>
-          <p className="mt-1 text-xs text-muted-foreground">Asientos pendientes de validar y contabilizar.</p>
+          <p className="mt-1 text-xs text-muted-foreground">Asientos pendientes de revisar o contabilizar.</p>
         </div>
         <div className="rounded-xl border border-border bg-card p-4">
           <p className="text-xs uppercase tracking-wide text-muted-foreground">Contabilizados</p>
           <p className="mt-2 text-2xl font-semibold">{stats.contabilizados}</p>
-          <p className="mt-1 text-xs text-muted-foreground">Impacto ya trazado y consolidado.</p>
+          <p className="mt-1 text-xs text-muted-foreground">Impacto confirmado en la contabilidad.</p>
         </div>
         <div className="rounded-xl border border-border bg-card p-4">
-          <p className="text-xs uppercase tracking-wide text-muted-foreground">Desde integraciones</p>
+          <p className="text-xs uppercase tracking-wide text-muted-foreground">Integraciones</p>
           <p className="mt-2 text-2xl font-semibold">{stats.integraciones}</p>
-          <p className="mt-1 text-xs text-muted-foreground">Centralizacion automatica desde otros modulos.</p>
+          <p className="mt-1 text-xs text-muted-foreground">Asientos generados desde ventas, compras o tesoreria.</p>
+        </div>
+        <div className="rounded-xl border border-border bg-card p-4">
+          <p className="text-xs uppercase tracking-wide text-muted-foreground">Errores pendientes</p>
+          <p className="mt-2 text-2xl font-semibold">{stats.errores}</p>
+          <p className="mt-1 text-xs text-muted-foreground">Solicitudes contables con fallo listo para reproceso.</p>
         </div>
       </div>
 
       {canManage ? (
         <form className="space-y-4 rounded-xl border border-border bg-card p-4" onSubmit={handleSubmit}>
+          <div>
+            <h3 className="text-lg font-semibold">Ingreso manual de asiento</h3>
+            <p className="text-sm text-muted-foreground">Pensado para ajustes, aperturas, regularizaciones y reclasificaciones contables.</p>
+          </div>
+
           <div className="grid gap-3 md:grid-cols-[220px_minmax(0,1fr)]">
             <label className="text-sm">
               Fecha
-              <input type="date" className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2" value={form.fecha} onChange={(event) => setForm((prev) => ({ ...prev, fecha: event.target.value }))} required />
+              <input
+                type="date"
+                className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
+                value={form.fecha}
+                onChange={(event) => setForm((prev) => ({ ...prev, fecha: event.target.value }))}
+                required
+              />
             </label>
             <label className="text-sm">
               Glosa
-              <input className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2" value={form.glosa} onChange={(event) => setForm((prev) => ({ ...prev, glosa: event.target.value }))} placeholder="Ejemplo: apertura caja chica" required />
+              <input
+                className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
+                value={form.glosa}
+                onChange={(event) => setForm((prev) => ({ ...prev, glosa: event.target.value }))}
+                placeholder="Ejemplo: reclasificacion de gastos operativos"
+                required
+              />
             </label>
           </div>
 
@@ -208,21 +259,46 @@ function ContabilidadAsientosPage() {
                 {rows.map((row, index) => (
                   <tr key={`row-${index}`} className="border-t border-border">
                     <td className="px-3 py-2">
-                      <select className="w-full rounded-md border border-input bg-background px-3 py-2" value={row.cuenta} onChange={(event) => handleRowChange(index, 'cuenta', event.target.value)} required>
+                      <select
+                        className="w-full rounded-md border border-input bg-background px-3 py-2"
+                        value={row.cuenta}
+                        onChange={(event) => handleRowChange(index, 'cuenta', event.target.value)}
+                        required
+                      >
                         <option value="">Seleccione</option>
                         {cuentas.map((cuenta) => (
-                          <option key={cuenta.id} value={cuenta.id}>{cuenta.codigo} - {cuenta.nombre}</option>
+                          <option key={cuenta.id} value={cuenta.id}>
+                            {cuenta.codigo} - {cuenta.nombre}
+                          </option>
                         ))}
                       </select>
                     </td>
                     <td className="px-3 py-2">
-                      <input className="w-full rounded-md border border-input bg-background px-3 py-2" value={row.glosa} onChange={(event) => handleRowChange(index, 'glosa', event.target.value)} />
+                      <input
+                        className="w-full rounded-md border border-input bg-background px-3 py-2"
+                        value={row.glosa}
+                        onChange={(event) => handleRowChange(index, 'glosa', event.target.value)}
+                      />
                     </td>
                     <td className="px-3 py-2">
-                      <input type="number" min="0" step="1" className="w-full rounded-md border border-input bg-background px-3 py-2" value={row.debe} onChange={(event) => handleRowChange(index, 'debe', event.target.value)} />
+                      <input
+                        type="number"
+                        min="0"
+                        step="1"
+                        className="w-full rounded-md border border-input bg-background px-3 py-2"
+                        value={row.debe}
+                        onChange={(event) => handleRowChange(index, 'debe', event.target.value)}
+                      />
                     </td>
                     <td className="px-3 py-2">
-                      <input type="number" min="0" step="1" className="w-full rounded-md border border-input bg-background px-3 py-2" value={row.haber} onChange={(event) => handleRowChange(index, 'haber', event.target.value)} />
+                      <input
+                        type="number"
+                        min="0"
+                        step="1"
+                        className="w-full rounded-md border border-input bg-background px-3 py-2"
+                        value={row.haber}
+                        onChange={(event) => handleRowChange(index, 'haber', event.target.value)}
+                      />
                     </td>
                     <td className="px-3 py-2">
                       <Button type="button" variant="outline" className="h-8 px-2 text-xs" onClick={() => removeRow(index)} disabled={rows.length <= 2}>
@@ -239,7 +315,9 @@ function ContabilidadAsientosPage() {
             <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
               <span>Debe: {formatCurrencyCLP(totalDebe)}</span>
               <span>Haber: {formatCurrencyCLP(totalHaber)}</span>
-              <span className={cuadrado ? 'text-emerald-600' : 'text-amber-600'}>{cuadrado ? 'Asiento cuadrado' : 'Revise la cuadratura'}</span>
+              <span className={cuadrado ? 'text-emerald-600' : 'text-amber-600'}>
+                {cuadrado ? 'Asiento cuadrado' : 'Revise la cuadratura'}
+              </span>
             </div>
             <div className="flex flex-wrap gap-2">
               <Button type="button" variant="outline" onClick={addRow}>Agregar linea</Button>
@@ -249,54 +327,97 @@ function ContabilidadAsientosPage() {
         </form>
       ) : null}
 
-      <div className="rounded-xl border border-border bg-card p-4">
-        <div className="mb-3">
-          <h3 className="text-lg font-semibold">Ultimos asientos</h3>
-          <p className="text-sm text-muted-foreground">Panel operativo para revisar origen, estado y cuadratura sin sobrecargar la rutina diaria.</p>
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(360px,0.9fr)]">
+        <div className="rounded-xl border border-border bg-card p-4">
+          <div className="mb-3">
+            <h3 className="text-lg font-semibold">Ultimos asientos</h3>
+            <p className="text-sm text-muted-foreground">Revision de origen, montos y estado para control diario del libro.</p>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-sm">
+              <thead className="bg-muted/40">
+                <tr>
+                  <th className="px-3 py-2 text-left font-medium">Numero</th>
+                  <th className="px-3 py-2 text-left font-medium">Fecha</th>
+                  <th className="px-3 py-2 text-left font-medium">Glosa</th>
+                  <th className="px-3 py-2 text-left font-medium">Origen</th>
+                  <th className="px-3 py-2 text-left font-medium">Debe</th>
+                  <th className="px-3 py-2 text-left font-medium">Haber</th>
+                  <th className="px-3 py-2 text-left font-medium">Estado</th>
+                  <th className="px-3 py-2 text-left font-medium">Accion</th>
+                </tr>
+              </thead>
+              <tbody>
+                {loading ? (
+                  <tr><td className="px-3 py-3 text-muted-foreground" colSpan={8}>Cargando asientos...</td></tr>
+                ) : asientos.length === 0 ? (
+                  <tr><td className="px-3 py-3 text-muted-foreground" colSpan={8}>Aun no hay asientos registrados.</td></tr>
+                ) : (
+                  asientos.map((asiento) => (
+                    <tr key={asiento.id} className="border-t border-border">
+                      <td className="px-3 py-2 font-medium">{asiento.numero}</td>
+                      <td className="px-3 py-2">{asiento.fecha}</td>
+                      <td className="px-3 py-2">{asiento.glosa}</td>
+                      <td className="px-3 py-2">{asiento.origen}</td>
+                      <td className="px-3 py-2">{formatCurrencyCLP(asiento.total_debe)}</td>
+                      <td className="px-3 py-2">{formatCurrencyCLP(asiento.total_haber)}</td>
+                      <td className="px-3 py-2">{asiento.estado}</td>
+                      <td className="px-3 py-2">
+                        {canManage && asiento.estado === 'BORRADOR' ? (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className="h-8 px-2 text-xs"
+                            onClick={() => handleContabilizar(asiento.id)}
+                            disabled={contabilizandoId === asiento.id}
+                          >
+                            {contabilizandoId === asiento.id ? 'Procesando...' : 'Contabilizar'}
+                          </Button>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">{asiento.estado === 'CONTABILIZADO' ? 'Listo' : '-'}</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
-        <div className="overflow-x-auto">
-          <table className="min-w-full text-sm">
-            <thead className="bg-muted/40">
-              <tr>
-                <th className="px-3 py-2 text-left font-medium">Numero</th>
-                <th className="px-3 py-2 text-left font-medium">Fecha</th>
-                <th className="px-3 py-2 text-left font-medium">Glosa</th>
-                <th className="px-3 py-2 text-left font-medium">Origen</th>
-                <th className="px-3 py-2 text-left font-medium">Debe</th>
-                <th className="px-3 py-2 text-left font-medium">Haber</th>
-                <th className="px-3 py-2 text-left font-medium">Estado</th>
-                <th className="px-3 py-2 text-left font-medium">Accion</th>
-              </tr>
-            </thead>
-            <tbody>
-              {loading ? (
-                <tr><td className="px-3 py-3 text-muted-foreground" colSpan={8}>Cargando asientos...</td></tr>
-              ) : asientos.length === 0 ? (
-                <tr><td className="px-3 py-3 text-muted-foreground" colSpan={8}>Aun no hay asientos registrados.</td></tr>
-              ) : (
-                asientos.map((asiento) => (
-                  <tr key={asiento.id} className="border-t border-border">
-                    <td className="px-3 py-2 font-medium">{asiento.numero}</td>
-                    <td className="px-3 py-2">{asiento.fecha}</td>
-                    <td className="px-3 py-2">{asiento.glosa}</td>
-                    <td className="px-3 py-2">{asiento.origen}</td>
-                    <td className="px-3 py-2">{formatCurrencyCLP(asiento.total_debe)}</td>
-                    <td className="px-3 py-2">{formatCurrencyCLP(asiento.total_haber)}</td>
-                    <td className="px-3 py-2">{asiento.estado}</td>
-                    <td className="px-3 py-2">
-                      {canManage && asiento.estado === 'BORRADOR' ? (
-                        <Button type="button" variant="outline" className="h-8 px-2 text-xs" onClick={() => handleContabilizar(asiento.id)} disabled={contabilizandoId === asiento.id}>
-                          {contabilizandoId === asiento.id ? 'Procesando...' : 'Contabilizar'}
-                        </Button>
-                      ) : (
-                        <span className="text-xs text-muted-foreground">{asiento.estado === 'CONTABILIZADO' ? 'Listo' : '-'}</span>
-                      )}
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+
+        <div className="rounded-xl border border-border bg-card p-4">
+          <div className="mb-3 flex items-start justify-between gap-3">
+            <div>
+              <h3 className="text-lg font-semibold">Errores de integracion</h3>
+              <p className="text-sm text-muted-foreground">Bandeja para revisar payloads fallidos, motivo y numero de intentos.</p>
+            </div>
+            {canManage ? (
+              <Button type="button" variant="outline" className="shrink-0" onClick={handleReprocesar} disabled={reprocessing || errores.length === 0}>
+                {reprocessing ? 'Reprocesando...' : 'Reintentar todo'}
+              </Button>
+            ) : null}
+          </div>
+          <div className="space-y-3">
+            {loading ? (
+              <p className="text-sm text-muted-foreground">Cargando errores...</p>
+            ) : errores.length === 0 ? (
+              <p className="rounded-lg border border-dashed border-border px-3 py-4 text-sm text-muted-foreground">
+                No hay errores contables pendientes.
+              </p>
+            ) : (
+              errores.map((error) => (
+                <article key={error.id} className="rounded-lg border border-border p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="font-medium">{error.aggregate_type} · {error.aggregate_id}</p>
+                    <span className="text-xs text-muted-foreground">Intentos: {error.attempts}</span>
+                  </div>
+                  <p className="mt-2 text-sm">{error.glosa || 'Sin glosa informada.'}</p>
+                  <p className="mt-2 text-sm text-destructive">{error.error || 'Sin detalle tecnico disponible.'}</p>
+                  <p className="mt-2 text-xs text-muted-foreground">Disponible desde: {error.available_at}</p>
+                </article>
+              ))
+            )}
+          </div>
         </div>
       </div>
     </section>
