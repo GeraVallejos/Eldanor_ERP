@@ -86,7 +86,7 @@ class PedidoVentaService:
                     producto_id=item.producto_id,
                     bodega_id=None,
                     cantidad=item.cantidad,
-                    documento_tipo=TipoDocumentoReferencia.PRESUPUESTO,
+                    documento_tipo=TipoDocumentoReferencia.PEDIDO_VENTA,
                     documento_id=pedido.id,
                     empresa=empresa,
                     usuario=usuario,
@@ -129,7 +129,7 @@ class PedidoVentaService:
                     InventarioService.liberar_reserva(
                         producto_id=item.producto_id,
                         bodega_id=None,
-                        documento_tipo=TipoDocumentoReferencia.PRESUPUESTO,
+                        documento_tipo=TipoDocumentoReferencia.PEDIDO_VENTA,
                         documento_id=pedido.id,
                         empresa=empresa,
                     )

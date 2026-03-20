@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
+import { api } from '@/api/client'
 import { normalizeApiError } from '@/api/errors'
 import Button from '@/components/ui/Button'
 import { buttonVariants } from '@/components/ui/buttonVariants'
@@ -21,6 +22,7 @@ function emptyItem() {
     descuento: '0',
     impuesto: '',
     impuesto_porcentaje: '0',
+    presupuesto_item_origen: '',
   }
 }
 
@@ -32,12 +34,15 @@ function VentasPedidosFormPage() {
   const { id } = useParams()
   const isEdit = Boolean(id)
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const presupuestoId = searchParams.get('presupuesto') || ''
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [clientes, setClientes] = useState([])
   const [productos, setProductos] = useState([])
   const [impuestos, setImpuestos] = useState([])
   const [numeroPreview, setNumeroPreview] = useState('...')
+  const [presupuestoOrigenId, setPresupuestoOrigenId] = useState('')
   const [form, setForm] = useState({
     cliente: '',
     fecha_emision: today(),
@@ -79,6 +84,7 @@ function VentasPedidosFormPage() {
           descuento: toIntegerString(pedido.descuento || 0),
         })
         setNumeroPreview(String(pedido.numero || '-'))
+        setPresupuestoOrigenId(String(pedido.presupuesto_origen || ''))
         setItems(
           scopedItems.length > 0
             ? scopedItems.map((row) => ({
@@ -89,19 +95,51 @@ function VentasPedidosFormPage() {
                 descuento: toIntegerString(row.descuento || 0),
                 impuesto: row.impuesto ? String(row.impuesto) : '',
                 impuesto_porcentaje: toIntegerString(row.impuesto_porcentaje || 0),
+                presupuesto_item_origen: row.presupuesto_item_origen ? String(row.presupuesto_item_origen) : '',
               }))
             : [emptyItem()],
         )
       } else {
         const next = await ventasApi.getOne(ventasApi.endpoints.pedidos, 'siguiente_numero')
         setNumeroPreview(String(next?.numero || '-'))
+        if (presupuestoId) {
+          const [{ data: presupuesto }, { data: trazabilidad }] = await Promise.all([
+            api.get(`/presupuestos/${presupuestoId}/`, { suppressGlobalErrorToast: true }),
+            api.get(`/presupuestos/${presupuestoId}/trazabilidad/`, { suppressGlobalErrorToast: true }),
+          ])
+          const presupuestoItems = Array.isArray(trazabilidad?.consumo?.items)
+            ? trazabilidad.consumo.items.filter((row) => Number(row.cantidad_disponible || 0) > 0)
+            : []
+          setPresupuestoOrigenId(String(presupuesto.id))
+          setForm({
+            cliente: String(presupuesto.cliente || ''),
+            fecha_emision: presupuesto.fecha || today(),
+            fecha_entrega: presupuesto.fecha_vencimiento || '',
+            observaciones: presupuesto.observaciones || '',
+            descuento: toIntegerString(presupuesto.descuento || 0),
+          })
+          setItems(
+            presupuestoItems.length > 0
+              ? presupuestoItems.map((row) => ({
+                  producto: String(row.producto_id || row.producto || ''),
+                  descripcion: row.descripcion || '',
+                  cantidad: toQuantityString(row.cantidad_disponible || row.cantidad || 1),
+                  precio_unitario: toIntegerString(row.precio_unitario || 0),
+                  descuento: toIntegerString(row.descuento || 0),
+                  impuesto: row.impuesto ? String(row.impuesto) : '',
+                  impuesto_porcentaje: toIntegerString(row.impuesto_porcentaje || 0),
+                  presupuesto_item_origen: String(row.id),
+                }))
+              : [emptyItem()],
+          )
+        }
       }
     } catch (error) {
       toast.error(normalizeApiError(error, { fallback: 'No se pudieron cargar los datos del formulario.' }))
     } finally {
       setLoading(false)
     }
-  }, [id, isEdit])
+  }, [id, isEdit, presupuestoId])
 
   useEffect(() => {
     const timeoutId = setTimeout(() => {
@@ -185,6 +223,7 @@ function VentasPedidosFormPage() {
       const total = totals.reduce((acc, row) => acc + row.total, 0)
       const payload = {
         cliente: form.cliente,
+        presupuesto_origen: presupuestoOrigenId || null,
         fecha_emision: form.fecha_emision,
         fecha_entrega: form.fecha_entrega || null,
         observaciones: form.observaciones || '',
@@ -217,6 +256,7 @@ function VentasPedidosFormPage() {
             descuento: Number(row.descuento || 0),
             impuesto: row.impuesto || null,
             impuesto_porcentaje: Number(row.impuesto_porcentaje || impuestoById.get(String(row.impuesto))?.porcentaje || 0),
+            presupuesto_item_origen: row.presupuesto_item_origen || null,
             subtotal: rowTotals.subtotal,
             total: rowTotals.total,
           })
@@ -242,6 +282,9 @@ function VentasPedidosFormPage() {
         <div>
           <h2 className="text-2xl font-semibold">{isEdit ? 'Editar pedido' : 'Nuevo pedido de venta'}</h2>
           <p className="text-sm text-muted-foreground">Folio: {numeroPreview}</p>
+          {!isEdit && presupuestoOrigenId ? (
+            <p className="text-xs text-muted-foreground">Origen comercial: presupuesto {presupuestoOrigenId}</p>
+          ) : null}
         </div>
         <Link to="/ventas/pedidos" className={cn(buttonVariants({ variant: 'outline', size: 'md' }))}>Volver</Link>
       </div>
@@ -352,6 +395,11 @@ function VentasPedidosFormPage() {
                 </select>
                 <Button type="button" variant="destructive" size="sm" onClick={() => removeItem(index)}>Quitar</Button>
               </div>
+              {row.presupuesto_item_origen ? (
+                <p className="text-xs text-muted-foreground md:col-span-6">
+                  Item vinculado al presupuesto origen.
+                </p>
+              ) : null}
             </div>
           ))}
         </div>

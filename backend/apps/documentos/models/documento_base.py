@@ -7,6 +7,7 @@ class TipoDocumentoReferencia(models.TextChoices):
     COMPRA_RECEPCION = "COMPRA_RECEPCION", "Recepcion de compra"
     GUIA_RECEPCION = "GUIA_RECEPCION", "Guia de recepcion"
     FACTURA_COMPRA = "FACTURA_COMPRA", "Factura de compra"
+    PEDIDO_VENTA = "PEDIDO_VENTA", "Pedido de venta"
     VENTA_FACTURA = "VENTA_FACTURA", "Factura de venta"
     AJUSTE = "AJUSTE", "Ajuste manual"
     TRASLADO = "TRASLADO", "Traslado bodega"

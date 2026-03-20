@@ -24,6 +24,15 @@ class PedidoVentaItem(TenantRelationValidationMixin, DocumentoItemBase):
         related_name="pedido_venta_items",
     )
 
+    presupuesto_item_origen = models.ForeignKey(
+        "presupuestos.PresupuestoItem",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="pedido_venta_items",
+        help_text="Item de presupuesto origen para trazabilidad comercial y control de consumo.",
+    )
+
     descuento = models.DecimalField(
         max_digits=5,
         decimal_places=2,
@@ -38,11 +47,12 @@ class PedidoVentaItem(TenantRelationValidationMixin, DocumentoItemBase):
         help_text="Tasa de impuesto desnormalizada al momento del pedido.",
     )
 
-    tenant_fk_fields = ["pedido_venta", "producto", "impuesto"]
+    tenant_fk_fields = ["pedido_venta", "producto", "impuesto", "presupuesto_item_origen"]
 
     class Meta:
         indexes = [
             models.Index(fields=["empresa", "pedido_venta"]),
+            models.Index(fields=["empresa", "presupuesto_item_origen"]),
         ]
 
     def save(self, *args, **kwargs):

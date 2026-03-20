@@ -1,3 +1,6 @@
+from collections import defaultdict
+from decimal import Decimal
+
 from django.db import transaction
 from django.db.models import Max
 from apps.core.exceptions import AuthorizationError, BusinessRuleError
@@ -10,6 +13,9 @@ from apps.core.permisos.constantes_permisos import Acciones, Modulos
 
 
 class PresupuestoService:
+    ESTADO_USO_NO_UTILIZADO = "NO_UTILIZADO"
+    ESTADO_USO_PARCIAL = "PARCIALMENTE_UTILIZADO"
+    ESTADO_USO_TOTAL = "TOTALMENTE_UTILIZADO"
 
     ESTADOS_TRANSICION_VALIDA = {
         EstadoPresupuesto.BORRADOR: {
@@ -49,6 +55,231 @@ class PresupuestoService:
             presupuesto=presupuesto,
             empresa=presupuesto.empresa,
         )
+
+    @staticmethod
+    def _normalizar_decimal(valor):
+        """Convierte valores nulos o primitivos en Decimal estable para calculos comerciales."""
+        return Decimal(str(valor or 0))
+
+    @staticmethod
+    def _cantidades_consumidas_por_item(*, presupuesto, excluir=None):
+        """Calcula la cantidad consumida por cada item del presupuesto desde pedidos y facturas vigentes."""
+        from apps.ventas.models import (
+            EstadoFacturaVenta,
+            EstadoPedidoVenta,
+            FacturaVentaItem,
+            PedidoVentaItem,
+        )
+
+        consumido = defaultdict(lambda: Decimal("0"))
+        excluir = excluir or {}
+
+        pedido_items = (
+            PedidoVentaItem.all_objects.select_related("pedido_venta", "presupuesto_item_origen")
+            .filter(
+                empresa=presupuesto.empresa,
+                pedido_venta__presupuesto_origen=presupuesto,
+                presupuesto_item_origen__isnull=False,
+            )
+            .exclude(pedido_venta__estado=EstadoPedidoVenta.ANULADO)
+        )
+        factura_items = (
+            FacturaVentaItem.all_objects.select_related("factura_venta", "presupuesto_item_origen")
+            .filter(
+                empresa=presupuesto.empresa,
+                factura_venta__presupuesto_origen=presupuesto,
+                presupuesto_item_origen__isnull=False,
+            )
+            .exclude(factura_venta__estado=EstadoFacturaVenta.ANULADA)
+        )
+
+        pedido_item_excluir = excluir.get("pedido_item_id")
+        factura_item_excluir = excluir.get("factura_item_id")
+
+        if pedido_item_excluir:
+            pedido_items = pedido_items.exclude(pk=pedido_item_excluir)
+        if factura_item_excluir:
+            factura_items = factura_items.exclude(pk=factura_item_excluir)
+
+        for item in pedido_items:
+            consumido[str(item.presupuesto_item_origen_id)] += PresupuestoService._normalizar_decimal(item.cantidad)
+
+        for item in factura_items:
+            consumido[str(item.presupuesto_item_origen_id)] += PresupuestoService._normalizar_decimal(item.cantidad)
+
+        return consumido
+
+    @staticmethod
+    def resumen_consumo_comercial(*, presupuesto, excluir=None):
+        """Resume el consumo comercial del presupuesto por linea para habilitar conversiones parciales o totales."""
+        items = []
+        cantidad_total = Decimal("0")
+        cantidad_usada_total = Decimal("0")
+        lineas_completas = 0
+
+        consumido = PresupuestoService._cantidades_consumidas_por_item(
+            presupuesto=presupuesto,
+            excluir=excluir,
+        )
+
+        for item in PresupuestoService._items_queryset(presupuesto).select_related("producto"):
+            cantidad_total_item = PresupuestoService._normalizar_decimal(item.cantidad)
+            cantidad_usada = consumido.get(str(item.id), Decimal("0"))
+            cantidad_disponible = max(cantidad_total_item - cantidad_usada, Decimal("0"))
+
+            if cantidad_usada <= 0:
+                estado_linea = PresupuestoService.ESTADO_USO_NO_UTILIZADO
+            elif cantidad_disponible <= 0:
+                estado_linea = PresupuestoService.ESTADO_USO_TOTAL
+                lineas_completas += 1
+            else:
+                estado_linea = PresupuestoService.ESTADO_USO_PARCIAL
+
+            cantidad_total += cantidad_total_item
+            cantidad_usada_total += min(cantidad_usada, cantidad_total_item)
+
+            items.append(
+                {
+                    "id": str(item.id),
+                    "producto_id": str(item.producto_id) if item.producto_id else None,
+                    "descripcion": item.descripcion,
+                    "cantidad": cantidad_total_item,
+                    "cantidad_usada": min(cantidad_usada, cantidad_total_item),
+                    "cantidad_disponible": cantidad_disponible,
+                    "estado_uso": estado_linea,
+                    "descuento": item.descuento,
+                    "impuesto": str(item.impuesto_id) if item.impuesto_id else None,
+                    "impuesto_porcentaje": item.impuesto_porcentaje,
+                    "precio_unitario": item.precio_unitario,
+                    "subtotal": item.subtotal,
+                    "total": item.total,
+                }
+            )
+
+        if not items or cantidad_usada_total <= 0:
+            estado_uso = PresupuestoService.ESTADO_USO_NO_UTILIZADO
+        elif all(item["cantidad_disponible"] <= 0 for item in items):
+            estado_uso = PresupuestoService.ESTADO_USO_TOTAL
+        else:
+            estado_uso = PresupuestoService.ESTADO_USO_PARCIAL
+
+        return {
+            "estado_uso": estado_uso,
+            "puede_generar_documentos": estado_uso != PresupuestoService.ESTADO_USO_TOTAL,
+            "cantidad_total": cantidad_total,
+            "cantidad_usada": cantidad_usada_total,
+            "cantidad_disponible": max(cantidad_total - cantidad_usada_total, Decimal("0")),
+            "lineas_totales": len(items),
+            "lineas_completas": lineas_completas,
+            "items": items,
+        }
+
+    @staticmethod
+    def validar_presupuesto_disponible_para_documento(*, presupuesto):
+        """Valida que un presupuesto aprobado aun tenga consumo comercial disponible."""
+        if presupuesto.estado != EstadoPresupuesto.APROBADO:
+            raise BusinessRuleError("Solo se puede generar un documento desde un presupuesto aprobado.")
+
+        resumen = PresupuestoService.resumen_consumo_comercial(presupuesto=presupuesto)
+        if resumen["estado_uso"] == PresupuestoService.ESTADO_USO_TOTAL:
+            raise BusinessRuleError(
+                "El presupuesto ya fue utilizado completamente. Clone el presupuesto si necesita repetir la operacion."
+            )
+        return resumen
+
+    @staticmethod
+    def validar_consumo_item_presupuesto(
+        *,
+        presupuesto_item,
+        cantidad_solicitada,
+        empresa,
+        presupuesto_origen=None,
+        excluir=None,
+    ):
+        """Valida que una linea derivada no consuma mas cantidad que la disponible en el presupuesto origen."""
+        if presupuesto_item.empresa_id != empresa.id:
+            raise BusinessRuleError("El item de presupuesto origen no pertenece a la empresa activa.")
+
+        presupuesto = presupuesto_item.presupuesto
+        if presupuesto_origen is None:
+            raise BusinessRuleError("Debe seleccionar un presupuesto origen para usar lineas con trazabilidad comercial.")
+
+        if presupuesto.id != presupuesto_origen.id:
+            raise BusinessRuleError("El item de presupuesto origen no pertenece al presupuesto seleccionado.")
+
+        resumen = PresupuestoService.resumen_consumo_comercial(
+            presupuesto=presupuesto,
+            excluir=excluir,
+        )
+        item_resumen = next(
+            (item for item in resumen["items"] if str(item["id"]) == str(presupuesto_item.id)),
+            None,
+        )
+        if not item_resumen:
+            raise BusinessRuleError("El item de presupuesto origen no esta disponible para trazabilidad.")
+
+        cantidad_solicitada = PresupuestoService._normalizar_decimal(cantidad_solicitada)
+        if cantidad_solicitada <= 0:
+            raise BusinessRuleError("La cantidad del documento debe ser mayor a cero.")
+
+        if cantidad_solicitada > item_resumen["cantidad_disponible"]:
+            raise BusinessRuleError(
+                "La cantidad solicitada supera lo disponible del presupuesto origen para esta linea."
+            )
+
+        return item_resumen
+
+    @staticmethod
+    def construir_trazabilidad_comercial(*, presupuesto):
+        """Construye el hilo comercial del presupuesto con documentos origen y consumo por linea."""
+        from apps.ventas.models import FacturaVenta, PedidoVenta
+
+        resumen = PresupuestoService.resumen_consumo_comercial(presupuesto=presupuesto)
+
+        pedidos = (
+            PedidoVenta.all_objects.filter(empresa=presupuesto.empresa, presupuesto_origen=presupuesto)
+            .select_related("cliente__contacto")
+            .order_by("-fecha_emision", "-numero")
+        )
+        facturas = (
+            FacturaVenta.all_objects.filter(empresa=presupuesto.empresa, presupuesto_origen=presupuesto)
+            .select_related("cliente__contacto")
+            .order_by("-fecha_emision", "-numero")
+        )
+
+        return {
+            "presupuesto": {
+                "id": str(presupuesto.id),
+                "numero": presupuesto.numero,
+                "estado": presupuesto.estado,
+                "fecha": presupuesto.fecha,
+                "fecha_vencimiento": presupuesto.fecha_vencimiento,
+                "cliente_id": str(presupuesto.cliente_id),
+                "cliente_nombre": getattr(getattr(presupuesto.cliente, "contacto", None), "nombre", None),
+                "total": presupuesto.total,
+            },
+            "consumo": resumen,
+            "pedidos": [
+                {
+                    "id": str(pedido.id),
+                    "numero": pedido.numero,
+                    "estado": pedido.estado,
+                    "fecha_emision": pedido.fecha_emision,
+                    "total": pedido.total,
+                }
+                for pedido in pedidos
+            ],
+            "facturas": [
+                {
+                    "id": str(factura.id),
+                    "numero": factura.numero,
+                    "estado": factura.estado,
+                    "fecha_emision": factura.fecha_emision,
+                    "total": factura.total,
+                }
+                for factura in facturas
+            ],
+        }
 
     @staticmethod
     @transaction.atomic

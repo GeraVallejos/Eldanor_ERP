@@ -25,6 +25,14 @@ class PedidoVenta(AuditDiffMixin, TenantRelationValidationMixin, DocumentoTribut
         related_name="pedidos_venta",
     )
 
+    presupuesto_origen = models.ForeignKey(
+        "presupuestos.Presupuesto",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="pedidos_venta_generados",
+    )
+
     estado = models.CharField(
         max_length=20,
         choices=EstadoPedidoVenta.choices,
@@ -54,7 +62,7 @@ class PedidoVenta(AuditDiffMixin, TenantRelationValidationMixin, DocumentoTribut
         related_name="pedidos_venta",
     )
 
-    tenant_fk_fields = ["cliente", "lista_precio"]
+    tenant_fk_fields = ["cliente", "lista_precio", "presupuesto_origen"]
 
     class Meta:
         constraints = [
@@ -66,6 +74,7 @@ class PedidoVenta(AuditDiffMixin, TenantRelationValidationMixin, DocumentoTribut
         indexes = [
             models.Index(fields=["empresa", "numero"]),
             models.Index(fields=["empresa", "cliente"]),
+            models.Index(fields=["empresa", "presupuesto_origen"]),
             models.Index(fields=["empresa", "estado"]),
             models.Index(fields=["empresa", "fecha_emision"]),
         ]

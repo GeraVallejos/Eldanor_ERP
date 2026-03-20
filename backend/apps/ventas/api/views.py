@@ -10,6 +10,7 @@ from apps.core.permisos.constantes_permisos import Acciones, Modulos
 from apps.core.permisos.permissions import TienePermisoModuloAccion, TieneRelacionActiva
 from apps.core.services import SecuenciaService
 from apps.core.models import TipoDocumento
+from apps.core.exceptions import BusinessRuleError
 
 from apps.ventas.api.filters import (
     FacturaVentaFilter,
@@ -46,6 +47,7 @@ from apps.ventas.services import (
     NotaCreditoVentaService,
     PedidoVentaService,
 )
+from apps.presupuestos.services.presupuesto_service import PresupuestoService
 
 
 class VentasAuditoriaMixin:
@@ -91,7 +93,7 @@ class PedidoVentaViewSet(VentasAuditoriaMixin, TenantViewSetMixin, ModelViewSet)
     }
 
     def get_queryset(self):
-        return super().get_queryset().select_related("cliente__contacto", "lista_precio")
+        return super().get_queryset().select_related("cliente__contacto", "lista_precio", "presupuesto_origen")
 
     def perform_create(self, serializer):
         self._set_tenant_context()
@@ -105,6 +107,13 @@ class PedidoVentaViewSet(VentasAuditoriaMixin, TenantViewSetMixin, ModelViewSet)
         serializer.is_valid(raise_exception=True)
         self._set_tenant_context()
         empresa = self.get_empresa()
+        presupuesto_origen = serializer.validated_data.get("presupuesto_origen")
+        if presupuesto_origen:
+            if presupuesto_origen.empresa_id != empresa.id:
+                raise BusinessRuleError("El presupuesto origen no pertenece a la empresa activa.")
+            PresupuestoService.validar_presupuesto_disponible_para_documento(
+                presupuesto=presupuesto_origen,
+            )
         pedido = PedidoVentaService.crear_pedido(
             datos=serializer.validated_data,
             empresa=empresa,
@@ -192,7 +201,7 @@ class PedidoVentaItemViewSet(VentasAuditoriaMixin, TenantViewSetMixin, ModelView
     }
 
     def get_queryset(self):
-        qs = super().get_queryset().select_related("producto", "impuesto")
+        qs = super().get_queryset().select_related("producto", "impuesto", "presupuesto_item_origen")
         pedido_id = self.request.query_params.get("pedido_venta")
         if pedido_id:
             qs = qs.filter(pedido_venta_id=pedido_id)
@@ -213,13 +222,34 @@ class PedidoVentaItemViewSet(VentasAuditoriaMixin, TenantViewSetMixin, ModelView
     def perform_create(self, serializer):
         self._set_tenant_context()
         self._validar_pedido_editable()
+        pedido = serializer.validated_data.get("pedido_venta")
+        presupuesto_item_origen = serializer.validated_data.get("presupuesto_item_origen")
+        if presupuesto_item_origen:
+            PresupuestoService.validar_consumo_item_presupuesto(
+                presupuesto_item=presupuesto_item_origen,
+                cantidad_solicitada=serializer.validated_data.get("cantidad"),
+                empresa=self.get_empresa(),
+                presupuesto_origen=pedido.presupuesto_origen,
+            )
         item = serializer.save()
         PedidoVentaService.recalcular_totales(pedido=item.pedido_venta)
 
     def perform_update(self, serializer):
         self._set_tenant_context()
-        item = self.get_object()
-        PedidoVentaService.validar_editable(pedido=item.pedido_venta)
+        item_actual = self.get_object()
+        PedidoVentaService.validar_editable(pedido=item_actual.pedido_venta)
+        presupuesto_item_origen = serializer.validated_data.get(
+            "presupuesto_item_origen",
+            item_actual.presupuesto_item_origen,
+        )
+        if presupuesto_item_origen:
+            PresupuestoService.validar_consumo_item_presupuesto(
+                presupuesto_item=presupuesto_item_origen,
+                cantidad_solicitada=serializer.validated_data.get("cantidad", item_actual.cantidad),
+                empresa=self.get_empresa(),
+                presupuesto_origen=item_actual.pedido_venta.presupuesto_origen,
+                excluir={"pedido_item_id": item_actual.id},
+            )
         item = serializer.save()
         PedidoVentaService.recalcular_totales(pedido=item.pedido_venta)
 
@@ -402,13 +432,20 @@ class FacturaVentaViewSet(VentasAuditoriaMixin, TenantViewSetMixin, ModelViewSet
 
     def get_queryset(self):
         return super().get_queryset().select_related(
-            "cliente__contacto", "pedido_venta", "guia_despacho"
+            "cliente__contacto", "pedido_venta", "guia_despacho", "presupuesto_origen"
         )
 
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         self._set_tenant_context()
+        presupuesto_origen = serializer.validated_data.get("presupuesto_origen")
+        if presupuesto_origen:
+            if presupuesto_origen.empresa_id != self.get_empresa().id:
+                raise BusinessRuleError("El presupuesto origen no pertenece a la empresa activa.")
+            PresupuestoService.validar_presupuesto_disponible_para_documento(
+                presupuesto=presupuesto_origen,
+            )
         factura = FacturaVentaService.crear_factura(
             datos=serializer.validated_data,
             empresa=self.get_empresa(),
@@ -484,7 +521,7 @@ class FacturaVentaItemViewSet(VentasAuditoriaMixin, TenantViewSetMixin, ModelVie
     }
 
     def get_queryset(self):
-        qs = super().get_queryset().select_related("producto", "impuesto", "guia_item")
+        qs = super().get_queryset().select_related("producto", "impuesto", "guia_item", "presupuesto_item_origen")
         factura_id = self.request.query_params.get("factura_venta")
         if factura_id:
             qs = qs.filter(factura_venta_id=factura_id)
@@ -498,12 +535,33 @@ class FacturaVentaItemViewSet(VentasAuditoriaMixin, TenantViewSetMixin, ModelVie
         ).first()
         if factura:
             FacturaVentaService.validar_editable(factura=factura)
+        presupuesto_item_origen = serializer.validated_data.get("presupuesto_item_origen")
+        if presupuesto_item_origen and factura:
+            PresupuestoService.validar_consumo_item_presupuesto(
+                presupuesto_item=presupuesto_item_origen,
+                cantidad_solicitada=serializer.validated_data.get("cantidad"),
+                empresa=self.get_empresa(),
+                presupuesto_origen=factura.presupuesto_origen,
+            )
         item = serializer.save()
         FacturaVentaService.recalcular_totales(factura=item.factura_venta)
 
     def perform_update(self, serializer):
         self._set_tenant_context()
-        FacturaVentaService.validar_editable(factura=self.get_object().factura_venta)
+        item_actual = self.get_object()
+        FacturaVentaService.validar_editable(factura=item_actual.factura_venta)
+        presupuesto_item_origen = serializer.validated_data.get(
+            "presupuesto_item_origen",
+            item_actual.presupuesto_item_origen,
+        )
+        if presupuesto_item_origen:
+            PresupuestoService.validar_consumo_item_presupuesto(
+                presupuesto_item=presupuesto_item_origen,
+                cantidad_solicitada=serializer.validated_data.get("cantidad", item_actual.cantidad),
+                empresa=self.get_empresa(),
+                presupuesto_origen=item_actual.factura_venta.presupuesto_origen,
+                excluir={"factura_item_id": item_actual.id},
+            )
         item = serializer.save()
         FacturaVentaService.recalcular_totales(factura=item.factura_venta)
 
