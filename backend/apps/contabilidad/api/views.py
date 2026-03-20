@@ -4,8 +4,14 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet
 
-from apps.contabilidad.api.serializers import AsientoContableSerializer, MovimientoContableSerializer, PlanCuentaSerializer
-from apps.contabilidad.models import AsientoContable, MovimientoContable, PlanCuenta
+from apps.contabilidad.api.serializers import (
+    AsientoContableSerializer,
+    ConfiguracionCuentaContableSerializer,
+    MovimientoContableSerializer,
+    OutboxContableErrorSerializer,
+    PlanCuentaSerializer,
+)
+from apps.contabilidad.models import AsientoContable, ConfiguracionCuentaContable, MovimientoContable, PlanCuenta
 from apps.contabilidad.services import ContabilidadService
 from apps.core.exceptions import ResourceNotFoundError
 from apps.core.mixins import TenantViewSetMixin
@@ -38,6 +44,31 @@ class PlanCuentaViewSet(TenantViewSetMixin, ModelViewSet):
         return Response({"created": len(creadas)}, status=status.HTTP_200_OK)
 
 
+class ConfiguracionCuentaContableViewSet(TenantViewSetMixin, ModelViewSet):
+    model = ConfiguracionCuentaContable
+    serializer_class = ConfiguracionCuentaContableSerializer
+    permission_classes = [IsAuthenticated, TieneRelacionActiva, TienePermisoModuloAccion]
+    permission_modulo = Modulos.CONTABILIDAD
+    permission_action_map = {
+        "list": Acciones.VER,
+        "retrieve": Acciones.VER,
+        "create": Acciones.CONTABILIZAR,
+        "update": Acciones.CONTABILIZAR,
+        "partial_update": Acciones.CONTABILIZAR,
+        "destroy": Acciones.CONTABILIZAR,
+        "seed_base": Acciones.CONTABILIZAR,
+    }
+
+    @action(detail=False, methods=["post"])
+    def seed_base(self, request):
+        self._set_tenant_context()
+        creadas = ContabilidadService.seed_configuracion_base(
+            empresa=self.get_empresa(),
+            usuario=request.user,
+        )
+        return Response({"created": len(creadas)}, status=status.HTTP_200_OK)
+
+
 class AsientoContableViewSet(TenantViewSetMixin, ModelViewSet):
     model = AsientoContable
     serializer_class = AsientoContableSerializer
@@ -53,6 +84,11 @@ class AsientoContableViewSet(TenantViewSetMixin, ModelViewSet):
         "contabilizar": Acciones.CONTABILIZAR,
         "anular": Acciones.CONTABILIZAR,
         "procesar_solicitudes": Acciones.CONTABILIZAR,
+        "reprocesar_errores": Acciones.CONTABILIZAR,
+        "errores": Acciones.VER,
+        "libro_mayor": Acciones.VER,
+        "balance_comprobacion": Acciones.VER,
+        "estado_resultados": Acciones.VER,
     }
 
     def create(self, request, *args, **kwargs):
@@ -121,6 +157,63 @@ class AsientoContableViewSet(TenantViewSetMixin, ModelViewSet):
             usuario=request.user,
         )
         return Response({"processed": len(procesados)}, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=["post"])
+    def reprocesar_errores(self, request):
+        self._set_tenant_context()
+        procesados = ContabilidadService.reprocesar_solicitudes_fallidas(
+            empresa=self.get_empresa(),
+            usuario=request.user,
+        )
+        return Response({"processed": len(procesados)}, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=["get"])
+    def errores(self, request):
+        self._set_tenant_context()
+        eventos = ContabilidadService.listar_eventos_fallidos(empresa=self.get_empresa())
+        payload = [
+            {
+                "id": str(event.id),
+                "aggregate_type": event.payload.get("aggregate_type", ""),
+                "aggregate_id": str(event.payload.get("aggregate_id", "")),
+                "glosa": (event.payload.get("entry") or {}).get("glosa", ""),
+                "error": event.last_error,
+                "attempts": event.attempts,
+                "available_at": event.available_at,
+            }
+            for event in eventos
+        ]
+        return Response(OutboxContableErrorSerializer(payload, many=True).data, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=["get"])
+    def libro_mayor(self, request):
+        self._set_tenant_context()
+        data = ContabilidadService.reporte_libro_mayor(
+            empresa=self.get_empresa(),
+            fecha_desde=request.query_params.get("fecha_desde"),
+            fecha_hasta=request.query_params.get("fecha_hasta"),
+        )
+        return Response(data, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=["get"])
+    def balance_comprobacion(self, request):
+        self._set_tenant_context()
+        data = ContabilidadService.reporte_balance_comprobacion(
+            empresa=self.get_empresa(),
+            fecha_desde=request.query_params.get("fecha_desde"),
+            fecha_hasta=request.query_params.get("fecha_hasta"),
+        )
+        return Response(data, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=["get"])
+    def estado_resultados(self, request):
+        self._set_tenant_context()
+        data = ContabilidadService.reporte_estado_resultados(
+            empresa=self.get_empresa(),
+            fecha_desde=request.query_params.get("fecha_desde"),
+            fecha_hasta=request.query_params.get("fecha_hasta"),
+        )
+        return Response(data, status=status.HTTP_200_OK)
 
 
 class MovimientoContableViewSet(TenantViewSetMixin, ModelViewSet):

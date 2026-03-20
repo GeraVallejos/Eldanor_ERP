@@ -113,9 +113,9 @@ class FacturaVentaService:
                 "glosa": f"Factura de venta {factura.numero}",
                 "referencia_tipo": "FACTURA_VENTA",
                 "movimientos": [
-                    {"cuenta_codigo": "112100", "debe": str(factura.total), "haber": "0"},
-                    {"cuenta_codigo": "411100", "debe": "0", "haber": str(factura.subtotal)},
-                    {"cuenta_codigo": "213100", "debe": "0", "haber": str(factura.impuestos)},
+                    {"cuenta_clave": "CLIENTES", "debe": str(factura.total), "haber": "0"},
+                    {"cuenta_clave": "VENTAS", "debe": "0", "haber": str(factura.subtotal)},
+                    {"cuenta_clave": "IVA_DEBITO", "debe": "0", "haber": str(factura.impuestos)},
                 ],
             },
             usuario=usuario,

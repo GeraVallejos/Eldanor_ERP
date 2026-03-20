@@ -5,6 +5,8 @@ from django.utils import timezone
 
 from apps.contabilidad.models import (
     AsientoContable,
+    ClaveCuentaContable,
+    ConfiguracionCuentaContable,
     EstadoAsientoContable,
     MovimientoContable,
     OrigenAsientoContable,
@@ -79,6 +81,33 @@ class ContabilidadService:
             )
             if created:
                 creadas.append(cuenta)
+        ContabilidadService.seed_configuracion_base(empresa=empresa, usuario=usuario)
+        return creadas
+
+    @staticmethod
+    @transaction.atomic
+    def seed_configuracion_base(*, empresa, usuario=None):
+        """Sincroniza configuraciones funcionales de cuentas usando el plan base actual."""
+        creadas = []
+        for clave in ClaveCuentaContable.values:
+            codigo = ContabilidadService.CODIGOS_BASE.get(clave, ("", "", ""))[0]
+            if not codigo:
+                continue
+            cuenta = PlanCuenta.all_objects.filter(empresa=empresa, codigo=codigo, activa=True).first()
+            if not cuenta:
+                continue
+            config, created = ConfiguracionCuentaContable.all_objects.get_or_create(
+                empresa=empresa,
+                clave=clave,
+                defaults={
+                    "creado_por": usuario,
+                    "cuenta": cuenta,
+                    "descripcion": f"Configuracion base para {clave.lower()}",
+                    "activa": True,
+                },
+            )
+            if created:
+                creadas.append(config)
         return creadas
 
     @staticmethod
@@ -196,6 +225,48 @@ class ContabilidadService:
         return cuenta
 
     @staticmethod
+    def _buscar_cuenta_por_clave(*, empresa, clave):
+        """Resuelve la cuenta contable desde una clave funcional parametrizable."""
+        clave = str(clave or "").strip().upper()
+        config = ConfiguracionCuentaContable.all_objects.filter(
+            empresa=empresa,
+            clave=clave,
+            activa=True,
+            cuenta__activa=True,
+        ).select_related("cuenta").first()
+        if config:
+            return config.cuenta
+
+        codigo = ContabilidadService.CODIGOS_BASE.get(clave, ("", "", ""))[0]
+        if not codigo:
+            raise BusinessRuleError(
+                f"No existe configuracion contable para la clave {clave}.",
+                error_code="ACCOUNTING_CONFIG_KEY_MISSING",
+            )
+        return ContabilidadService._buscar_cuenta_por_codigo(empresa=empresa, codigo=codigo)
+
+    @staticmethod
+    def _resolver_cuenta_linea(*, empresa, linea):
+        """Resuelve la cuenta objetivo desde cuenta directa, codigo o clave funcional."""
+        cuenta = linea.get("cuenta")
+        if cuenta:
+            return cuenta
+        if linea.get("cuenta_codigo"):
+            return ContabilidadService._buscar_cuenta_por_codigo(
+                empresa=empresa,
+                codigo=linea.get("cuenta_codigo"),
+            )
+        if linea.get("cuenta_clave"):
+            return ContabilidadService._buscar_cuenta_por_clave(
+                empresa=empresa,
+                clave=linea.get("cuenta_clave"),
+            )
+        raise BusinessRuleError(
+            "La linea contable no informa cuenta, codigo ni clave funcional.",
+            error_code="ACCOUNTING_LINE_ACCOUNT_REQUIRED",
+        )
+
+    @staticmethod
     def _marcar_origen_contabilizado(*, aggregate_type, aggregate_id):
         """Actualiza el estado contable del documento origen cuando la centralizacion finaliza bien."""
         model_map = {
@@ -214,6 +285,200 @@ class ContabilidadService:
         model.all_objects.filter(id=aggregate_id).update(
             estado_contable=EstadoContable.CONTABILIZADO,
         )
+
+    @staticmethod
+    def _marcar_origen_error(*, aggregate_type, aggregate_id):
+        """Marca error contable sobre el documento origen cuando falla la centralizacion."""
+        model_map = {
+            "FacturaVenta": ("apps.ventas.models", "FacturaVenta"),
+            "NotaCreditoVenta": ("apps.ventas.models", "NotaCreditoVenta"),
+            "DocumentoCompraProveedor": ("apps.compras.models", "DocumentoCompraProveedor"),
+            "MovimientoBancario": ("apps.core.models", "MovimientoBancario"),
+        }
+        mapping = model_map.get(aggregate_type)
+        if not mapping:
+            return
+
+        module_name, model_name = mapping
+        module = __import__(module_name, fromlist=[model_name])
+        model = getattr(module, model_name)
+        model.all_objects.filter(id=aggregate_id).update(
+            estado_contable=EstadoContable.ERROR,
+        )
+
+    @staticmethod
+    @transaction.atomic
+    def generar_reversa_asiento(*, asiento_id, empresa, usuario=None, motivo=""):
+        """Genera un contra-asiento contabilizado a partir de un asiento contabilizado."""
+        asiento = (
+            AsientoContable.all_objects
+            .select_for_update()
+            .filter(id=asiento_id, empresa=empresa)
+            .first()
+        )
+        if not asiento:
+            raise ResourceNotFoundError("Asiento contable no encontrado.")
+        if asiento.estado != EstadoAsientoContable.CONTABILIZADO:
+            raise ConflictError("Solo se puede revertir un asiento ya contabilizado.")
+
+        ya_revertido = AsientoContable.all_objects.filter(
+            empresa=empresa,
+            referencia_tipo="REVERSA_ASIENTO",
+            referencia_id=asiento.id,
+        ).exists()
+        if ya_revertido:
+            raise ConflictError("El asiento ya tiene una reversa registrada.")
+
+        movimientos_data = []
+        for movimiento in asiento.movimientos.all():
+            movimientos_data.append(
+                {
+                    "cuenta": movimiento.cuenta,
+                    "glosa": movimiento.glosa or asiento.glosa,
+                    "debe": movimiento.haber,
+                    "haber": movimiento.debe,
+                }
+            )
+
+        reversa = ContabilidadService.crear_asiento(
+            empresa=empresa,
+            fecha=timezone.localdate(),
+            glosa=f"Reversa de {asiento.numero}: {motivo or asiento.glosa}",
+            movimientos_data=movimientos_data,
+            usuario=usuario,
+            referencia_tipo="REVERSA_ASIENTO",
+            referencia_id=asiento.id,
+            origen=OrigenAsientoContable.INTEGRACION,
+        )
+        return ContabilidadService.contabilizar_asiento(
+            asiento_id=reversa.id,
+            empresa=empresa,
+            usuario=usuario,
+        )
+
+    @staticmethod
+    def listar_eventos_fallidos(*, empresa):
+        """Obtiene eventos contables fallidos para analisis y reproceso."""
+        return list(
+            OutboxEvent.all_objects.filter(
+                empresa=empresa,
+                topic="contabilidad",
+                event_name="ASIENTO_SOLICITADO",
+                status=OutboxStatus.FAILED,
+            ).order_by("-actualizado_en", "-creado_en")
+        )
+
+    @staticmethod
+    @transaction.atomic
+    def reprocesar_solicitudes_fallidas(*, empresa, usuario=None, limit=50):
+        """Reencola solicitudes contables fallidas y las procesa nuevamente."""
+        eventos = list(
+            OutboxEvent.all_objects
+            .select_for_update(skip_locked=True)
+            .filter(
+                empresa=empresa,
+                topic="contabilidad",
+                event_name="ASIENTO_SOLICITADO",
+                status=OutboxStatus.FAILED,
+            )
+            .order_by("available_at", "creado_en")[:limit]
+        )
+        for event in eventos:
+            event.status = OutboxStatus.PENDING
+            event.last_error = ""
+            event.save(update_fields=["status", "last_error", "actualizado_en"])
+        return ContabilidadService.procesar_solicitudes_pendientes(
+            empresa=empresa,
+            usuario=usuario,
+            limit=limit,
+        )
+
+    @staticmethod
+    def reporte_libro_mayor(*, empresa, fecha_desde=None, fecha_hasta=None):
+        """Construye libro mayor resumido por cuenta dentro de un rango de fechas."""
+        movimientos = MovimientoContable.all_objects.select_related("asiento", "cuenta").filter(
+            empresa=empresa,
+            asiento__estado=EstadoAsientoContable.CONTABILIZADO,
+        )
+        if fecha_desde:
+            movimientos = movimientos.filter(asiento__fecha__gte=fecha_desde)
+        if fecha_hasta:
+            movimientos = movimientos.filter(asiento__fecha__lte=fecha_hasta)
+
+        mayor = {}
+        for movimiento in movimientos.order_by("cuenta__codigo", "asiento__fecha", "creado_en"):
+            clave = str(movimiento.cuenta_id)
+            bucket = mayor.setdefault(
+                clave,
+                {
+                    "cuenta_id": str(movimiento.cuenta_id),
+                    "codigo": movimiento.cuenta.codigo,
+                    "nombre": movimiento.cuenta.nombre,
+                    "debe": Decimal("0.00"),
+                    "haber": Decimal("0.00"),
+                    "saldo": Decimal("0.00"),
+                },
+            )
+            bucket["debe"] += ContabilidadService._decimal(movimiento.debe)
+            bucket["haber"] += ContabilidadService._decimal(movimiento.haber)
+            bucket["saldo"] = bucket["debe"] - bucket["haber"]
+        return list(mayor.values())
+
+    @staticmethod
+    def reporte_balance_comprobacion(*, empresa, fecha_desde=None, fecha_hasta=None):
+        """Entrega balance de comprobacion resumido por cuenta."""
+        return ContabilidadService.reporte_libro_mayor(
+            empresa=empresa,
+            fecha_desde=fecha_desde,
+            fecha_hasta=fecha_hasta,
+        )
+
+    @staticmethod
+    def reporte_estado_resultados(*, empresa, fecha_desde=None, fecha_hasta=None):
+        """Construye estado de resultados usando cuentas de ingreso y gasto."""
+        balance = ContabilidadService.reporte_balance_comprobacion(
+            empresa=empresa,
+            fecha_desde=fecha_desde,
+            fecha_hasta=fecha_hasta,
+        )
+
+        ingresos = []
+        gastos = []
+        total_ingresos = Decimal("0.00")
+        total_gastos = Decimal("0.00")
+
+        cuentas = {
+            cuenta.codigo: cuenta
+            for cuenta in PlanCuenta.all_objects.filter(
+                empresa=empresa,
+                codigo__in=[fila["codigo"] for fila in balance],
+            )
+        }
+        for fila in balance:
+            cuenta = cuentas.get(fila["codigo"])
+            if not cuenta:
+                continue
+            saldo = Decimal(fila["saldo"])
+            item = {
+                "codigo": fila["codigo"],
+                "nombre": fila["nombre"],
+                "saldo": saldo,
+            }
+            if cuenta.tipo == TipoCuentaContable.INGRESO:
+                item["saldo"] = saldo * Decimal("-1")
+                total_ingresos += item["saldo"]
+                ingresos.append(item)
+            elif cuenta.tipo == TipoCuentaContable.GASTO:
+                total_gastos += saldo
+                gastos.append(item)
+
+        return {
+            "ingresos": ingresos,
+            "gastos": gastos,
+            "total_ingresos": total_ingresos,
+            "total_gastos": total_gastos,
+            "utilidad": total_ingresos - total_gastos,
+        }
 
     @staticmethod
     @transaction.atomic
@@ -249,9 +514,9 @@ class ContabilidadService:
                 for linea in movimientos:
                     movimientos_data.append(
                         {
-                            "cuenta": ContabilidadService._buscar_cuenta_por_codigo(
+                            "cuenta": ContabilidadService._resolver_cuenta_linea(
                                 empresa=empresa,
-                                codigo=linea.get("cuenta_codigo"),
+                                linea=linea,
                             ),
                             "glosa": linea.get("glosa") or entry.get("glosa") or "",
                             "debe": linea.get("debe", 0),
@@ -278,10 +543,31 @@ class ContabilidadService:
                     aggregate_type=event.payload.get("aggregate_type"),
                     aggregate_id=event.payload.get("aggregate_id"),
                 )
+                estado_objetivo = entry.get("estado_contable_objetivo")
+                if estado_objetivo:
+                    module_name = event.payload.get("aggregate_type")
+                    if module_name:
+                        model_map = {
+                            "FacturaVenta": ("apps.ventas.models", "FacturaVenta"),
+                            "NotaCreditoVenta": ("apps.ventas.models", "NotaCreditoVenta"),
+                            "DocumentoCompraProveedor": ("apps.compras.models", "DocumentoCompraProveedor"),
+                            "MovimientoBancario": ("apps.core.models", "MovimientoBancario"),
+                        }
+                        mapping = model_map.get(module_name)
+                        if mapping:
+                            module = __import__(mapping[0], fromlist=[mapping[1]])
+                            model = getattr(module, mapping[1])
+                            model.all_objects.filter(id=event.payload.get("aggregate_id")).update(
+                                estado_contable=estado_objetivo,
+                            )
                 asiento.refresh_from_db()
                 OutboxService.mark_sent(event=event)
                 procesados.append(asiento)
             except Exception as exc:  # pragma: no cover
+                ContabilidadService._marcar_origen_error(
+                    aggregate_type=event.payload.get("aggregate_type"),
+                    aggregate_id=event.payload.get("aggregate_id"),
+                )
                 OutboxService.mark_failed(event=event, error_message=str(exc))
 
         return procesados

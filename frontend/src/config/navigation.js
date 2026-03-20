@@ -160,6 +160,13 @@ const NAV_MODULES = [
         requiredPermissions: ['CONTABILIDAD.VER'],
       },
       {
+        id: 'contabilidad-reportes',
+        label: 'Reportes',
+        to: '/contabilidad/reportes',
+        enabled: true,
+        requiredPermissions: ['CONTABILIDAD.VER'],
+      },
+      {
         id: 'contabilidad-sii',
         label: 'SII y DTE',
         to: '/contabilidad/sii',

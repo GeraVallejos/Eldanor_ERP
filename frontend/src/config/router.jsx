@@ -22,6 +22,7 @@ const ComprasRecepcionesListPage = lazy(() => import('@/modules/compras/pages/Co
 const ComprasRecepcionesCreatePage = lazy(() => import('@/modules/compras/pages/ComprasRecepcionesCreatePage'))
 const ContabilidadAsientosPage = lazy(() => import('@/modules/contabilidad/pages/ContabilidadAsientosPage'))
 const ContabilidadPlanPage = lazy(() => import('@/modules/contabilidad/pages/ContabilidadPlanPage'))
+const ContabilidadReportesPage = lazy(() => import('@/modules/contabilidad/pages/ContabilidadReportesPage'))
 const AuditoriaEventosPage = lazy(() => import('@/modules/auditoria/pages/AuditoriaEventosPage'))
 const AuditoriaEventoDetailPage = lazy(() => import('@/modules/auditoria/pages/AuditoriaEventoDetailPage'))
 const AdministracionPermisosPage = lazy(() => import('@/modules/administracion/pages/AdministracionPermisosPage'))
@@ -93,6 +94,7 @@ const router = createBrowserRouter([
           { path: 'compras/recepciones/:id/editar', element: page(ComprasRecepcionesCreatePage) },
           { path: 'contabilidad/plan-cuentas', element: page(ContabilidadPlanPage) },
           { path: 'contabilidad/asientos', element: page(ContabilidadAsientosPage) },
+          { path: 'contabilidad/reportes', element: page(ContabilidadReportesPage) },
           { path: 'auditoria/eventos', element: page(AuditoriaEventosPage) },
           { path: 'auditoria/eventos/:id', element: page(AuditoriaEventoDetailPage) },
           { path: 'administracion/permisos', element: page(AdministracionPermisosPage) },

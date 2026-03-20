@@ -4,10 +4,10 @@ from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 from apps.core.exceptions import BusinessRuleError, ConflictError, ResourceNotFoundError
-from apps.core.services import CarteraService, DomainEventService, OutboxService, SecuenciaService
-from apps.core.services.accounting_bridge import AccountingBridge
 from apps.core.models import TipoDocumento
 from apps.core.models.cartera import CuentaPorCobrar
+from apps.core.services import CarteraService, DomainEventService, OutboxService, SecuenciaService
+from apps.core.services.accounting_bridge import AccountingBridge
 from apps.documentos.models import EstadoContable
 from apps.documentos.services.integracion_tributaria_service import IntegracionTributariaService
 from apps.ventas.models import (
@@ -24,39 +24,40 @@ from apps.ventas.services.calculo_ventas_service import CalculoVentasService
 
 
 class NotaCreditoVentaService:
-    """Servicio para la gestión de notas de crédito de venta y su impacto en cartera."""
+    """Servicio para la gestion de notas de credito de venta y su impacto en cartera."""
 
     @classmethod
     def recalcular_totales(cls, *, nota):
-        """Recalcula subtotal, impuestos y total sumando items de la nota de crédito."""
+        """Recalcula subtotal, impuestos y total sumando items de la nota de credito."""
         items_qs = NotaCreditoVentaItem.all_objects.filter(nota_credito=nota)
         CalculoVentasService.recalcular_documento(documento=nota, items_qs=items_qs)
 
     @classmethod
     def validar_editable(cls, *, nota):
-        """Lanza ConflictError si la nota de crédito no está en estado BORRADOR."""
+        """Lanza ConflictError si la nota de credito no esta en estado BORRADOR."""
         if nota.estado != EstadoNotaCreditoVenta.BORRADOR:
-            raise ConflictError("Solo se puede modificar una nota de crédito en estado BORRADOR.")
+            raise ConflictError("Solo se puede modificar una nota de credito en estado BORRADOR.")
 
     @classmethod
     @transaction.atomic
     def crear_nota_credito(cls, *, datos, empresa, usuario):
-        """Crea nota de crédito de venta con folio secuencial. Requiere factura origen EMITIDA."""
+        """Crea nota de credito de venta con folio secuencial. Requiere factura origen EMITIDA."""
         factura_origen_id = datos.get("factura_origen_id") or (
             datos.get("factura_origen") and datos["factura_origen"].id
         )
         if not factura_origen_id:
-            raise BusinessRuleError("Se requiere una factura de origen para crear una nota de crédito.")
+            raise BusinessRuleError("Se requiere una factura de origen para crear una nota de credito.")
 
         from apps.ventas.models import FacturaVenta
+
         factura = FacturaVenta.objects.filter(pk=factura_origen_id, empresa=empresa).first()
         if not factura:
             raise ResourceNotFoundError("Factura de venta de origen no encontrada.")
         if factura.estado != EstadoFacturaVenta.EMITIDA:
-            raise ConflictError("Solo se puede crear nota de crédito sobre facturas EMITIDAS.")
+            raise ConflictError("Solo se puede crear nota de credito sobre facturas EMITIDAS.")
 
-        MAX_REINTENTOS = 5
-        for intento in range(MAX_REINTENTOS):
+        max_reintentos = 5
+        for intento in range(max_reintentos):
             try:
                 numero = SecuenciaService.obtener_siguiente_numero(
                     empresa, TipoDocumento.NOTA_CREDITO_VENTA
@@ -69,19 +70,19 @@ class NotaCreditoVentaService:
                 )
                 return nota
             except IntegrityError:
-                if intento == MAX_REINTENTOS - 1:
+                if intento == max_reintentos - 1:
                     raise
-        raise BusinessRuleError("No se pudo asignar folio a la nota de crédito.")
+        raise BusinessRuleError("No se pudo asignar folio a la nota de credito.")
 
     @classmethod
     @transaction.atomic
     def crear_nota_credito_anulacion(cls, *, factura, empresa, usuario, motivo=""):
         """
-        Genera NC de anulación automática al anular una factura.
+        Genera NC de anulacion automatica al anular una factura.
         Copia todos los items de la factura y emite la NC inmediatamente.
         """
-        MAX_REINTENTOS = 5
-        for intento in range(MAX_REINTENTOS):
+        max_reintentos = 5
+        for intento in range(max_reintentos):
             try:
                 numero = SecuenciaService.obtener_siguiente_numero(
                     empresa, TipoDocumento.NOTA_CREDITO_VENTA
@@ -95,14 +96,13 @@ class NotaCreditoVentaService:
                     tipo=TipoNotaCreditoVenta.ANULACION,
                     estado=EstadoNotaCreditoVenta.BORRADOR,
                     fecha_emision=factura.fecha_emision,
-                    motivo=motivo or f"Anulación de factura {factura.numero}",
+                    motivo=motivo or f"Anulacion de factura {factura.numero}",
                 )
                 break
             except IntegrityError:
-                if intento == MAX_REINTENTOS - 1:
+                if intento == max_reintentos - 1:
                     raise
 
-        # Copiar items de la factura hacia la NC.
         for item in FacturaVentaItem.all_objects.filter(factura_venta=factura):
             NotaCreditoVentaItem.all_objects.create(
                 empresa=empresa,
@@ -125,27 +125,25 @@ class NotaCreditoVentaService:
     @transaction.atomic
     def emitir_nota_credito(cls, *, nota_id, empresa, usuario):
         """
-        Emite nota de crédito BORRADOR→EMITIDA.
+        Emite nota de credito BORRADOR->EMITIDA.
         Aplica el monto como pago contra la CxC asociada a la factura origen.
-        No puede exceder el saldo pendiente de la CxC.
         """
         nota = (
             NotaCreditoVenta.objects.select_for_update().filter(pk=nota_id, empresa=empresa).first()
         )
         if not nota:
-            raise ResourceNotFoundError("Nota de crédito de venta no encontrada.")
+            raise ResourceNotFoundError("Nota de credito de venta no encontrada.")
         if nota.estado != EstadoNotaCreditoVenta.BORRADOR:
             raise ConflictError(
-                f"Solo se puede emitir una nota de crédito en BORRADOR (estado: {nota.get_estado_display()})."
+                f"Solo se puede emitir una nota de credito en BORRADOR (estado: {nota.get_estado_display()})."
             )
         if Decimal(nota.total or 0) <= 0:
-            raise BusinessRuleError("No se puede emitir una nota de crédito con total cero.")
+            raise BusinessRuleError("No se puede emitir una nota de credito con total cero.")
 
         items = NotaCreditoVentaItem.all_objects.filter(nota_credito=nota)
         if not items.exists():
-            raise BusinessRuleError("No se puede emitir una nota de crédito sin líneas.")
+            raise BusinessRuleError("No se puede emitir una nota de credito sin lineas.")
 
-        # Buscar la CxC correspondiente a la factura origen para aplicar el crédito.
         referencia_cxc = f"FV-{nota.factura_origen.numero}-{str(nota.factura_origen_id)[:8]}"
         cxc = CuentaPorCobrar.all_objects.filter(
             empresa=empresa,
@@ -174,9 +172,9 @@ class NotaCreditoVentaService:
                 "glosa": f"Nota de credito {nota.numero}",
                 "referencia_tipo": "NOTA_CREDITO_VENTA",
                 "movimientos": [
-                    {"cuenta_codigo": "411100", "debe": str(nota.subtotal), "haber": "0"},
-                    {"cuenta_codigo": "213100", "debe": str(nota.impuestos), "haber": "0"},
-                    {"cuenta_codigo": "112100", "debe": "0", "haber": str(nota.total)},
+                    {"cuenta_clave": "VENTAS", "debe": str(nota.subtotal), "haber": "0"},
+                    {"cuenta_clave": "IVA_DEBITO", "debe": str(nota.impuestos), "haber": "0"},
+                    {"cuenta_clave": "CLIENTES", "debe": "0", "haber": str(nota.total)},
                 ],
             },
             usuario=usuario,
@@ -202,22 +200,57 @@ class NotaCreditoVentaService:
     @classmethod
     @transaction.atomic
     def anular_nota_credito(cls, *, nota_id, empresa, usuario, motivo=""):
-        """Anula nota de crédito EMITIDA→ANULADA. No revierte el crédito aplicado en cartera."""
+        """Anula nota de credito EMITIDA->ANULADA y revierte su impacto financiero."""
         nota = (
             NotaCreditoVenta.objects.select_for_update().filter(pk=nota_id, empresa=empresa).first()
         )
         if not nota:
-            raise ResourceNotFoundError("Nota de crédito de venta no encontrada.")
+            raise ResourceNotFoundError("Nota de credito de venta no encontrada.")
         if nota.estado != EstadoNotaCreditoVenta.EMITIDA:
             raise ConflictError(
-                f"Solo se puede anular una nota de crédito EMITIDA (estado: {nota.get_estado_display()})."
+                f"Solo se puede anular una nota de credito EMITIDA (estado: {nota.get_estado_display()})."
             )
+
+        referencia_cxc = f"FV-{nota.factura_origen.numero}-{str(nota.factura_origen_id)[:8]}"
+        cxc = CuentaPorCobrar.all_objects.filter(
+            empresa=empresa,
+            referencia=referencia_cxc,
+        ).first()
+        if cxc:
+            monto_aplicado = Decimal(cxc.monto_total or 0) - Decimal(cxc.saldo or 0)
+            monto_revertir = min(Decimal(nota.total or 0), monto_aplicado)
+            if monto_revertir > 0:
+                CarteraService.revertir_pago_cuenta(
+                    cuenta=cxc,
+                    monto=monto_revertir,
+                    fecha_referencia=nota.fecha_emision,
+                )
 
         estado_anterior = nota.estado
         nota.estado = EstadoNotaCreditoVenta.ANULADA
         nota.anulado_por = usuario
         nota.anulado_en = timezone.now()
         nota.save(update_fields=["estado", "anulado_por", "anulado_en"])
+        AccountingBridge.request_entry(
+            empresa=empresa,
+            aggregate_type="NotaCreditoVenta",
+            aggregate_id=nota.id,
+            entry_payload={
+                "fecha": str(timezone.localdate()),
+                "glosa": f"Reversa nota de credito {nota.numero}",
+                "referencia_tipo": "NOTA_CREDITO_VENTA_REVERSA",
+                "estado_contable_objetivo": EstadoContable.REVERSADO,
+                "movimientos": [
+                    {"cuenta_clave": "CLIENTES", "debe": str(nota.total), "haber": "0"},
+                    {"cuenta_clave": "VENTAS", "debe": "0", "haber": str(nota.subtotal)},
+                    {"cuenta_clave": "IVA_DEBITO", "debe": "0", "haber": str(nota.impuestos)},
+                ],
+            },
+            usuario=usuario,
+            dedup_key=f"ncv-accounting:{nota.id}:anulada",
+        )
+        nota.estado_contable = EstadoContable.PENDIENTE
+        nota.save(update_fields=["estado_contable", "actualizado_en"])
 
         cls.registrar_historial(
             nota=nota,
@@ -287,6 +320,6 @@ class NotaCreditoVentaService:
             event_type="nota_credito_venta.cambio_estado",
             entity_type="NotaCreditoVenta",
             entity_id=str(nota.id),
-            summary=f"NC {nota.numero}: {estado_anterior} → {estado_nuevo}",
+            summary=f"NC {nota.numero}: {estado_anterior} -> {estado_nuevo}",
             changes=cambios,
         )

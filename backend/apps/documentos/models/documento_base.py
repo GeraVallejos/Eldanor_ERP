@@ -25,6 +25,7 @@ class EstadoContable(models.TextChoices):
     NO_APLICA = "NO_APLICA", "No aplica"
     PENDIENTE = "PENDIENTE", "Pendiente"
     CONTABILIZADO = "CONTABILIZADO", "Contabilizado"
+    REVERSADO = "REVERSADO", "Reversado"
     ERROR = "ERROR", "Error"
 
 
