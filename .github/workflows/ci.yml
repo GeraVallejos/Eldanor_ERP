@@ -40,6 +40,9 @@ jobs:
       - name: Django system check
         run: python manage.py check
 
+      - name: Django production-like settings smoke check
+        run: python manage.py check --settings=Eldanor_ERP.settings_smoke
+
       - name: Check missing migrations
         run: python manage.py makemigrations --check --dry-run
 
@@ -47,7 +50,7 @@ jobs:
         run: python scripts/check_permission_action_map.py
 
       - name: Run backend tests with coverage
-        run: pytest --cov=apps --cov-report=term
+        run: pytest --cov=apps --cov-report=term --cov-fail-under=85
 
   frontend-tests:
     name: Frontend Lint and Tests

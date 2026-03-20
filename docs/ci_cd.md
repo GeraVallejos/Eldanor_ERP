@@ -5,7 +5,7 @@ Esta guia describe la automatizacion configurada para este ERP y como usarla.
 ## Que se implemento
 
 - CI: [ci.yml](../.github/workflows/ci.yml)
-  - Backend: instala dependencias de CI, valida `permission_action_map` y ejecuta `pytest`.
+  - Backend: instala dependencias de CI, ejecuta `check` normal, smoke check de settings productivos, valida `permission_action_map` y ejecuta `pytest` con umbral de cobertura.
   - Frontend: ejecuta `npm ci`, `npm run lint`, `npm run test:run` y `npm run build`.
 - CD: [cd.yml](../.github/workflows/cd.yml)
   - Build en `main` (o manual) y publicacion de artifacts (`frontend-dist`, `backend-source`).
@@ -68,13 +68,20 @@ El backend usa [backend/Eldanor_ERP/settings_ci.py](../backend/Eldanor_ERP/setti
 - Desactiva hardening no necesario en pruebas (cookies secure/HSTS).
 - Evita dependencias de storage cloud en tests.
 
+Ademas, el smoke check usa [backend/Eldanor_ERP/settings_smoke.py](../backend/Eldanor_ERP/settings_smoke.py), que:
+
+- Carga la base de [backend/Eldanor_ERP/settings.py](../backend/Eldanor_ERP/settings.py) con defaults seguros via `setdefault`.
+- Mantiene una validacion mas cercana a produccion para imports y configuracion.
+- Reemplaza DB y storage por SQLite/FileSystem para no depender de MySQL ni cloud storage.
+
 ## Comandos utiles locales
 
 Desde [backend](../backend):
 
 ```bash
 python scripts/check_permission_action_map.py
-pytest -q
+python manage.py check --settings=Eldanor_ERP.settings_smoke
+pytest --cov=apps --cov-report=term --cov-fail-under=85
 ```
 
 Desde [frontend](../frontend):

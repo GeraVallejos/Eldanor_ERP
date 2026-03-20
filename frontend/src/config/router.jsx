@@ -1,51 +1,62 @@
+import { Suspense, lazy } from 'react'
 import { createBrowserRouter } from 'react-router-dom'
 import ERPLayout from '@/layouts/ERPLayout'
 import PrivateRoute from '@/modules/auth/components/PrivateRoute'
 import PublicOnlyRoute from '@/modules/auth/components/PublicOnlyRoute'
-import LoginPage from '@/modules/auth/pages/LoginPage'
-import ClientesCreatePage from '@/modules/contactos/pages/ClientesCreatePage'
-import ClientesListPage from '@/modules/contactos/pages/ClientesListPage'
-import ProveedoresCreatePage from '@/modules/contactos/pages/ProveedoresCreatePage'
-import ProveedoresListPage from '@/modules/contactos/pages/ProveedoresListPage'
-import PresupuestosCreatePage from '@/modules/presupuestos/pages/PresupuestosCreatePage'
-import PresupuestosEditPage from '@/modules/presupuestos/pages/PresupuestosEditPage'
-import PresupuestosListPage from '@/modules/presupuestos/pages/PresupuestosListPage'
-import ComprasOrdenesListPage from '@/modules/compras/pages/ComprasOrdenesListPage'
-import ComprasOrdenesCreatePage from '@/modules/compras/pages/ComprasOrdenesCreatePage'
-import ComprasOrdenesDetailPage from '@/modules/compras/pages/ComprasOrdenesDetailPage'
-import ComprasDocumentosListPage from '@/modules/compras/pages/ComprasDocumentosListPage'
-import ComprasDocumentosCreatePage from '@/modules/compras/pages/ComprasDocumentosCreatePage'
-import ComprasDocumentosDetailPage from '@/modules/compras/pages/ComprasDocumentosDetailPage'
-import ComprasRecepcionesListPage from '@/modules/compras/pages/ComprasRecepcionesListPage'
-import ComprasRecepcionesCreatePage from '@/modules/compras/pages/ComprasRecepcionesCreatePage'
-import ContabilidadAsientosPage from '@/modules/contabilidad/pages/ContabilidadAsientosPage'
-import ContabilidadPlanPage from '@/modules/contabilidad/pages/ContabilidadPlanPage'
-import AuditoriaEventosPage from '@/modules/auditoria/pages/AuditoriaEventosPage'
-import AuditoriaEventoDetailPage from '@/modules/auditoria/pages/AuditoriaEventoDetailPage'
-import AdministracionPermisosPage from '@/modules/administracion/pages/AdministracionPermisosPage'
-import AdministracionSiiPage from '@/modules/administracion/pages/AdministracionSiiPage'
-import InventarioBodegasPage from '@/modules/inventario/pages/InventarioBodegasPage'
-import InventarioKardexPage from '@/modules/inventario/pages/InventarioKardexPage'
-import InventarioResumenPage from '@/modules/inventario/pages/InventarioResumenPage'
-import TesoreriaBancosPage from '@/modules/tesoreria/pages/TesoreriaBancosPage'
-import TesoreriaCuentasPage from '@/modules/tesoreria/pages/TesoreriaCuentasPage'
-import TesoreriaMonedasPage from '@/modules/tesoreria/pages/TesoreriaMonedasPage'
-import TesoreriaTipoCambioPage from '@/modules/tesoreria/pages/TesoreriaTipoCambioPage'
-import VentasPedidosListPage from '@/modules/ventas/pages/VentasPedidosListPage'
-import VentasPedidosFormPage from '@/modules/ventas/pages/VentasPedidosFormPage'
-import VentasPedidosDetailPage from '@/modules/ventas/pages/VentasPedidosDetailPage'
-import VentasGuiasListPage from '@/modules/ventas/pages/VentasGuiasListPage'
-import VentasGuiasFormPage from '@/modules/ventas/pages/VentasGuiasFormPage'
-import VentasFacturasListPage from '@/modules/ventas/pages/VentasFacturasListPage'
-import VentasFacturasFormPage from '@/modules/ventas/pages/VentasFacturasFormPage'
-import VentasNotasListPage from '@/modules/ventas/pages/VentasNotasListPage'
-import VentasNotasFormPage from '@/modules/ventas/pages/VentasNotasFormPage'
-import ProductosCreatePage from '@/modules/productos/pages/ProductosCreatePage'
-import ProductosCategoriasPage from '@/modules/productos/pages/ProductosCategoriasPage'
-import ProductosImpuestosPage from '@/modules/productos/pages/ProductosImpuestosPage'
-import ProductosListasPrecioPage from '@/modules/productos/pages/ProductosListasPrecioPage'
-import ProductosListPage from '@/modules/productos/pages/ProductosListPage'
-import NotFoundPage from '@/modules/shared/pages/NotFoundPage'
+
+const LoginPage = lazy(() => import('@/modules/auth/pages/LoginPage'))
+const ClientesCreatePage = lazy(() => import('@/modules/contactos/pages/ClientesCreatePage'))
+const ClientesListPage = lazy(() => import('@/modules/contactos/pages/ClientesListPage'))
+const ProveedoresCreatePage = lazy(() => import('@/modules/contactos/pages/ProveedoresCreatePage'))
+const ProveedoresListPage = lazy(() => import('@/modules/contactos/pages/ProveedoresListPage'))
+const PresupuestosCreatePage = lazy(() => import('@/modules/presupuestos/pages/PresupuestosCreatePage'))
+const PresupuestosEditPage = lazy(() => import('@/modules/presupuestos/pages/PresupuestosEditPage'))
+const PresupuestosListPage = lazy(() => import('@/modules/presupuestos/pages/PresupuestosListPage'))
+const ComprasOrdenesListPage = lazy(() => import('@/modules/compras/pages/ComprasOrdenesListPage'))
+const ComprasOrdenesCreatePage = lazy(() => import('@/modules/compras/pages/ComprasOrdenesCreatePage'))
+const ComprasOrdenesDetailPage = lazy(() => import('@/modules/compras/pages/ComprasOrdenesDetailPage'))
+const ComprasDocumentosListPage = lazy(() => import('@/modules/compras/pages/ComprasDocumentosListPage'))
+const ComprasDocumentosCreatePage = lazy(() => import('@/modules/compras/pages/ComprasDocumentosCreatePage'))
+const ComprasDocumentosDetailPage = lazy(() => import('@/modules/compras/pages/ComprasDocumentosDetailPage'))
+const ComprasRecepcionesListPage = lazy(() => import('@/modules/compras/pages/ComprasRecepcionesListPage'))
+const ComprasRecepcionesCreatePage = lazy(() => import('@/modules/compras/pages/ComprasRecepcionesCreatePage'))
+const ContabilidadAsientosPage = lazy(() => import('@/modules/contabilidad/pages/ContabilidadAsientosPage'))
+const ContabilidadPlanPage = lazy(() => import('@/modules/contabilidad/pages/ContabilidadPlanPage'))
+const AuditoriaEventosPage = lazy(() => import('@/modules/auditoria/pages/AuditoriaEventosPage'))
+const AuditoriaEventoDetailPage = lazy(() => import('@/modules/auditoria/pages/AuditoriaEventoDetailPage'))
+const AdministracionPermisosPage = lazy(() => import('@/modules/administracion/pages/AdministracionPermisosPage'))
+const AdministracionSiiPage = lazy(() => import('@/modules/administracion/pages/AdministracionSiiPage'))
+const InventarioBodegasPage = lazy(() => import('@/modules/inventario/pages/InventarioBodegasPage'))
+const InventarioKardexPage = lazy(() => import('@/modules/inventario/pages/InventarioKardexPage'))
+const InventarioResumenPage = lazy(() => import('@/modules/inventario/pages/InventarioResumenPage'))
+const TesoreriaBancosPage = lazy(() => import('@/modules/tesoreria/pages/TesoreriaBancosPage'))
+const TesoreriaCuentasPage = lazy(() => import('@/modules/tesoreria/pages/TesoreriaCuentasPage'))
+const TesoreriaMonedasPage = lazy(() => import('@/modules/tesoreria/pages/TesoreriaMonedasPage'))
+const TesoreriaTipoCambioPage = lazy(() => import('@/modules/tesoreria/pages/TesoreriaTipoCambioPage'))
+const VentasPedidosListPage = lazy(() => import('@/modules/ventas/pages/VentasPedidosListPage'))
+const VentasPedidosFormPage = lazy(() => import('@/modules/ventas/pages/VentasPedidosFormPage'))
+const VentasPedidosDetailPage = lazy(() => import('@/modules/ventas/pages/VentasPedidosDetailPage'))
+const VentasGuiasListPage = lazy(() => import('@/modules/ventas/pages/VentasGuiasListPage'))
+const VentasGuiasFormPage = lazy(() => import('@/modules/ventas/pages/VentasGuiasFormPage'))
+const VentasFacturasListPage = lazy(() => import('@/modules/ventas/pages/VentasFacturasListPage'))
+const VentasFacturasFormPage = lazy(() => import('@/modules/ventas/pages/VentasFacturasFormPage'))
+const VentasNotasListPage = lazy(() => import('@/modules/ventas/pages/VentasNotasListPage'))
+const VentasNotasFormPage = lazy(() => import('@/modules/ventas/pages/VentasNotasFormPage'))
+const ProductosCreatePage = lazy(() => import('@/modules/productos/pages/ProductosCreatePage'))
+const ProductosCategoriasPage = lazy(() => import('@/modules/productos/pages/ProductosCategoriasPage'))
+const ProductosImpuestosPage = lazy(() => import('@/modules/productos/pages/ProductosImpuestosPage'))
+const ProductosListasPrecioPage = lazy(() => import('@/modules/productos/pages/ProductosListasPrecioPage'))
+const ProductosListPage = lazy(() => import('@/modules/productos/pages/ProductosListPage'))
+const NotFoundPage = lazy(() => import('@/modules/shared/pages/NotFoundPage'))
+
+function page(LazyPage) {
+  const RoutePage = LazyPage
+  return (
+    <Suspense fallback={<p className="p-4 text-sm text-muted-foreground">Cargando...</p>}>
+      <RoutePage />
+    </Suspense>
+  )
+}
 
 const router = createBrowserRouter([
   {
@@ -55,58 +66,58 @@ const router = createBrowserRouter([
         path: '/',
         element: <ERPLayout />,
         children: [
-          { index: true, element: <ProductosListPage /> },
-          { path: 'contactos', element: <ClientesListPage /> },
-          { path: 'contactos/clientes', element: <ClientesListPage /> },
-          { path: 'contactos/clientes/nuevo', element: <ClientesCreatePage /> },
-          { path: 'contactos/proveedores', element: <ProveedoresListPage /> },
-          { path: 'contactos/proveedores/nuevo', element: <ProveedoresCreatePage /> },
-          { path: 'presupuestos', element: <PresupuestosListPage /> },
-          { path: 'presupuestos/nuevo', element: <PresupuestosCreatePage /> },
-          { path: 'presupuestos/:id/editar', element: <PresupuestosEditPage /> },
-          { path: 'productos', element: <ProductosListPage /> },
-          { path: 'productos/nuevo', element: <ProductosCreatePage /> },
-          { path: 'productos/categorias', element: <ProductosCategoriasPage /> },
-          { path: 'productos/impuestos', element: <ProductosImpuestosPage /> },
-          { path: 'productos/listas-precio', element: <ProductosListasPrecioPage /> },
-          { path: 'compras/ordenes', element: <ComprasOrdenesListPage /> },
-          { path: 'compras/ordenes/nuevo', element: <ComprasOrdenesCreatePage /> },
-          { path: 'compras/ordenes/:id', element: <ComprasOrdenesDetailPage /> },
-          { path: 'compras/ordenes/:id/editar', element: <ComprasOrdenesCreatePage /> },
-          { path: 'compras/documentos', element: <ComprasDocumentosListPage /> },
-          { path: 'compras/documentos/nuevo', element: <ComprasDocumentosCreatePage /> },
-          { path: 'compras/documentos/:id', element: <ComprasDocumentosDetailPage /> },
-          { path: 'compras/documentos/:id/editar', element: <ComprasDocumentosCreatePage /> },
-          { path: 'compras/recepciones', element: <ComprasRecepcionesListPage /> },
-          { path: 'compras/recepciones/nuevo', element: <ComprasRecepcionesCreatePage /> },
-          { path: 'compras/recepciones/:id/editar', element: <ComprasRecepcionesCreatePage /> },
-          { path: 'contabilidad/plan-cuentas', element: <ContabilidadPlanPage /> },
-          { path: 'contabilidad/asientos', element: <ContabilidadAsientosPage /> },
-          { path: 'auditoria/eventos', element: <AuditoriaEventosPage /> },
-          { path: 'auditoria/eventos/:id', element: <AuditoriaEventoDetailPage /> },
-          { path: 'administracion/permisos', element: <AdministracionPermisosPage /> },
-          { path: 'administracion/sii', element: <AdministracionSiiPage /> },
-          { path: 'contabilidad/sii', element: <AdministracionSiiPage /> },
-          { path: 'inventario/bodegas', element: <InventarioBodegasPage /> },
-          { path: 'inventario/kardex', element: <InventarioKardexPage /> },
-          { path: 'inventario/resumen', element: <InventarioResumenPage /> },
-          { path: 'tesoreria/bancos', element: <TesoreriaBancosPage /> },
-          { path: 'tesoreria/cartera', element: <TesoreriaCuentasPage /> },
-          { path: 'tesoreria/monedas', element: <TesoreriaMonedasPage /> },
-          { path: 'tesoreria/tipos-cambio', element: <TesoreriaTipoCambioPage /> },
-          { path: 'ventas/pedidos', element: <VentasPedidosListPage /> },
-          { path: 'ventas/pedidos/nuevo', element: <VentasPedidosFormPage /> },
-          { path: 'ventas/pedidos/:id', element: <VentasPedidosDetailPage /> },
-          { path: 'ventas/pedidos/:id/editar', element: <VentasPedidosFormPage /> },
-          { path: 'ventas/guias', element: <VentasGuiasListPage /> },
-          { path: 'ventas/guias/nuevo', element: <VentasGuiasFormPage /> },
-          { path: 'ventas/guias/:id/editar', element: <VentasGuiasFormPage /> },
-          { path: 'ventas/facturas', element: <VentasFacturasListPage /> },
-          { path: 'ventas/facturas/nuevo', element: <VentasFacturasFormPage /> },
-          { path: 'ventas/facturas/:id/editar', element: <VentasFacturasFormPage /> },
-          { path: 'ventas/notas', element: <VentasNotasListPage /> },
-          { path: 'ventas/notas/nuevo', element: <VentasNotasFormPage /> },
-          { path: 'ventas/notas/:id/editar', element: <VentasNotasFormPage /> },
+          { index: true, element: page(ProductosListPage) },
+          { path: 'contactos', element: page(ClientesListPage) },
+          { path: 'contactos/clientes', element: page(ClientesListPage) },
+          { path: 'contactos/clientes/nuevo', element: page(ClientesCreatePage) },
+          { path: 'contactos/proveedores', element: page(ProveedoresListPage) },
+          { path: 'contactos/proveedores/nuevo', element: page(ProveedoresCreatePage) },
+          { path: 'presupuestos', element: page(PresupuestosListPage) },
+          { path: 'presupuestos/nuevo', element: page(PresupuestosCreatePage) },
+          { path: 'presupuestos/:id/editar', element: page(PresupuestosEditPage) },
+          { path: 'productos', element: page(ProductosListPage) },
+          { path: 'productos/nuevo', element: page(ProductosCreatePage) },
+          { path: 'productos/categorias', element: page(ProductosCategoriasPage) },
+          { path: 'productos/impuestos', element: page(ProductosImpuestosPage) },
+          { path: 'productos/listas-precio', element: page(ProductosListasPrecioPage) },
+          { path: 'compras/ordenes', element: page(ComprasOrdenesListPage) },
+          { path: 'compras/ordenes/nuevo', element: page(ComprasOrdenesCreatePage) },
+          { path: 'compras/ordenes/:id', element: page(ComprasOrdenesDetailPage) },
+          { path: 'compras/ordenes/:id/editar', element: page(ComprasOrdenesCreatePage) },
+          { path: 'compras/documentos', element: page(ComprasDocumentosListPage) },
+          { path: 'compras/documentos/nuevo', element: page(ComprasDocumentosCreatePage) },
+          { path: 'compras/documentos/:id', element: page(ComprasDocumentosDetailPage) },
+          { path: 'compras/documentos/:id/editar', element: page(ComprasDocumentosCreatePage) },
+          { path: 'compras/recepciones', element: page(ComprasRecepcionesListPage) },
+          { path: 'compras/recepciones/nuevo', element: page(ComprasRecepcionesCreatePage) },
+          { path: 'compras/recepciones/:id/editar', element: page(ComprasRecepcionesCreatePage) },
+          { path: 'contabilidad/plan-cuentas', element: page(ContabilidadPlanPage) },
+          { path: 'contabilidad/asientos', element: page(ContabilidadAsientosPage) },
+          { path: 'auditoria/eventos', element: page(AuditoriaEventosPage) },
+          { path: 'auditoria/eventos/:id', element: page(AuditoriaEventoDetailPage) },
+          { path: 'administracion/permisos', element: page(AdministracionPermisosPage) },
+          { path: 'administracion/sii', element: page(AdministracionSiiPage) },
+          { path: 'contabilidad/sii', element: page(AdministracionSiiPage) },
+          { path: 'inventario/bodegas', element: page(InventarioBodegasPage) },
+          { path: 'inventario/kardex', element: page(InventarioKardexPage) },
+          { path: 'inventario/resumen', element: page(InventarioResumenPage) },
+          { path: 'tesoreria/bancos', element: page(TesoreriaBancosPage) },
+          { path: 'tesoreria/cartera', element: page(TesoreriaCuentasPage) },
+          { path: 'tesoreria/monedas', element: page(TesoreriaMonedasPage) },
+          { path: 'tesoreria/tipos-cambio', element: page(TesoreriaTipoCambioPage) },
+          { path: 'ventas/pedidos', element: page(VentasPedidosListPage) },
+          { path: 'ventas/pedidos/nuevo', element: page(VentasPedidosFormPage) },
+          { path: 'ventas/pedidos/:id', element: page(VentasPedidosDetailPage) },
+          { path: 'ventas/pedidos/:id/editar', element: page(VentasPedidosFormPage) },
+          { path: 'ventas/guias', element: page(VentasGuiasListPage) },
+          { path: 'ventas/guias/nuevo', element: page(VentasGuiasFormPage) },
+          { path: 'ventas/guias/:id/editar', element: page(VentasGuiasFormPage) },
+          { path: 'ventas/facturas', element: page(VentasFacturasListPage) },
+          { path: 'ventas/facturas/nuevo', element: page(VentasFacturasFormPage) },
+          { path: 'ventas/facturas/:id/editar', element: page(VentasFacturasFormPage) },
+          { path: 'ventas/notas', element: page(VentasNotasListPage) },
+          { path: 'ventas/notas/nuevo', element: page(VentasNotasFormPage) },
+          { path: 'ventas/notas/:id/editar', element: page(VentasNotasFormPage) },
         ],
       },
     ],
@@ -116,13 +127,13 @@ const router = createBrowserRouter([
     children: [
       {
         path: '/auth/login',
-        element: <LoginPage />,
+        element: page(LoginPage),
       },
     ],
   },
   {
     path: '*',
-    element: <NotFoundPage />,
+    element: page(NotFoundPage),
   },
 ])
 
