@@ -101,6 +101,7 @@ const router = createBrowserRouter([
           { path: 'productos', element: guardedPage(ProductosListPage, 'PRODUCTOS.VER', 'No tiene permiso para revisar productos.') },
           { path: 'productos/:id', element: guardedPage(ProductosDetailPage, 'PRODUCTOS.VER', 'No tiene permiso para revisar el detalle del producto.') },
           { path: 'productos/nuevo', element: guardedPage(ProductosCreatePage, 'PRODUCTOS.CREAR', 'No tiene permiso para crear productos.') },
+          { path: 'productos/:id/editar', element: guardedPage(ProductosCreatePage, 'PRODUCTOS.EDITAR', 'No tiene permiso para editar productos.') },
           { path: 'productos/categorias', element: guardedPage(ProductosCategoriasPage, 'PRODUCTOS.EDITAR', 'No tiene permiso para gestionar categorias.') },
           { path: 'productos/impuestos', element: guardedPage(ProductosImpuestosPage, 'PRODUCTOS.EDITAR', 'No tiene permiso para gestionar impuestos.') },
           { path: 'productos/listas-precio', element: guardedPage(ProductosListasPrecioPage, 'PRODUCTOS.EDITAR', 'No tiene permiso para gestionar listas de precio.') },

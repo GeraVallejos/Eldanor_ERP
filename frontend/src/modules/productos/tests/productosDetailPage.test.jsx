@@ -129,6 +129,7 @@ describe('productos/ProductosDetailPage', () => {
 
     expect(await screen.findByText('Taladro industrial')).toBeInTheDocument()
     expect(screen.getByText(/El stock actual y el costo promedio se administran desde inventario/i)).toBeInTheDocument()
+    expect(screen.getByText('$ 31.000')).toBeInTheDocument()
     expect(screen.getByText('Trazabilidad comercial')).toBeInTheDocument()
     expect(screen.getByText('Lista Cliente Norte')).toBeInTheDocument()
     expect(screen.getByText(/Pedidos de venta recientes \(1\)/i)).toBeInTheDocument()

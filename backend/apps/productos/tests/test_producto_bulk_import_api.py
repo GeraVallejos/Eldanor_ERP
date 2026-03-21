@@ -49,9 +49,9 @@ class TestProductoBulkImportApi:
         api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(admin_usuario)}")
 
         csv_content = "\n".join([
-            "nombre,sku,tipo,precio_referencia,precio_costo,maneja_inventario,stock_actual,activo",
-            "Producto Uno,SKU-001,PRODUCTO,1200,800,true,10,true",
-            "Servicio Dos,SKU-002,SERVICIO,2500,0,false,0,true",
+            "nombre,sku,tipo,precio_referencia,precio_costo,maneja_inventario,activo",
+            "Producto Uno,SKU-001,PRODUCTO,1200,800,true,true",
+            "Servicio Dos,SKU-002,SERVICIO,2500,0,false,true",
         ])
 
         file = SimpleUploadedFile("productos.csv", csv_content.encode("utf-8"), content_type="text/csv")
@@ -67,8 +67,10 @@ class TestProductoBulkImportApi:
         assert producto.nombre == "PRODUCTO UNO"
         assert producto.precio_referencia == Decimal("1200")
         assert producto.stock_actual == Decimal("0")
+        assert producto.costo_promedio == Decimal("800")
         assert servicio.maneja_inventario is False
         assert servicio.stock_actual == Decimal("0")
+        assert servicio.costo_promedio == Decimal("0")
 
     def test_owner_no_puede_carga_masiva_por_regla_admin_only(self, api_client, owner_usuario):
         api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
@@ -113,3 +115,17 @@ class TestProductoBulkImportApi:
         assert response.status_code == status.HTTP_200_OK
         assert response["Content-Type"] == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         assert "attachment; filename=\"plantilla_productos.xlsx\"" in response["Content-Disposition"]
+
+    def test_admin_no_puede_importar_csv_legacy_con_stock_actual(self, api_client, admin_usuario):
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(admin_usuario)}")
+
+        csv_content = "\n".join([
+            "nombre,sku,stock_actual",
+            "Producto Legacy,SKU-LEGACY-002,5",
+        ])
+
+        file = SimpleUploadedFile("productos.csv", csv_content.encode("utf-8"), content_type="text/csv")
+        response = api_client.post(reverse("producto-bulk-import"), {"file": file}, format="multipart")
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert response.data["error_code"] == "BULK_IMPORT_STOCK_ACTUAL_NO_SOPORTADO"

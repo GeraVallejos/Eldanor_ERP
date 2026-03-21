@@ -30,7 +30,6 @@ import {
   fetchCatalogosProducto,
   fetchProductos,
   selectCategorias,
-  selectImpuestos,
   selectProductos,
   selectProductosError,
   selectProductosStatus,
@@ -40,45 +39,27 @@ import { hasAnyRole } from '@/modules/shared/auth/roles'
 import { usePermissions } from '@/modules/shared/auth/usePermission'
 
 const columnHelper = createColumnHelper()
-const unidadMedidaOptions = [
-  { value: 'UN', label: 'Unidad' },
-  { value: 'KG', label: 'Kilogramo' },
-  { value: 'GR', label: 'Gramo' },
-  { value: 'LT', label: 'Litro' },
-  { value: 'MT', label: 'Metro' },
-  { value: 'M2', label: 'Metro cuadrado' },
-  { value: 'M3', label: 'Metro cubico' },
-  { value: 'CJ', label: 'Caja' },
+
+const tipoFilterOptions = [
+  { value: 'PRODUCTO', label: 'Productos' },
+  { value: 'SERVICIO', label: 'Servicios' },
+  { value: 'ALL', label: 'Todos' },
 ]
 
 function formatMoney(value) {
   return formatCurrencyCLP(value)
 }
 
-function applyOperationalRules(values) {
-  const nextValues = { ...values }
-
-  if (nextValues.tipo === 'SERVICIO') {
-    nextValues.maneja_inventario = false
-    nextValues.stock_minimo = 0
-    nextValues.usa_lotes = false
-    nextValues.usa_series = false
-    nextValues.usa_vencimiento = false
+function getTipoFilterLabel(tipoFilter) {
+  if (tipoFilter === 'SERVICIO') {
+    return 'servicios'
   }
 
-  if (!nextValues.maneja_inventario) {
-    nextValues.stock_minimo = 0
-    nextValues.usa_lotes = false
-    nextValues.usa_series = false
-    nextValues.usa_vencimiento = false
+  if (tipoFilter === 'ALL') {
+    return 'registros'
   }
 
-  if (nextValues.usa_series) {
-    nextValues.usa_lotes = true
-    nextValues.permite_decimales = false
-  }
-
-  return nextValues
+  return 'productos'
 }
 
 function ProductosListPage() {
@@ -86,40 +67,18 @@ function ProductosListPage() {
   const dispatch = useDispatch()
   const productos = useSelector(selectProductos)
   const categorias = useSelector(selectCategorias)
-  const impuestos = useSelector(selectImpuestos)
   const currentUser = useSelector(selectCurrentUser)
   const permissions = usePermissions(['PRODUCTOS.CREAR', 'PRODUCTOS.EDITAR', 'PRODUCTOS.BORRAR'])
   const status = useSelector(selectProductosStatus)
   const error = useSelector(selectProductosError)
   const [sorting, setSorting] = useState([{ id: 'creado_en', desc: true }])
   const [globalFilter, setGlobalFilter] = useState('')
+  const [tipoFilter, setTipoFilter] = useState('PRODUCTO')
   const [categoryFilter, setCategoryFilter] = useState('ALL')
   const [pagination, setPagination] = useState({ pageIndex: 0, pageSize: responsivePageSize })
-  const [editModalOpen, setEditModalOpen] = useState(false)
-  const [savingEdit, setSavingEdit] = useState(false)
   const [deletingId, setDeletingId] = useState(null)
   const [productoToDelete, setProductoToDelete] = useState(null)
   const [includeInactive, setIncludeInactive] = useState(false)
-  const [editForm, setEditForm] = useState({
-    id: null,
-    nombre: '',
-    descripcion: '',
-    sku: '',
-    tipo: 'PRODUCTO',
-    categoria: '',
-    impuesto: '',
-    precio_referencia: 0,
-    precio_costo: 0,
-    unidad_medida: 'UN',
-    permite_decimales: true,
-    maneja_inventario: true,
-    stock_actual: 0,
-    stock_minimo: 0,
-    usa_lotes: false,
-    usa_series: false,
-    usa_vencimiento: false,
-    activo: true,
-  })
 
   const canViewInactive = hasAnyRole(currentUser, ['OWNER', 'ADMIN'])
   const canBulkImport = permissions['PRODUCTOS.CREAR'] && hasAnyRole(currentUser, ['ADMIN'])
@@ -160,92 +119,23 @@ function ProductosListPage() {
       .sort((a, b) => String(a.nombre).localeCompare(String(b.nombre), 'es', { sensitivity: 'base' }))
   }, [categorias])
 
-  const filteredByCategory = useMemo(() => {
-    if (categoryFilter === 'ALL') {
+  const filteredByType = useMemo(() => {
+    if (tipoFilter === 'ALL') {
       return productos
     }
+
+    return productos.filter((item) => item?.tipo === tipoFilter)
+  }, [productos, tipoFilter])
+
+  const filteredByCategory = useMemo(() => {
+    if (categoryFilter === 'ALL') {
+      return filteredByType
+    }
     if (categoryFilter === 'SIN_CATEGORIA') {
-      return productos.filter((item) => !item?.categoria)
+      return filteredByType.filter((item) => !item?.categoria)
     }
-    return productos.filter((item) => String(item?.categoria || '') === categoryFilter)
-  }, [productos, categoryFilter])
-
-  const openEditModal = (producto) => {
-    setEditForm({
-      id: producto.id,
-      nombre: producto.nombre || '',
-      descripcion: producto.descripcion || '',
-      sku: producto.sku || '',
-      tipo: producto.tipo || 'PRODUCTO',
-      categoria: producto.categoria ? String(producto.categoria) : '',
-      impuesto: producto.impuesto ? String(producto.impuesto) : '',
-      precio_referencia: producto.precio_referencia ?? 0,
-      precio_costo: producto.precio_costo ?? 0,
-      unidad_medida: producto.unidad_medida || 'UN',
-      permite_decimales: Boolean(producto.permite_decimales ?? true),
-      maneja_inventario: Boolean(producto.maneja_inventario),
-      stock_actual: producto.stock_actual ?? 0,
-      stock_minimo: producto.stock_minimo ?? 0,
-      usa_lotes: Boolean(producto.usa_lotes),
-      usa_series: Boolean(producto.usa_series),
-      usa_vencimiento: Boolean(producto.usa_vencimiento),
-      activo: Boolean(producto.activo),
-    })
-    setEditModalOpen(true)
-  }
-
-  const updateEditField = (key, value) => {
-    setEditForm((prev) => ({ ...prev, [key]: value }))
-  }
-
-  const closeEditModal = () => {
-    setEditModalOpen(false)
-    setSavingEdit(false)
-  }
-
-  const handleEditSubmit = async (event) => {
-    event.preventDefault()
-    if (!editForm.id) {
-      return
-    }
-
-    setSavingEdit(true)
-
-    try {
-      const payload = applyOperationalRules({
-        nombre: editForm.nombre,
-        descripcion: editForm.descripcion,
-        sku: editForm.sku,
-        tipo: editForm.tipo,
-        categoria: editForm.categoria || null,
-        impuesto: editForm.impuesto || null,
-        precio_referencia: Number(editForm.precio_referencia) || 0,
-        precio_costo: Number(editForm.precio_costo) || 0,
-        unidad_medida: editForm.unidad_medida,
-        permite_decimales: Boolean(editForm.permite_decimales),
-        maneja_inventario: editForm.tipo === 'SERVICIO' ? false : Boolean(editForm.maneja_inventario),
-        stock_minimo: Number(editForm.stock_minimo) || 0,
-        usa_lotes: Boolean(editForm.usa_lotes),
-        usa_series: Boolean(editForm.usa_series),
-        usa_vencimiento: Boolean(editForm.usa_vencimiento),
-        activo: Boolean(editForm.activo),
-      })
-
-      await api.patch(
-        `/productos/${editForm.id}/`,
-        payload,
-        { suppressGlobalErrorToast: true },
-      )
-
-      invalidateProductosCatalogCache()
-      toast.success('Producto actualizado correctamente.')
-      closeEditModal()
-      dispatch(fetchProductos({ includeInactive: canViewInactive && includeInactive }))
-    } catch (error) {
-      toast.error(normalizeApiError(error, { fallback: 'No se pudo actualizar el producto.' }))
-      setSavingEdit(false)
-    }
-  }
+    return filteredByType.filter((item) => String(item?.categoria || '') === categoryFilter)
+  }, [filteredByType, categoryFilter])
 
   const requestDeleteProducto = (producto) => {
     setProductoToDelete(producto)
@@ -320,14 +210,12 @@ function ProductosListPage() {
                 Ver
               </Link>
               {canEdit ? (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => openEditModal(producto)}
-                  className="h-7 px-2 text-xs"
+                <Link
+                  to={`/productos/${producto.id}/editar`}
+                  className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'h-7 px-2 text-xs')}
                 >
                   Editar
-                </Button>
+                </Link>
               ) : null}
               {canDelete ? (
                 <Button
@@ -445,6 +333,8 @@ function ProductosListPage() {
     return 'Ord'
   }
 
+  const tipoFilterLabel = getTipoFilterLabel(tipoFilter)
+
   return (
     <section className="space-y-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -482,6 +372,28 @@ function ProductosListPage() {
 
       <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
         <div className="flex w-full flex-col gap-2 md:max-w-xl">
+          <div className="flex flex-wrap gap-2">
+            {tipoFilterOptions.map((option) => {
+              const selected = tipoFilter === option.value
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => setTipoFilter(option.value)}
+                  aria-pressed={selected}
+                  className={cn(
+                    'rounded-md border px-3 py-1.5 text-sm transition-colors',
+                    selected
+                      ? 'border-primary bg-primary text-primary-foreground'
+                      : 'border-input bg-background text-foreground hover:bg-muted',
+                  )}
+                >
+                  {option.label}
+                </button>
+              )
+            })}
+          </div>
+
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_220px]">
             <div className="relative w-full">
               <input
@@ -538,7 +450,7 @@ function ProductosListPage() {
           ) : null}
         </div>
         <p className="text-xs text-muted-foreground">
-          Mostrando {table.getFilteredRowModel().rows.length} de {productos.length} productos
+          Mostrando {table.getFilteredRowModel().rows.length} de {filteredByCategory.length} {tipoFilterLabel}
         </p>
       </div>
 
@@ -585,7 +497,7 @@ function ProductosListPage() {
               {table.getRowModel().rows.length === 0 ? (
                 <tr>
                   <td className="px-3 py-3 text-muted-foreground" colSpan={columns.length}>
-                    No hay productos cargados.
+                    No hay {tipoFilterLabel} cargados.
                   </td>
                 </tr>
               ) : (
@@ -619,240 +531,6 @@ function ProductosListPage() {
         onPrev={() => table.previousPage()}
         onNext={() => table.nextPage()}
       />
-
-      {editModalOpen && (
-        <div className="fixed inset-0 z-90 flex items-center justify-center bg-foreground/40 p-4">
-          <div className="w-full max-w-2xl rounded-xl border border-border bg-card p-4 shadow-xl">
-            <div className="mb-3 flex items-center justify-between gap-3">
-              <h3 className="text-lg font-semibold">Editar producto</h3>
-              <Button variant="outline" size="sm" onClick={closeEditModal} disabled={savingEdit}>
-                Cerrar
-              </Button>
-            </div>
-
-            <form className="space-y-3" onSubmit={handleEditSubmit}>
-              <div className="grid gap-3 md:grid-cols-2">
-                <label className="text-sm">
-                  Nombre
-                  <input
-                    className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
-                    value={editForm.nombre}
-                    onChange={(event) => updateEditField('nombre', event.target.value)}
-                    required
-                  />
-                </label>
-
-                <label className="text-sm">
-                  SKU
-                  <input
-                    className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
-                    value={editForm.sku}
-                    onChange={(event) => updateEditField('sku', event.target.value)}
-                    required
-                  />
-                </label>
-
-                <label className="text-sm md:col-span-2">
-                  Descripcion
-                  <textarea
-                    rows={3}
-                    className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
-                    value={editForm.descripcion}
-                    onChange={(event) => updateEditField('descripcion', event.target.value)}
-                  />
-                </label>
-
-                <label className="text-sm">
-                  Tipo
-                  <select
-                    className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
-                    value={editForm.tipo}
-                    onChange={(event) => {
-                      const nextTipo = event.target.value
-                      setEditForm((prev) => ({
-                        ...prev,
-                        tipo: nextTipo,
-                        maneja_inventario: nextTipo === 'SERVICIO' ? false : true,
-                        stock_minimo: nextTipo === 'SERVICIO' ? 0 : prev.stock_minimo,
-                        usa_lotes: nextTipo === 'SERVICIO' ? false : prev.usa_lotes,
-                        usa_series: nextTipo === 'SERVICIO' ? false : prev.usa_series,
-                        usa_vencimiento: nextTipo === 'SERVICIO' ? false : prev.usa_vencimiento,
-                      }))
-                    }}
-                  >
-                    <option value="PRODUCTO">Producto</option>
-                    <option value="SERVICIO">Servicio</option>
-                  </select>
-                </label>
-
-                <label className="text-sm">
-                  Categoria
-                  <select
-                    className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
-                    value={editForm.categoria}
-                    onChange={(event) => updateEditField('categoria', event.target.value)}
-                  >
-                    <option value="">Sin categoria</option>
-                    {categorias.map((categoria) => (
-                      <option key={categoria.id} value={categoria.id}>{categoria.nombre}</option>
-                    ))}
-                  </select>
-                </label>
-
-                <label className="text-sm">
-                  Impuesto
-                  <select
-                    className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
-                    value={editForm.impuesto}
-                    onChange={(event) => updateEditField('impuesto', event.target.value)}
-                  >
-                    <option value="">Sin impuesto</option>
-                    {impuestos.map((impuesto) => (
-                      <option key={impuesto.id} value={impuesto.id}>{impuesto.nombre}</option>
-                    ))}
-                  </select>
-                </label>
-
-                <label className="text-sm">
-                  Precio referencia
-                  <input
-                    type="number"
-                    min="0"
-                    step="1"
-                    className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
-                    value={editForm.precio_referencia}
-                    onChange={(event) => updateEditField('precio_referencia', event.target.value)}
-                  />
-                </label>
-
-                <label className="text-sm">
-                  Precio costo
-                  <input
-                    type="number"
-                    min="0"
-                    step="1"
-                    className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
-                    value={editForm.precio_costo}
-                    onChange={(event) => updateEditField('precio_costo', event.target.value)}
-                  />
-                </label>
-
-                <label className="text-sm">
-                  Unidad
-                  <select
-                    className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
-                    value={editForm.unidad_medida}
-                    onChange={(event) => updateEditField('unidad_medida', event.target.value)}
-                  >
-                    {unidadMedidaOptions.map((option) => (
-                      <option key={option.value} value={option.value}>{option.label}</option>
-                    ))}
-                  </select>
-                </label>
-
-                <label className="text-sm">
-                  Stock minimo
-                  <input
-                    type="number"
-                    min="0"
-                    step="1"
-                    disabled={!editForm.maneja_inventario || editForm.tipo === 'SERVICIO'}
-                    className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
-                    value={editForm.stock_minimo}
-                    onChange={(event) => updateEditField('stock_minimo', event.target.value)}
-                  />
-                </label>
-
-                <div className="text-sm">
-                  Stock actual
-                  <div className="mt-1 rounded-md border border-input bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
-                    {formatSmartNumber(editForm.stock_actual ?? 0, { maximumFractionDigits: 2 })}
-                  </div>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    El stock se ajusta desde inventario, no desde esta ficha.
-                  </p>
-                </div>
-
-                <label className="flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={editForm.permite_decimales}
-                    disabled={editForm.usa_series}
-                    onChange={(event) => updateEditField('permite_decimales', event.target.checked)}
-                  />
-                  Permite decimales
-                </label>
-
-                <label className="flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={editForm.tipo === 'SERVICIO' ? false : editForm.maneja_inventario}
-                    disabled={editForm.tipo === 'SERVICIO'}
-                    onChange={(event) => updateEditField('maneja_inventario', event.target.checked)}
-                  />
-                  Maneja inventario
-                </label>
-
-                <label className="flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={editForm.usa_lotes}
-                    disabled={!editForm.maneja_inventario || editForm.tipo === 'SERVICIO' || editForm.usa_series}
-                    onChange={(event) => updateEditField('usa_lotes', event.target.checked)}
-                  />
-                  Usa lotes
-                </label>
-
-                <label className="flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={editForm.usa_series}
-                    disabled={!editForm.maneja_inventario || editForm.tipo === 'SERVICIO'}
-                    onChange={(event) => {
-                      const checked = event.target.checked
-                      setEditForm((prev) => ({
-                        ...prev,
-                        usa_series: checked,
-                        usa_lotes: checked ? true : prev.usa_lotes,
-                        permite_decimales: checked ? false : prev.permite_decimales,
-                      }))
-                    }}
-                  />
-                  Usa series
-                </label>
-
-                <label className="flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={editForm.usa_vencimiento}
-                    disabled={!editForm.maneja_inventario || editForm.tipo === 'SERVICIO'}
-                    onChange={(event) => updateEditField('usa_vencimiento', event.target.checked)}
-                  />
-                  Usa vencimiento
-                </label>
-
-                <label className="flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={editForm.activo}
-                    onChange={(event) => updateEditField('activo', event.target.checked)}
-                  />
-                  Activo
-                </label>
-              </div>
-
-              <div className="flex items-center justify-end gap-2 pt-2">
-                <Button type="button" variant="outline" onClick={closeEditModal} disabled={savingEdit}>
-                  Cancelar
-                </Button>
-                <Button type="submit" disabled={savingEdit}>
-                  {savingEdit ? 'Guardando...' : 'Guardar cambios'}
-                </Button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
 
       <ConfirmDialog
         open={Boolean(productoToDelete)}

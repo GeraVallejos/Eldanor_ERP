@@ -81,6 +81,8 @@ class TestProductoApi:
 
         producto = Producto.all_objects.get(id=resp.data["id"])
         assert Decimal(str(producto.stock_actual)) == Decimal("0")
+        assert Decimal(str(producto.costo_promedio)) == Decimal("7000")
+        assert Decimal(str(resp.data["costo_promedio"])) == Decimal("7000")
         assert not StockProducto.all_objects.filter(empresa=empresa, producto=producto).exists()
 
     def test_crear_producto_ignora_campos_operativos_read_only(self, api_client, owner_usuario, empresa):
