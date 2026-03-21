@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
 import { api } from '@/api/client'
@@ -54,7 +54,7 @@ function InventarioReportesPage() {
   })
   const [onlyWithStock, setOnlyWithStock] = useState(true)
 
-  const loadCatalogs = async () => {
+  const loadCatalogs = useCallback(async () => {
     try {
       const [productosData, { data: bodegasData }] = await Promise.all([
         getProductosCatalog(),
@@ -65,9 +65,9 @@ function InventarioReportesPage() {
     } catch (error) {
       toast.error(normalizeApiError(error, { fallback: 'No se pudieron cargar los catalogos de reportes.' }))
     }
-  }
+  }, [])
 
-  const loadAnalytics = async (nextFilters, nextOnlyWithStock = onlyWithStock) => {
+  const loadAnalytics = useCallback(async (nextFilters, nextOnlyWithStock) => {
     try {
       const { data } = await api.get('/stocks/analytics/', {
         params: {
@@ -80,7 +80,7 @@ function InventarioReportesPage() {
     } catch (error) {
       toast.error(normalizeApiError(error, { fallback: 'No se pudo cargar el reporte de inventario.' }))
     }
-  }
+  }, [])
 
   useEffect(() => {
     const timeoutId = setTimeout(() => {
@@ -93,7 +93,7 @@ function InventarioReportesPage() {
     }, 0)
 
     return () => clearTimeout(timeoutId)
-  }, [])
+  }, [loadAnalytics, loadCatalogs])
 
   const updateFilter = (key, value) => {
     setFilters((prev) => ({ ...prev, [key]: value }))
@@ -136,7 +136,7 @@ function InventarioReportesPage() {
 
   const onSubmit = async (event) => {
     event.preventDefault()
-    await loadAnalytics(filters)
+    await loadAnalytics(filters, onlyWithStock)
   }
 
   const getTodaySuffix = () => getChileDateSuffix()

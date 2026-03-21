@@ -66,6 +66,7 @@ class TestProductoBulkImportApi:
         servicio = Producto.all_objects.get(empresa=empresa, sku="SKU-002")
         assert producto.nombre == "PRODUCTO UNO"
         assert producto.precio_referencia == Decimal("1200")
+        assert producto.stock_actual == Decimal("0")
         assert servicio.maneja_inventario is False
         assert servicio.stock_actual == Decimal("0")
 

@@ -30,17 +30,55 @@ import {
   fetchCatalogosProducto,
   fetchProductos,
   selectCategorias,
+  selectImpuestos,
   selectProductos,
   selectProductosError,
   selectProductosStatus,
 } from '@/modules/productos/productosSlice'
 import { selectCurrentUser } from '@/modules/auth/authSlice'
+import { hasAnyRole } from '@/modules/shared/auth/roles'
 import { usePermissions } from '@/modules/shared/auth/usePermission'
 
 const columnHelper = createColumnHelper()
+const unidadMedidaOptions = [
+  { value: 'UN', label: 'Unidad' },
+  { value: 'KG', label: 'Kilogramo' },
+  { value: 'GR', label: 'Gramo' },
+  { value: 'LT', label: 'Litro' },
+  { value: 'MT', label: 'Metro' },
+  { value: 'M2', label: 'Metro cuadrado' },
+  { value: 'M3', label: 'Metro cubico' },
+  { value: 'CJ', label: 'Caja' },
+]
 
 function formatMoney(value) {
   return formatCurrencyCLP(value)
+}
+
+function applyOperationalRules(values) {
+  const nextValues = { ...values }
+
+  if (nextValues.tipo === 'SERVICIO') {
+    nextValues.maneja_inventario = false
+    nextValues.stock_minimo = 0
+    nextValues.usa_lotes = false
+    nextValues.usa_series = false
+    nextValues.usa_vencimiento = false
+  }
+
+  if (!nextValues.maneja_inventario) {
+    nextValues.stock_minimo = 0
+    nextValues.usa_lotes = false
+    nextValues.usa_series = false
+    nextValues.usa_vencimiento = false
+  }
+
+  if (nextValues.usa_series) {
+    nextValues.usa_lotes = true
+    nextValues.permite_decimales = false
+  }
+
+  return nextValues
 }
 
 function ProductosListPage() {
@@ -48,6 +86,7 @@ function ProductosListPage() {
   const dispatch = useDispatch()
   const productos = useSelector(selectProductos)
   const categorias = useSelector(selectCategorias)
+  const impuestos = useSelector(selectImpuestos)
   const currentUser = useSelector(selectCurrentUser)
   const permissions = usePermissions(['PRODUCTOS.CREAR', 'PRODUCTOS.EDITAR', 'PRODUCTOS.BORRAR'])
   const status = useSelector(selectProductosStatus)
@@ -67,16 +106,23 @@ function ProductosListPage() {
     descripcion: '',
     sku: '',
     tipo: 'PRODUCTO',
+    categoria: '',
+    impuesto: '',
     precio_referencia: 0,
     precio_costo: 0,
+    unidad_medida: 'UN',
+    permite_decimales: true,
     maneja_inventario: true,
     stock_actual: 0,
+    stock_minimo: 0,
+    usa_lotes: false,
+    usa_series: false,
+    usa_vencimiento: false,
     activo: true,
   })
 
-  const userRole = String(currentUser?.rol || '').toUpperCase()
-  const canViewInactive = userRole === 'OWNER' || userRole === 'ADMIN'
-  const canBulkImport = userRole === 'ADMIN'
+  const canViewInactive = hasAnyRole(currentUser, ['OWNER', 'ADMIN'])
+  const canBulkImport = permissions['PRODUCTOS.CREAR'] && hasAnyRole(currentUser, ['ADMIN'])
   const canCreate = permissions['PRODUCTOS.CREAR']
   const canEdit = permissions['PRODUCTOS.EDITAR']
   const canDelete = permissions['PRODUCTOS.BORRAR']
@@ -131,10 +177,18 @@ function ProductosListPage() {
       descripcion: producto.descripcion || '',
       sku: producto.sku || '',
       tipo: producto.tipo || 'PRODUCTO',
+      categoria: producto.categoria ? String(producto.categoria) : '',
+      impuesto: producto.impuesto ? String(producto.impuesto) : '',
       precio_referencia: producto.precio_referencia ?? 0,
       precio_costo: producto.precio_costo ?? 0,
+      unidad_medida: producto.unidad_medida || 'UN',
+      permite_decimales: Boolean(producto.permite_decimales ?? true),
       maneja_inventario: Boolean(producto.maneja_inventario),
       stock_actual: producto.stock_actual ?? 0,
+      stock_minimo: producto.stock_minimo ?? 0,
+      usa_lotes: Boolean(producto.usa_lotes),
+      usa_series: Boolean(producto.usa_series),
+      usa_vencimiento: Boolean(producto.usa_vencimiento),
       activo: Boolean(producto.activo),
     })
     setEditModalOpen(true)
@@ -158,18 +212,28 @@ function ProductosListPage() {
     setSavingEdit(true)
 
     try {
+      const payload = applyOperationalRules({
+        nombre: editForm.nombre,
+        descripcion: editForm.descripcion,
+        sku: editForm.sku,
+        tipo: editForm.tipo,
+        categoria: editForm.categoria || null,
+        impuesto: editForm.impuesto || null,
+        precio_referencia: Number(editForm.precio_referencia) || 0,
+        precio_costo: Number(editForm.precio_costo) || 0,
+        unidad_medida: editForm.unidad_medida,
+        permite_decimales: Boolean(editForm.permite_decimales),
+        maneja_inventario: editForm.tipo === 'SERVICIO' ? false : Boolean(editForm.maneja_inventario),
+        stock_minimo: Number(editForm.stock_minimo) || 0,
+        usa_lotes: Boolean(editForm.usa_lotes),
+        usa_series: Boolean(editForm.usa_series),
+        usa_vencimiento: Boolean(editForm.usa_vencimiento),
+        activo: Boolean(editForm.activo),
+      })
+
       await api.patch(
         `/productos/${editForm.id}/`,
-        {
-          nombre: editForm.nombre,
-          descripcion: editForm.descripcion,
-          sku: editForm.sku,
-          tipo: editForm.tipo,
-          precio_referencia: Number(editForm.precio_referencia) || 0,
-          precio_costo: Number(editForm.precio_costo) || 0,
-          maneja_inventario: editForm.tipo === 'SERVICIO' ? false : Boolean(editForm.maneja_inventario),
-          activo: Boolean(editForm.activo),
-        },
+        payload,
         { suppressGlobalErrorToast: true },
       )
 
@@ -371,14 +435,14 @@ function ProductosListPage() {
     const sort = column.getIsSorted()
 
     if (sort === 'asc') {
-      return '↑'
+      return 'Asc'
     }
 
     if (sort === 'desc') {
-      return '↓'
+      return 'Desc'
     }
 
-    return '↕'
+    return 'Ord'
   }
 
   return (
@@ -609,11 +673,43 @@ function ProductosListPage() {
                         ...prev,
                         tipo: nextTipo,
                         maneja_inventario: nextTipo === 'SERVICIO' ? false : true,
+                        stock_minimo: nextTipo === 'SERVICIO' ? 0 : prev.stock_minimo,
+                        usa_lotes: nextTipo === 'SERVICIO' ? false : prev.usa_lotes,
+                        usa_series: nextTipo === 'SERVICIO' ? false : prev.usa_series,
+                        usa_vencimiento: nextTipo === 'SERVICIO' ? false : prev.usa_vencimiento,
                       }))
                     }}
                   >
                     <option value="PRODUCTO">Producto</option>
                     <option value="SERVICIO">Servicio</option>
+                  </select>
+                </label>
+
+                <label className="text-sm">
+                  Categoria
+                  <select
+                    className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
+                    value={editForm.categoria}
+                    onChange={(event) => updateEditField('categoria', event.target.value)}
+                  >
+                    <option value="">Sin categoria</option>
+                    {categorias.map((categoria) => (
+                      <option key={categoria.id} value={categoria.id}>{categoria.nombre}</option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="text-sm">
+                  Impuesto
+                  <select
+                    className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
+                    value={editForm.impuesto}
+                    onChange={(event) => updateEditField('impuesto', event.target.value)}
+                  >
+                    <option value="">Sin impuesto</option>
+                    {impuestos.map((impuesto) => (
+                      <option key={impuesto.id} value={impuesto.id}>{impuesto.nombre}</option>
+                    ))}
                   </select>
                 </label>
 
@@ -641,6 +737,32 @@ function ProductosListPage() {
                   />
                 </label>
 
+                <label className="text-sm">
+                  Unidad
+                  <select
+                    className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
+                    value={editForm.unidad_medida}
+                    onChange={(event) => updateEditField('unidad_medida', event.target.value)}
+                  >
+                    {unidadMedidaOptions.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="text-sm">
+                  Stock minimo
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    disabled={!editForm.maneja_inventario || editForm.tipo === 'SERVICIO'}
+                    className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
+                    value={editForm.stock_minimo}
+                    onChange={(event) => updateEditField('stock_minimo', event.target.value)}
+                  />
+                </label>
+
                 <div className="text-sm">
                   Stock actual
                   <div className="mt-1 rounded-md border border-input bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
@@ -654,11 +776,59 @@ function ProductosListPage() {
                 <label className="flex items-center gap-2 text-sm">
                   <input
                     type="checkbox"
+                    checked={editForm.permite_decimales}
+                    disabled={editForm.usa_series}
+                    onChange={(event) => updateEditField('permite_decimales', event.target.checked)}
+                  />
+                  Permite decimales
+                </label>
+
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
                     checked={editForm.tipo === 'SERVICIO' ? false : editForm.maneja_inventario}
                     disabled={editForm.tipo === 'SERVICIO'}
                     onChange={(event) => updateEditField('maneja_inventario', event.target.checked)}
                   />
                   Maneja inventario
+                </label>
+
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={editForm.usa_lotes}
+                    disabled={!editForm.maneja_inventario || editForm.tipo === 'SERVICIO' || editForm.usa_series}
+                    onChange={(event) => updateEditField('usa_lotes', event.target.checked)}
+                  />
+                  Usa lotes
+                </label>
+
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={editForm.usa_series}
+                    disabled={!editForm.maneja_inventario || editForm.tipo === 'SERVICIO'}
+                    onChange={(event) => {
+                      const checked = event.target.checked
+                      setEditForm((prev) => ({
+                        ...prev,
+                        usa_series: checked,
+                        usa_lotes: checked ? true : prev.usa_lotes,
+                        permite_decimales: checked ? false : prev.permite_decimales,
+                      }))
+                    }}
+                  />
+                  Usa series
+                </label>
+
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={editForm.usa_vencimiento}
+                    disabled={!editForm.maneja_inventario || editForm.tipo === 'SERVICIO'}
+                    onChange={(event) => updateEditField('usa_vencimiento', event.target.checked)}
+                  />
+                  Usa vencimiento
                 </label>
 
                 <label className="flex items-center gap-2 text-sm">

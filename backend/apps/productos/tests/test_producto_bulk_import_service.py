@@ -100,7 +100,7 @@ def test_bulk_import_crea_impuesto_si_no_existe(db, empresa):
     assert str(producto.impuesto.porcentaje) in {"19", "19.00"}
 
 
-def test_bulk_import_sincroniza_stock_producto_para_resumen(db, empresa):
+def test_bulk_import_no_sincroniza_stock_operativo(db, empresa):
     User = get_user_model()
     user = User.objects.create_user(
         username="admin_service_bulk_productos_stock",
@@ -125,5 +125,5 @@ def test_bulk_import_sincroniza_stock_producto_para_resumen(db, empresa):
 
     producto = Producto.all_objects.get(empresa=empresa, sku="SKU-RES-001")
     stock = StockProducto.all_objects.filter(empresa=empresa, producto=producto).first()
-    assert stock is not None
-    assert str(stock.stock) in {"7", "7.00"}
+    assert stock is None
+    assert str(producto.stock_actual) in {"0", "0.00"}

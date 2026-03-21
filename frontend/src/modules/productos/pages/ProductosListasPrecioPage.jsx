@@ -106,7 +106,7 @@ function ProductosListasPrecioPage() {
     <section className="space-y-4">
       <div>
         <h2 className="text-2xl font-semibold">Listas de precio</h2>
-        <p className="text-sm text-muted-foreground">Gestione listas comerciales y valores especÃ­ficos por producto.</p>
+        <p className="text-sm text-muted-foreground">Gestione listas comerciales y valores especificos por producto.</p>
       </div>
 
       <form className="flex flex-col gap-3 rounded-md border border-border bg-card p-4 md:flex-row md:items-end" onSubmit={createLista}>
@@ -173,7 +173,7 @@ function ProductosListasPrecioPage() {
                   </thead>
                   <tbody>
                     {itemsListaSeleccionada.length === 0 ? (
-                      <tr><td className="px-3 py-3 text-muted-foreground" colSpan={2}>La lista seleccionada no tiene Ã­tems.</td></tr>
+                      <tr><td className="px-3 py-3 text-muted-foreground" colSpan={2}>La lista seleccionada no tiene items.</td></tr>
                     ) : (
                       itemsListaSeleccionada.map((item) => (
                         <tr key={item.id} className="border-t border-border">

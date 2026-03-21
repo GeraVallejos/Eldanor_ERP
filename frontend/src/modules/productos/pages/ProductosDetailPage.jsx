@@ -138,7 +138,7 @@ function ProductosDetailPage() {
           <p className="text-xs uppercase tracking-[0.24em] text-muted-foreground">Catalogo de productos</p>
           <h2 className="mt-1 text-3xl font-semibold">{producto.nombre || 'Producto sin nombre'}</h2>
           <p className="mt-2 text-sm text-muted-foreground">
-            SKU {producto.sku || '-'} · {producto.tipo || '-'} · {producto.activo ? 'Activo' : 'Inactivo'}
+            SKU {producto.sku || '-'} | {producto.tipo || '-'} | {producto.activo ? 'Activo' : 'Inactivo'}
           </p>
         </div>
         <div className="flex gap-2">
@@ -225,7 +225,7 @@ function ProductosDetailPage() {
                             <div>
                               <p className="text-sm font-medium text-foreground">{item.nombre}</p>
                               <p className="mt-1 text-xs text-muted-foreground">
-                                {item.cliente_nombre || 'Lista general'} · {item.moneda_codigo || '-'} · Desde {formatDateChile(item.fecha_desde)}
+                                {item.cliente_nombre || 'Lista general'} | {item.moneda_codigo || '-'} | Desde {formatDateChile(item.fecha_desde)}
                                 {item.fecha_hasta ? ` hasta ${formatDateChile(item.fecha_hasta)}` : ''}
                               </p>
                             </div>
@@ -306,7 +306,7 @@ function ProductosDetailPage() {
                       <div key={row.id} className="rounded-lg border border-border bg-background/70 p-3">
                         <p className="text-sm font-medium text-foreground">{row.numero || 'Pedido sin numero'}</p>
                         <p className="mt-1 text-xs text-muted-foreground">
-                          {row.cliente_nombre || 'Sin cliente'} · {formatDateChile(row.fecha_emision)} · {row.estado || '-'}
+                          {row.cliente_nombre || 'Sin cliente'} | {formatDateChile(row.fecha_emision)} | {row.estado || '-'}
                         </p>
                       </div>
                     ))
@@ -326,7 +326,7 @@ function ProductosDetailPage() {
                       <div key={row.id} className="rounded-lg border border-border bg-background/70 p-3">
                         <p className="text-sm font-medium text-foreground">{row.tipo_documento || 'Documento'} {row.folio || '-'}</p>
                         <p className="mt-1 text-xs text-muted-foreground">
-                          {row.proveedor_nombre || 'Sin proveedor'} · {formatDateChile(row.fecha_emision)} · {row.estado || '-'}
+                          {row.proveedor_nombre || 'Sin proveedor'} | {formatDateChile(row.fecha_emision)} | {row.estado || '-'}
                         </p>
                       </div>
                     ))
