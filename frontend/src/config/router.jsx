@@ -57,6 +57,7 @@ const VentasNotasListPage = lazy(() => import('@/modules/ventas/pages/VentasNota
 const VentasNotasFormPage = lazy(() => import('@/modules/ventas/pages/VentasNotasFormPage'))
 const ProductosCreatePage = lazy(() => import('@/modules/productos/pages/ProductosCreatePage'))
 const ProductosCategoriasPage = lazy(() => import('@/modules/productos/pages/ProductosCategoriasPage'))
+const ProductosDetailPage = lazy(() => import('@/modules/productos/pages/ProductosDetailPage'))
 const ProductosImpuestosPage = lazy(() => import('@/modules/productos/pages/ProductosImpuestosPage'))
 const ProductosListasPrecioPage = lazy(() => import('@/modules/productos/pages/ProductosListasPrecioPage'))
 const ProductosListPage = lazy(() => import('@/modules/productos/pages/ProductosListPage'))
@@ -98,6 +99,7 @@ const router = createBrowserRouter([
           { path: 'presupuestos/:id/editar', element: guardedPage(PresupuestosEditPage, 'PRESUPUESTOS.EDITAR', 'No tiene permiso para editar presupuestos.') },
           { path: 'presupuestos/:id/trazabilidad', element: guardedPage(PresupuestoTrazabilidadPage, 'PRESUPUESTOS.VER', 'No tiene permiso para revisar la trazabilidad del presupuesto.') },
           { path: 'productos', element: guardedPage(ProductosListPage, 'PRODUCTOS.VER', 'No tiene permiso para revisar productos.') },
+          { path: 'productos/:id', element: guardedPage(ProductosDetailPage, 'PRODUCTOS.VER', 'No tiene permiso para revisar el detalle del producto.') },
           { path: 'productos/nuevo', element: guardedPage(ProductosCreatePage, 'PRODUCTOS.CREAR', 'No tiene permiso para crear productos.') },
           { path: 'productos/categorias', element: guardedPage(ProductosCategoriasPage, 'PRODUCTOS.EDITAR', 'No tiene permiso para gestionar categorias.') },
           { path: 'productos/impuestos', element: guardedPage(ProductosImpuestosPage, 'PRODUCTOS.EDITAR', 'No tiene permiso para gestionar impuestos.') },

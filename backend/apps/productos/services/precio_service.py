@@ -37,6 +37,7 @@ class PrecioComercialService:
         """Resuelve precio comercial priorizando lista cliente y fallback a referencia."""
         fecha = fecha or date.today()
         lista = PrecioComercialService._resolver_lista(empresa=empresa, cliente=cliente, fecha=fecha)
+        lista_aplicada = None
 
         if lista:
             item = ListaPrecioItem.all_objects.filter(
@@ -48,6 +49,7 @@ class PrecioComercialService:
                 monto = item.precio
                 moneda_origen = lista.moneda
                 fuente = "LISTA_PRECIO"
+                lista_aplicada = lista
             else:
                 monto = producto.precio_referencia
                 moneda_origen = producto.moneda
@@ -74,5 +76,5 @@ class PrecioComercialService:
             "precio": monto,
             "moneda": moneda_resuelta,
             "fuente": fuente,
-            "lista": lista,
+            "lista": lista_aplicada,
         }

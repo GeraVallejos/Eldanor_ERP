@@ -22,11 +22,20 @@ ALTER TABLE `facturacion_rangofoliotributario`
 """
 
 
+def run_mysql_cleanup(apps, schema_editor):
+    if schema_editor.connection.vendor != "mysql":
+        return
+
+    with schema_editor.connection.cursor() as cursor:
+        for statement in [s.strip() for s in FACTURACION_CLEANUP_SQL.split(";") if s.strip()]:
+            cursor.execute(statement)
+
+
 class Migration(migrations.Migration):
     dependencies = [
         ("facturacion", "0002_rename_core_config_empresa_16c229_idx_fac_config_empresa_activa_idx_and_more"),
     ]
 
     operations = [
-        migrations.RunSQL(FACTURACION_CLEANUP_SQL, reverse_sql=migrations.RunSQL.noop),
+        migrations.RunPython(run_mysql_cleanup, reverse_code=migrations.RunPython.noop),
     ]

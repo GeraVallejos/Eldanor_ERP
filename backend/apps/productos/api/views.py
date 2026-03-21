@@ -1,9 +1,9 @@
 from datetime import date
 
-from django.db.models.deletion import ProtectedError
+from rest_framework import status
+from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet
 
-from apps.core.exceptions import ConflictError
 from apps.core.roles import RolUsuario
 from apps.productos.models import Categoria, Impuesto, ListaPrecio, ListaPrecioItem, Producto
 from apps.productos.api.serializer import (
@@ -19,12 +19,12 @@ from apps.core.permisos.constantes_permisos import Modulos, Acciones
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.decorators import action
 from rest_framework.parsers import MultiPartParser, FormParser
-from rest_framework.response import Response
 from django.http import HttpResponse
 from django.utils.dateparse import parse_date
 
 from apps.productos.services.bulk_import_service import bulk_import_productos, build_productos_bulk_template
 from apps.productos.services.precio_service import PrecioComercialService
+from apps.productos.services.producto_service import ProductoService
 
 
 
@@ -80,18 +80,47 @@ class ProductoViewSet(TenantViewSetMixin, ModelViewSet ):
 
         return queryset.filter(activo=True)
 
-    def perform_destroy(self, instance):
+    def create(self, request, *args, **kwargs):
         self._set_tenant_context()
-        try:
-            instance.delete()
-        except ProtectedError:
-            if not instance.activo:
-                raise ConflictError(
-                    "El producto ya esta anulado y mantiene referencias historicas."
-                )
-            # Conserva integridad historica cuando el producto ya fue usado.
-            instance.activo = False
-            instance.save(skip_clean=True, update_fields=["activo"])
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        producto = ProductoService.crear_producto(
+            empresa=self.get_empresa(),
+            usuario=request.user,
+            data=serializer.validated_data,
+        )
+        response_serializer = self.get_serializer(producto)
+        headers = self.get_success_headers(response_serializer.data)
+        return Response(response_serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+
+    def update(self, request, *args, **kwargs):
+        partial = kwargs.pop("partial", False)
+        self._set_tenant_context()
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        producto = ProductoService.actualizar_producto(
+            producto_id=instance.id,
+            empresa=self.get_empresa(),
+            usuario=request.user,
+            data=serializer.validated_data,
+        )
+        response_serializer = self.get_serializer(producto)
+        return Response(response_serializer.data)
+
+    def partial_update(self, request, *args, **kwargs):
+        kwargs["partial"] = True
+        return self.update(request, *args, **kwargs)
+
+    def destroy(self, request, *args, **kwargs):
+        self._set_tenant_context()
+        instance = self.get_object()
+        ProductoService.eliminar_producto(
+            producto_id=instance.id,
+            empresa=self.get_empresa(),
+            usuario=request.user,
+        )
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(detail=False, methods=["post"], url_path="bulk_import", parser_classes=[MultiPartParser, FormParser])
     def bulk_import(self, request):

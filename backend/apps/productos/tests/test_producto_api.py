@@ -57,7 +57,7 @@ def proveedor(db, empresa):
 
 @pytest.mark.django_db
 class TestProductoApi:
-    def test_crear_producto_no_sincroniza_stock_desde_maestro(self, api_client, owner_usuario, empresa):
+    def test_crear_producto_ignora_stock_operativo_en_crud_normal(self, api_client, owner_usuario, empresa):
         api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
 
         resp = api_client.post(
@@ -78,8 +78,30 @@ class TestProductoApi:
         assert resp.status_code == status.HTTP_201_CREATED, resp.data
 
         producto = Producto.all_objects.get(id=resp.data["id"])
-        assert Decimal(str(producto.stock_actual)) == Decimal("5")
+        assert Decimal(str(producto.stock_actual)) == Decimal("0")
         assert not StockProducto.all_objects.filter(empresa=empresa, producto=producto).exists()
+
+    def test_crear_producto_ignora_campos_operativos_read_only(self, api_client, owner_usuario, empresa):
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
+
+        resp = api_client.post(
+            reverse("producto-list"),
+            {
+                "nombre": "Producto Read Only",
+                "sku": "PRO-RO-001",
+                "tipo": "PRODUCTO",
+                "precio_referencia": "1000",
+                "costo_promedio": "999.9999",
+                "activo": True,
+            },
+            format="json",
+        )
+
+        assert resp.status_code == status.HTTP_201_CREATED, resp.data
+        producto = Producto.all_objects.get(id=resp.data["id"])
+        assert Decimal(str(producto.costo_promedio)) == Decimal("0")
+        assert Decimal(str(producto.stock_actual)) == Decimal("0")
+        assert resp.data["costo_promedio"] in {"0.0000", "0"}
 
     def test_listado_productos_oculta_inactivos_por_defecto(self, api_client, owner_usuario, empresa):
         api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")

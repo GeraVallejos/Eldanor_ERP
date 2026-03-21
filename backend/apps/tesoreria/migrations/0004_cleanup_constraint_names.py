@@ -111,6 +111,15 @@ ALTER TABLE `productos_listaprecio`
 """
 
 
+def run_mysql_cleanup(apps, schema_editor):
+  if schema_editor.connection.vendor != "mysql":
+    return
+
+  with schema_editor.connection.cursor() as cursor:
+    for statement in [s.strip() for s in TESORERIA_CLEANUP_SQL.split(";") if s.strip()]:
+      cursor.execute(statement)
+
+
 class Migration(migrations.Migration):
     dependencies = [
         ("tesoreria", "0003_rename_core_cuenta_empresa_f7efb4_idx_tes_cta_banco_empresa_activa_idx_and_more"),
@@ -119,5 +128,5 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        migrations.RunSQL(TESORERIA_CLEANUP_SQL, reverse_sql=migrations.RunSQL.noop),
+        migrations.RunPython(run_mysql_cleanup, reverse_code=migrations.RunPython.noop),
     ]

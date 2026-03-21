@@ -36,7 +36,6 @@ const productoSchema = z
     precio_referencia: z.number({ error: 'Precio de referencia invalido.' }).min(0, 'No puede ser negativo.'),
     precio_costo: z.number({ error: 'Precio de costo invalido.' }).min(0, 'No puede ser negativo.'),
     maneja_inventario: z.boolean(),
-    stock_actual: z.number({ error: 'Stock invalido.' }).min(0, 'No puede ser negativo.'),
     activo: z.boolean(),
   })
   .superRefine((values, ctx) => {
@@ -46,14 +45,6 @@ const productoSchema = z
           code: 'custom',
           path: ['maneja_inventario'],
           message: 'Un servicio no maneja inventario.',
-        })
-      }
-
-      if (values.stock_actual !== 0) {
-        ctx.addIssue({
-          code: 'custom',
-          path: ['stock_actual'],
-          message: 'El stock de un servicio debe ser 0.',
         })
       }
     }
@@ -87,7 +78,6 @@ function ProductosCreatePage() {
       precio_referencia: 0,
       precio_costo: 0,
       maneja_inventario: true,
-      stock_actual: 0,
       activo: true,
     },
   })
@@ -103,7 +93,6 @@ function ProductosCreatePage() {
   useEffect(() => {
     if (tipoSeleccionado === 'SERVICIO') {
       setValue('maneja_inventario', false, { shouldValidate: true })
-      setValue('stock_actual', 0, { shouldValidate: true })
       return
     }
 
@@ -133,7 +122,6 @@ function ProductosCreatePage() {
       impuesto: values.impuesto || null,
       descripcion: values.descripcion?.trim() || '',
       maneja_inventario: values.tipo === 'SERVICIO' ? false : values.maneja_inventario,
-      stock_actual: values.tipo === 'SERVICIO' ? 0 : values.stock_actual,
     }
 
     try {
@@ -150,7 +138,6 @@ function ProductosCreatePage() {
         precio_referencia: 0,
         precio_costo: 0,
         maneja_inventario: true,
-        stock_actual: 0,
         activo: true,
       })
       dispatch(fetchProductos())
@@ -239,12 +226,6 @@ function ProductosCreatePage() {
             {errors.precio_costo && <span className="mt-1 block text-xs text-destructive">{errors.precio_costo.message}</span>}
           </label>
 
-          <label className="text-sm">
-            Stock actual
-            <input type="number" step="0.01" min="0" disabled={tipoSeleccionado === 'SERVICIO'} className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 disabled:opacity-60" {...register('stock_actual', { valueAsNumber: true })} />
-            {errors.stock_actual && <span className="mt-1 block text-xs text-destructive">{errors.stock_actual.message}</span>}
-          </label>
-
           <label className="flex items-center gap-2 text-sm">
             <input type="checkbox" disabled={tipoSeleccionado === 'SERVICIO'} {...register('maneja_inventario')} />
             Maneja inventario
@@ -254,6 +235,10 @@ function ProductosCreatePage() {
             <input type="checkbox" {...register('activo')} />
             Activo
           </label>
+
+          <p className="text-xs text-muted-foreground md:col-span-2">
+            El stock actual se gestiona desde inventario. La ficha de producto solo mantiene datos maestros del catalogo.
+          </p>
         </div>
 
         <div className="mt-4">

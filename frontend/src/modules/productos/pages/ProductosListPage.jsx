@@ -168,7 +168,6 @@ function ProductosListPage() {
           precio_referencia: Number(editForm.precio_referencia) || 0,
           precio_costo: Number(editForm.precio_costo) || 0,
           maneja_inventario: editForm.tipo === 'SERVICIO' ? false : Boolean(editForm.maneja_inventario),
-          stock_actual: editForm.tipo === 'SERVICIO' ? 0 : Number(editForm.stock_actual) || 0,
           activo: Boolean(editForm.activo),
         },
         { suppressGlobalErrorToast: true },
@@ -250,6 +249,12 @@ function ProductosListPage() {
 
           return (
             <div className="flex items-center gap-1">
+              <Link
+                to={`/productos/${producto.id}`}
+                className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'h-7 px-2 text-xs')}
+              >
+                Ver
+              </Link>
               {canEdit ? (
                 <Button
                   size="sm"
@@ -604,7 +609,6 @@ function ProductosListPage() {
                         ...prev,
                         tipo: nextTipo,
                         maneja_inventario: nextTipo === 'SERVICIO' ? false : true,
-                        stock_actual: nextTipo === 'SERVICIO' ? 0 : prev.stock_actual,
                       }))
                     }}
                   >
@@ -637,18 +641,15 @@ function ProductosListPage() {
                   />
                 </label>
 
-                <label className="text-sm">
+                <div className="text-sm">
                   Stock actual
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    disabled={editForm.tipo === 'SERVICIO'}
-                    className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 disabled:opacity-60"
-                    value={editForm.tipo === 'SERVICIO' ? 0 : editForm.stock_actual}
-                    onChange={(event) => updateEditField('stock_actual', event.target.value)}
-                  />
-                </label>
+                  <div className="mt-1 rounded-md border border-input bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
+                    {formatSmartNumber(editForm.stock_actual ?? 0, { maximumFractionDigits: 2 })}
+                  </div>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    El stock se ajusta desde inventario, no desde esta ficha.
+                  </p>
+                </div>
 
                 <label className="flex items-center gap-2 text-sm">
                   <input
