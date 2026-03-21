@@ -23,6 +23,7 @@ function VentasGuiasFormPage() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [numeroPreview, setNumeroPreview] = useState('...')
+  const [estadoActual, setEstadoActual] = useState('')
   const [clientes, setClientes] = useState([])
   const [pedidos, setPedidos] = useState([])
   const [productos, setProductos] = useState([])
@@ -32,9 +33,11 @@ function VentasGuiasFormPage() {
   const canCreate = usePermission(VENTAS_PERMISSIONS.crear)
   const canEdit = usePermission(VENTAS_PERMISSIONS.editar)
   const canSubmit = isEdit ? canEdit : canCreate
+  const isEditableState = !isEdit || estadoActual === 'BORRADOR'
   const noPermissionMessage = isEdit
     ? 'No tiene permiso para editar guias de despacho.'
     : 'No tiene permiso para crear guias de despacho.'
+  const blockedByStateMessage = 'Solo se pueden editar guias en estado BORRADOR.'
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -52,6 +55,7 @@ function VentasGuiasFormPage() {
 
       if (isEdit) {
         const guia = await ventasApi.getOne(ventasApi.endpoints.guias, id)
+        setEstadoActual(String(guia.estado || ''))
         const itemRows = await ventasApi.getList(ventasApi.endpoints.guiasItems)
         const scoped = itemRows.filter((row) => String(row.guia_despacho) === String(id))
         setNumeroPreview(String(guia.numero || '-'))
@@ -70,6 +74,7 @@ function VentasGuiasFormPage() {
           impuesto_porcentaje: toIntegerString(row.impuesto_porcentaje || 0),
         })) : [emptyItem()])
       } else {
+        setEstadoActual('BORRADOR')
         const next = await ventasApi.getOne(ventasApi.endpoints.guias, 'siguiente_numero')
         setNumeroPreview(String(next?.numero || '-'))
       }
@@ -117,8 +122,8 @@ function VentasGuiasFormPage() {
 
   const submit = async (event) => {
     event.preventDefault()
-    if (!canSubmit) {
-      toast.error(noPermissionMessage)
+    if (!canSubmit || !isEditableState) {
+      toast.error(!canSubmit ? noPermissionMessage : blockedByStateMessage)
       return
     }
     if (!form.cliente) {
@@ -194,13 +199,14 @@ function VentasGuiasFormPage() {
         <Link to="/ventas/guias" className={cn(buttonVariants({ variant: 'outline', size: 'md' }))}>Volver</Link>
       </div>
 
-      {!canSubmit ? (
+      {!canSubmit || !isEditableState ? (
         <p className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
-          {noPermissionMessage}
+          {!canSubmit ? noPermissionMessage : blockedByStateMessage}
         </p>
       ) : null}
 
       <form onSubmit={submit} className="space-y-4">
+        <fieldset disabled={!canSubmit || !isEditableState} className="space-y-4">
         <div className="grid gap-3 rounded-md border border-border bg-card p-4 md:grid-cols-2">
           <SearchableSelect
             value={form.cliente}
@@ -247,8 +253,9 @@ function VentasGuiasFormPage() {
 
         <div className="flex justify-end gap-2">
           <Link to="/ventas/guias" className={cn(buttonVariants({ variant: 'outline', size: 'md' }))}>Cancelar</Link>
-          <Button type="submit" disabled={saving || !canSubmit}>{saving ? 'Guardando...' : isEdit ? 'Guardar cambios' : 'Crear guia'}</Button>
+          <Button type="submit" disabled={saving || !canSubmit || !isEditableState}>{saving ? 'Guardando...' : isEdit ? 'Guardar cambios' : 'Crear guia'}</Button>
         </div>
+        </fieldset>
       </form>
     </section>
   )

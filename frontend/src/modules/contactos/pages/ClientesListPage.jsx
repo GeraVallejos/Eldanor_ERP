@@ -13,6 +13,7 @@ import TablePagination from '@/components/ui/TablePagination'
 import { getChileDateSuffix } from '@/lib/dateTimeFormat'
 import { formatCurrencyCLP, formatSmartNumber } from '@/lib/numberFormat'
 import { useTableSorting } from '@/lib/tableSorting'
+import { useResponsiveTablePageSize } from '@/lib/useResponsiveTablePageSize'
 import { cn } from '@/lib/utils'
 import { downloadExcelFile } from '@/modules/shared/exports/downloadExcelFile'
 import { downloadSimpleTablePdf } from '@/modules/shared/exports/downloadSimpleTablePdf'
@@ -43,6 +44,7 @@ function getTodaySuffix() {
 }
 
 function ClientesListPage() {
+  const pageSize = useResponsiveTablePageSize({ reservedHeight: 450 })
   const currentUser = useSelector(selectCurrentUser)
   const [clientes, setClientes] = useState([])
   const [contactos, setContactos] = useState([])
@@ -127,7 +129,7 @@ function ClientesListPage() {
     })
   }, [clientes, contactoById, search])
 
-  const { paginatedRows: paginatedClientes, toggleSort, getSortIndicator, currentPage, totalPages, totalRows, pageSize, nextPage, prevPage } = useTableSorting(filteredClientes, {
+  const { paginatedRows: paginatedClientes, toggleSort, getSortIndicator, currentPage, totalPages, totalRows, nextPage, prevPage } = useTableSorting(filteredClientes, {
     accessors: {
       creado_en: (cliente) => cliente.creado_en,
       nombre: (cliente) => contactoById.get(String(cliente.contacto))?.nombre || '',
@@ -143,6 +145,7 @@ function ClientesListPage() {
     },
     initialKey: 'creado_en',
     initialDirection: 'desc',
+    pageSize,
   })
 
   const openEditModal = (cliente) => {

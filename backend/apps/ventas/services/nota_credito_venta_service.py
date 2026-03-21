@@ -5,10 +5,11 @@ from django.utils import timezone
 
 from apps.core.exceptions import BusinessRuleError, ConflictError, ResourceNotFoundError
 from apps.core.models import TipoDocumento
-from apps.core.models.cartera import CuentaPorCobrar
-from apps.core.services import CarteraService, DomainEventService, OutboxService, SecuenciaService
+from apps.core.services import DomainEventService, OutboxService, SecuenciaService
+from apps.tesoreria.models import CuentaPorCobrar
+from apps.tesoreria.services import CarteraService
 from apps.core.services.accounting_bridge import AccountingBridge
-from apps.documentos.models import EstadoContable
+from apps.documentos.models import EstadoContable, TipoDocumentoReferencia
 from apps.documentos.services.integracion_tributaria_service import IntegracionTributariaService
 from apps.ventas.models import (
     EstadoFacturaVenta,
@@ -25,6 +26,71 @@ from apps.ventas.services.calculo_ventas_service import CalculoVentasService
 
 class NotaCreditoVentaService:
     """Servicio para la gestion de notas de credito de venta y su impacto en cartera."""
+
+    @classmethod
+    def _registrar_reingreso_inventario_si_corresponde(cls, *, nota, items, empresa, usuario):
+        """Registra reingreso fisico solo para notas de credito por devolucion."""
+        from apps.inventario.services.inventario_service import InventarioService
+
+        if nota.tipo != TipoNotaCreditoVenta.DEVOLUCION:
+            return
+
+        for item in items:
+            if not item.producto_id or not item.producto.maneja_inventario:
+                continue
+
+            InventarioService.registrar_movimiento(
+                producto_id=item.producto_id,
+                tipo="ENTRADA",
+                cantidad=item.cantidad,
+                referencia=f"NCV-{nota.numero}",
+                empresa=empresa,
+                usuario=usuario,
+                documento_tipo=TipoDocumentoReferencia.AJUSTE,
+                documento_id=nota.id,
+            )
+
+    @classmethod
+    def _revertir_reingreso_inventario_si_corresponde(cls, *, nota, empresa, usuario):
+        """Revierte el reingreso fisico cuando se anula una devolucion ya emitida."""
+        from apps.inventario.models import MovimientoInventario, TipoMovimiento
+        from apps.inventario.services.inventario_service import InventarioService
+
+        if nota.tipo != TipoNotaCreditoVenta.DEVOLUCION:
+            return
+
+        items = NotaCreditoVentaItem.all_objects.filter(nota_credito=nota).select_related("producto")
+        for item in items:
+            if not item.producto_id or not item.producto.maneja_inventario:
+                continue
+
+            movimiento_entrada = (
+                MovimientoInventario.all_objects.filter(
+                    empresa=empresa,
+                    producto_id=item.producto_id,
+                    documento_tipo=TipoDocumentoReferencia.AJUSTE,
+                    documento_id=nota.id,
+                    tipo=TipoMovimiento.ENTRADA,
+                    referencia=f"NCV-{nota.numero}",
+                )
+                .order_by("-creado_en", "-id")
+                .first()
+            )
+            if not movimiento_entrada:
+                continue
+
+            InventarioService.registrar_movimiento(
+                producto_id=item.producto_id,
+                bodega_id=movimiento_entrada.bodega_id,
+                tipo=TipoMovimiento.SALIDA,
+                cantidad=item.cantidad,
+                referencia=f"ANULACION-NCV-{nota.numero}",
+                empresa=empresa,
+                usuario=usuario,
+                costo_unitario=movimiento_entrada.costo_unitario,
+                documento_tipo=TipoDocumentoReferencia.AJUSTE,
+                documento_id=nota.id,
+            )
 
     @classmethod
     def recalcular_totales(cls, *, nota):
@@ -140,9 +206,16 @@ class NotaCreditoVentaService:
         if Decimal(nota.total or 0) <= 0:
             raise BusinessRuleError("No se puede emitir una nota de credito con total cero.")
 
-        items = NotaCreditoVentaItem.all_objects.filter(nota_credito=nota)
+        items = NotaCreditoVentaItem.all_objects.filter(nota_credito=nota).select_related("producto")
         if not items.exists():
             raise BusinessRuleError("No se puede emitir una nota de credito sin lineas.")
+
+        cls._registrar_reingreso_inventario_si_corresponde(
+            nota=nota,
+            items=items,
+            empresa=empresa,
+            usuario=usuario,
+        )
 
         referencia_cxc = f"FV-{nota.factura_origen.numero}-{str(nota.factura_origen_id)[:8]}"
         cxc = CuentaPorCobrar.all_objects.filter(
@@ -210,6 +283,12 @@ class NotaCreditoVentaService:
             raise ConflictError(
                 f"Solo se puede anular una nota de credito EMITIDA (estado: {nota.get_estado_display()})."
             )
+
+        cls._revertir_reingreso_inventario_si_corresponde(
+            nota=nota,
+            empresa=empresa,
+            usuario=usuario,
+        )
 
         referencia_cxc = f"FV-{nota.factura_origen.numero}-{str(nota.factura_origen_id)[:8]}"
         cxc = CuentaPorCobrar.all_objects.filter(

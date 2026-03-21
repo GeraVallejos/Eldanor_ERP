@@ -9,6 +9,7 @@ import { getChileDateSuffix } from '@/lib/dateTimeFormat'
 import { formatCurrencyCLP, formatSmartNumber, toIntegerString } from '@/lib/numberFormat'
 import { useNormalizedFormItems } from '@/hooks/useNormalizedFormItems'
 import { getProductosCatalog } from '@/modules/productos/services/productosCatalogCache'
+import { usePermissions } from '@/modules/shared/auth/usePermission'
 
 function normalizeListResponse(data) {
   if (Array.isArray(data)) return data
@@ -27,12 +28,25 @@ const EMPTY_ITEM = {
   precio_unitario: '0',
 }
 
+function canCrearRecepcion(isEditMode, permissions) {
+  return !isEditMode && permissions['COMPRAS.CREAR']
+}
+
+function canEditarRecepcion(isEditMode, recepcion, permissions) {
+  return isEditMode && recepcion?.estado === 'BORRADOR' && permissions['COMPRAS.EDITAR']
+}
+
+function canConfirmarRecepcion(recepcion, permissions) {
+  return recepcion?.estado === 'BORRADOR' && permissions['COMPRAS.APROBAR']
+}
+
 function ComprasRecepcionesCreatePage() {
   const navigate = useNavigate()
   const { id: recepcionId } = useParams()
   const [searchParams] = useSearchParams()
   const isEditMode = Boolean(recepcionId)
   const prefillOrdenCompraId = searchParams.get('orden_compra') || ''
+  const permissions = usePermissions(['COMPRAS.CREAR', 'COMPRAS.EDITAR', 'COMPRAS.APROBAR'])
 
   const [loadingInitial, setLoadingInitial] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -246,7 +260,7 @@ function ComprasRecepcionesCreatePage() {
     setItems((prev) => prev.filter((_, i) => i !== index))
   }
 
-  const isReadOnly = recepcion?.estado === 'CONFIRMADA'
+  const isReadOnly = recepcion?.estado === 'CONFIRMADA' || (isEditMode && !canEditarRecepcion(true, recepcion, permissions))
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -342,7 +356,7 @@ function ComprasRecepcionesCreatePage() {
         <h2 className="text-2xl font-semibold">
           {isReadOnly ? 'Detalle recepcion' : isEditMode ? 'Editar recepcion' : 'Nueva recepcion de compra'}
         </h2>
-        {isEditMode && recepcion?.estado === 'BORRADOR' ? (
+        {isEditMode && canConfirmarRecepcion(recepcion, permissions) ? (
           <Button variant="default" size="md" onClick={() => setConfirmOpen(true)}>
             Confirmar recepcion
           </Button>
@@ -498,7 +512,7 @@ function ComprasRecepcionesCreatePage() {
           </div>
         </div>
 
-        {!isReadOnly ? (
+        {!isReadOnly && (canCrearRecepcion(isEditMode, permissions) || canEditarRecepcion(isEditMode, recepcion, permissions)) ? (
           <div className="flex justify-end gap-2">
             <Button
               type="button"

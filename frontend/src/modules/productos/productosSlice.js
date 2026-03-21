@@ -1,6 +1,6 @@
 import { createAsyncThunk, createSlice } from '@reduxjs/toolkit'
 import { api } from '@/api/client'
-import { normalizeApiError } from '@/api/errors'
+import { extractApiErrorContract, normalizeApiError } from '@/api/errors'
 import { login, logout } from '@/modules/auth/authSlice'
 import { invalidateProductosCatalogCache } from '@/modules/productos/services/productosCatalogCache'
 
@@ -90,7 +90,7 @@ export const createProducto = createAsyncThunk(
       return data
     } catch (error) {
       return rejectWithValue(
-        normalizeApiError(error, { fallback: 'No se pudo crear el producto.' }),
+        extractApiErrorContract(error, { fallback: 'No se pudo crear el producto.' }),
       )
     }
   },

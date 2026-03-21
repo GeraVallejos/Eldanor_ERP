@@ -1,7 +1,8 @@
 from django.db.models.signals import post_save
 from django.dispatch import receiver
-from apps.core.models import Empresa, Moneda
+from apps.core.models import Empresa
 from apps.core.models.secuencia import SecuenciaDocumento, TipoDocumento
+from apps.tesoreria.models import Moneda
 
 
 @receiver(post_save, sender=Empresa)

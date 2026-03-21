@@ -1,6 +1,6 @@
 from datetime import datetime, time
 
-from django.db.models import DecimalField, Q, Sum, Value
+from django.db.models import Count, DecimalField, Q, Sum, Value
 from django.db.models.functions import Coalesce
 from django.utils.dateparse import parse_date, parse_datetime
 from rest_framework import status
@@ -17,7 +17,10 @@ from apps.inventario.api.serializer import (
     BodegaSerializer,
     InventorySnapshotSerializer,
     MovimientoInventarioSerializer,
+    PrevisualizacionRegularizacionSerializer,
+    RegularizacionInventarioSerializer,
     StockProductoSerializer,
+    TrasladoInventarioSerializer,
 )
 from apps.inventario.models import Bodega, InventorySnapshot, MovimientoInventario, ReservaStock, StockProducto
 from apps.inventario.services.inventario_service import InventarioService
@@ -52,10 +55,12 @@ class StockProductoViewSet(TenantViewSetMixin, ModelViewSet):
         "partial_update": Acciones.EDITAR,
         "destroy": Acciones.BORRAR,
         "resumen": Acciones.VER,
+        "criticos": Acciones.VER,
+        "analytics": Acciones.VER,
     }
 
-    @action(detail=False, methods=["get"])
-    def resumen(self, request):
+    def _build_resumen_payload(self, request, *, include_filters=False):
+        """Construye el payload valorizado de inventario para resumen y reportes."""
         queryset = self.get_queryset().filter(producto__activo=True)
         empresa = self.get_empresa()
         reservas_qs = ReservaStock.all_objects.filter(empresa=empresa, producto__activo=True)
@@ -63,6 +68,11 @@ class StockProductoViewSet(TenantViewSetMixin, ModelViewSet):
         producto_id = request.query_params.get("producto_id")
         bodega_id = request.query_params.get("bodega_id")
         group_by = request.query_params.get("group_by")
+        only_with_stock = str(request.query_params.get("only_with_stock", "")).lower() in {
+            "1",
+            "true",
+            "si",
+        }
 
         if producto_id:
             queryset = queryset.filter(producto_id=producto_id)
@@ -142,24 +152,143 @@ class StockProductoViewSet(TenantViewSetMixin, ModelViewSet):
                     "disponible_total": item["stock_total"] - reservas_por_bodega.get(str(item["bodega_id"]), 0),
                 }
                 for item in list(
-                queryset.values("bodega_id", "bodega__nombre")
-                .annotate(stock_total=Sum("stock"), valor_total=Sum("valor_stock"))
-                .order_by("bodega__nombre")
+                    queryset.values("bodega_id", "bodega__nombre")
+                    .annotate(stock_total=Sum("stock"), valor_total=Sum("valor_stock"))
+                    .order_by("bodega__nombre")
                 )
             ]
         else:
             detalle = []
 
+        if only_with_stock:
+            detalle = [item for item in detalle if (item.get("stock_total") or 0) > 0]
+
+        payload = {
+            "totales": {
+                "stock_total": total_stock,
+                "reservado_total": total_reservado,
+                "disponible_total": total_disponible,
+                "valor_total": total_valor,
+            },
+            "group_by": group_by,
+            "detalle": detalle,
+        }
+        if include_filters:
+            payload["filters"] = {
+                "producto_id": producto_id or "",
+                "bodega_id": bodega_id or "",
+                "group_by": group_by or "",
+                "only_with_stock": only_with_stock,
+            }
+        return payload
+
+    @action(detail=False, methods=["get"])
+    def resumen(self, request):
+        return Response(self._build_resumen_payload(request), status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=["get"])
+    def analytics(self, request):
+        """Entrega el reporte analitico valorizado de inventario listo para frontend."""
+        payload = self._build_resumen_payload(request, include_filters=True)
+        detalle = payload["detalle"]
+        top_valorizados = sorted(
+            detalle,
+            key=lambda item: (item.get("valor_total") or 0, item.get("stock_total") or 0),
+            reverse=True,
+        )[:5]
+        criticos_qs = self.get_queryset().filter(
+            producto__activo=True,
+            producto__maneja_inventario=True,
+            producto__stock_minimo__gt=0,
+        )
+        if request.query_params.get("bodega_id"):
+            criticos_qs = criticos_qs.filter(bodega_id=request.query_params.get("bodega_id"))
+        criticos = list(
+            criticos_qs.values(
+                "producto_id",
+                "producto__nombre",
+                "producto__sku",
+                "producto__stock_minimo",
+            )
+            .annotate(
+                stock_total=Coalesce(
+                    Sum("stock"),
+                    Value(0),
+                    output_field=DecimalField(max_digits=12, decimal_places=2),
+                ),
+            )
+            .order_by("producto__nombre")
+        )
+        payload["top_valorizados"] = top_valorizados
+        payload["criticos"] = [
+            {
+                **item,
+                "faltante": max(
+                    (item["producto__stock_minimo"] or 0) - (item["stock_total"] or 0),
+                    0,
+                ),
+            }
+            for item in criticos
+            if (item["stock_total"] or 0) <= (item["producto__stock_minimo"] or 0)
+        ]
+        payload["metrics"] = {
+            "registros": len(detalle),
+            "con_stock": sum(1 for item in detalle if (item.get("stock_total") or 0) > 0),
+            "valor_total": payload["totales"]["valor_total"],
+            "stock_total": payload["totales"]["stock_total"],
+        }
+        return Response(payload, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=["get"])
+    def criticos(self, request):
+        queryset = self.get_queryset().filter(
+            producto__activo=True,
+            producto__maneja_inventario=True,
+            producto__stock_minimo__gt=0,
+        )
+
+        bodega_id = request.query_params.get("bodega_id")
+        if bodega_id:
+            queryset = queryset.filter(bodega_id=bodega_id)
+
+        detalle = list(
+            queryset.values(
+                "producto_id",
+                "producto__nombre",
+                "producto__sku",
+                "producto__stock_minimo",
+            )
+            .annotate(
+                stock_total=Coalesce(
+                    Sum("stock"),
+                    Value(0),
+                    output_field=DecimalField(max_digits=12, decimal_places=2),
+                ),
+                valor_total=Coalesce(
+                    Sum("valor_stock"),
+                    Value(0),
+                    output_field=DecimalField(max_digits=14, decimal_places=2),
+                ),
+            )
+            .order_by("producto__nombre")
+        )
+
+        criticos = [
+            {
+                **item,
+                "faltante": max(
+                    (item["producto__stock_minimo"] or 0) - (item["stock_total"] or 0),
+                    0,
+                ),
+            }
+            for item in detalle
+            if (item["stock_total"] or 0) <= (item["producto__stock_minimo"] or 0)
+        ]
+
         return Response(
             {
-                "totales": {
-                    "stock_total": total_stock,
-                    "reservado_total": total_reservado,
-                    "disponible_total": total_disponible,
-                    "valor_total": total_valor,
-                },
-                "group_by": group_by,
-                "detalle": detalle,
+                "count": len(criticos),
+                "detalle": criticos,
             },
             status=status.HTTP_200_OK,
         )
@@ -181,6 +310,10 @@ class MovimientoInventarioViewSet(TenantViewSetMixin, ModelViewSet):
         "retrieve": Acciones.VER,
         "kardex": Acciones.VER,
         "snapshot": Acciones.VER,
+        "resumen_operativo": Acciones.VER,
+        "previsualizar_regularizacion": Acciones.EDITAR,
+        "regularizar": Acciones.EDITAR,
+        "trasladar": Acciones.EDITAR,
     }
 
     @staticmethod
@@ -247,6 +380,120 @@ class MovimientoInventarioViewSet(TenantViewSetMixin, ModelViewSet):
 
         serializer = InventorySnapshotSerializer(snap)
         return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=["get"])
+    def resumen_operativo(self, request):
+        empresa = request.user.empresa_activa
+        queryset = self.get_queryset()
+
+        producto_id = request.query_params.get("producto_id")
+        bodega_id = request.query_params.get("bodega_id")
+        desde = self._parse_instant(request.query_params.get("desde"))
+        hasta = self._parse_instant(request.query_params.get("hasta"), end_of_day=True)
+
+        if producto_id:
+            queryset = queryset.filter(producto_id=producto_id)
+        if bodega_id:
+            queryset = queryset.filter(bodega_id=bodega_id)
+        if desde is not None:
+            queryset = queryset.filter(creado_en__gte=desde)
+        if hasta is not None:
+            queryset = queryset.filter(creado_en__lte=hasta)
+
+        agregados = queryset.aggregate(
+            total_movimientos=Count("id"),
+            entradas=Count("id", filter=Q(tipo="ENTRADA")),
+            salidas=Count("id", filter=Q(tipo="SALIDA")),
+            ajustes=Count("id", filter=Q(documento_tipo="AJUSTE")),
+            traslados=Count("id", filter=Q(documento_tipo="TRASLADO")),
+            cantidad_entrada=Coalesce(
+                Sum("cantidad", filter=Q(tipo="ENTRADA")),
+                Value(0),
+                output_field=DecimalField(max_digits=12, decimal_places=2),
+            ),
+            cantidad_salida=Coalesce(
+                Sum("cantidad", filter=Q(tipo="SALIDA")),
+                Value(0),
+                output_field=DecimalField(max_digits=12, decimal_places=2),
+            ),
+        )
+
+        cantidad_entrada = agregados["cantidad_entrada"] or 0
+        cantidad_salida = agregados["cantidad_salida"] or 0
+
+        return Response(
+            {
+                "empresa_id": str(empresa.id),
+                "total_movimientos": agregados["total_movimientos"] or 0,
+                "entradas": agregados["entradas"] or 0,
+                "salidas": agregados["salidas"] or 0,
+                "ajustes": agregados["ajustes"] or 0,
+                "traslados": agregados["traslados"] or 0,
+                "cantidad_entrada": cantidad_entrada,
+                "cantidad_salida": cantidad_salida,
+                "neto_unidades": cantidad_entrada - cantidad_salida,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    @action(detail=False, methods=["post"])
+    def previsualizar_regularizacion(self, request):
+        serializer = PrevisualizacionRegularizacionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        data = InventarioService.previsualizar_regularizacion_stock(
+            producto_id=serializer.validated_data["producto_id"],
+            bodega_id=serializer.validated_data.get("bodega_id"),
+            stock_objetivo=serializer.validated_data["stock_objetivo"],
+            empresa=request.user.empresa_activa,
+        )
+        return Response(data, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=["post"])
+    def regularizar(self, request):
+        serializer = RegularizacionInventarioSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        movimiento = InventarioService.regularizar_stock(
+            producto_id=serializer.validated_data["producto_id"],
+            bodega_id=serializer.validated_data.get("bodega_id"),
+            stock_objetivo=serializer.validated_data["stock_objetivo"],
+            referencia=serializer.validated_data["referencia"],
+            empresa=request.user.empresa_activa,
+            usuario=request.user,
+            costo_unitario=serializer.validated_data.get("costo_unitario"),
+            lote_codigo=serializer.validated_data.get("lote_codigo", ""),
+            fecha_vencimiento=serializer.validated_data.get("fecha_vencimiento"),
+            series=serializer.validated_data.get("series"),
+        )
+        return Response(
+            MovimientoInventarioSerializer(movimiento).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+    @action(detail=False, methods=["post"])
+    def trasladar(self, request):
+        serializer = TrasladoInventarioSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        traslado = InventarioService.trasladar_stock(
+            producto_id=serializer.validated_data["producto_id"],
+            bodega_origen_id=serializer.validated_data["bodega_origen_id"],
+            bodega_destino_id=serializer.validated_data["bodega_destino_id"],
+            cantidad=serializer.validated_data["cantidad"],
+            referencia=serializer.validated_data["referencia"],
+            empresa=request.user.empresa_activa,
+            usuario=request.user,
+            lote_codigo=serializer.validated_data.get("lote_codigo", ""),
+        )
+        return Response(
+            {
+                "traslado_id": traslado["traslado_id"],
+                "movimiento_salida": MovimientoInventarioSerializer(traslado["movimiento_salida"]).data,
+                "movimiento_entrada": MovimientoInventarioSerializer(traslado["movimiento_entrada"]).data,
+            },
+            status=status.HTTP_201_CREATED,
+        )
 
 
 class InventorySnapshotViewSet(TenantViewSetMixin, ModelViewSet):

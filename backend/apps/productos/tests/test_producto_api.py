@@ -57,7 +57,7 @@ def proveedor(db, empresa):
 
 @pytest.mark.django_db
 class TestProductoApi:
-    def test_crear_producto_sincroniza_stock_para_resumen(self, api_client, owner_usuario, empresa):
+    def test_crear_producto_no_sincroniza_stock_desde_maestro(self, api_client, owner_usuario, empresa):
         api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
 
         resp = api_client.post(
@@ -78,9 +78,8 @@ class TestProductoApi:
         assert resp.status_code == status.HTTP_201_CREATED, resp.data
 
         producto = Producto.all_objects.get(id=resp.data["id"])
-        stock = StockProducto.all_objects.filter(empresa=empresa, producto=producto).first()
-        assert stock is not None
-        assert Decimal(str(stock.stock)) == Decimal("5")
+        assert Decimal(str(producto.stock_actual)) == Decimal("5")
+        assert not StockProducto.all_objects.filter(empresa=empresa, producto=producto).exists()
 
     def test_listado_productos_oculta_inactivos_por_defecto(self, api_client, owner_usuario, empresa):
         api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")

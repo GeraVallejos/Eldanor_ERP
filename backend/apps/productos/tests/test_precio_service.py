@@ -4,8 +4,8 @@ from decimal import Decimal
 import pytest
 
 from apps.contactos.models import Cliente, Contacto
-from apps.core.models import Moneda
-from apps.core.services import TipoCambioService
+from apps.tesoreria.models import Moneda
+from apps.tesoreria.services import TipoCambioService
 from apps.core.tenant import set_current_empresa
 from apps.productos.models import ListaPrecio, ListaPrecioItem, Producto
 from apps.productos.services.precio_service import PrecioComercialService

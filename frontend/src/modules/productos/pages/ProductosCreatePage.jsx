@@ -5,6 +5,7 @@ import { useDispatch, useSelector } from 'react-redux'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
 import { z } from 'zod'
+import ApiContractError from '@/components/ui/ApiContractError'
 import Button from '@/components/ui/Button'
 import { buttonVariants } from '@/components/ui/buttonVariants'
 import { cn } from '@/lib/utils'
@@ -17,6 +18,7 @@ import {
   selectCatalogError,
   selectCatalogStatus,
   selectCategorias,
+  selectCreateProductoError,
   selectCreateProductoStatus,
   selectImpuestos,
 } from '@/modules/productos/productosSlice'
@@ -64,6 +66,7 @@ function ProductosCreatePage() {
   const catalogStatus = useSelector(selectCatalogStatus)
   const catalogError = useSelector(selectCatalogError)
   const createStatus = useSelector(selectCreateProductoStatus)
+  const createError = useSelector(selectCreateProductoError)
 
   const {
     register,
@@ -153,8 +156,7 @@ function ProductosCreatePage() {
       dispatch(fetchProductos())
       dispatch(resetCreateProductoState())
     } catch (error) {
-      toast.error(typeof error === 'string' ? error : 'No se pudo crear el producto.')
-      dispatch(resetCreateProductoState())
+      toast.error(typeof error === 'string' ? error : (error?.message || 'No se pudo crear el producto.'))
     }
   }
 
@@ -174,6 +176,10 @@ function ProductosCreatePage() {
       </div>
 
       <form className="rounded-md border border-border bg-card p-4" onSubmit={handleSubmit(onSubmit)}>
+        <ApiContractError
+          error={typeof createError === 'object' ? createError : null}
+          title="No se pudo crear el producto."
+        />
         <div className="grid gap-3 md:grid-cols-2">
           <label className="text-sm">
             Nombre

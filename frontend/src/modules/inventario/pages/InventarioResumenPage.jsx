@@ -1,15 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
 import { api } from '@/api/client'
 import { normalizeApiError } from '@/api/errors'
-import Button from '@/components/ui/Button'
-import MenuButton from '@/components/ui/MenuButton'
-import SearchableSelect from '@/components/ui/SearchableSelect'
-import { formatDateTimeChile, getChileDateSuffix } from '@/lib/dateTimeFormat'
+import { buttonVariants } from '@/components/ui/buttonVariants'
 import { formatCurrencyCLP, formatSmartNumber } from '@/lib/numberFormat'
-import { getProductosCatalog } from '@/modules/productos/services/productosCatalogCache'
-import { downloadExcelFile } from '@/modules/shared/exports/downloadExcelFile'
-import { downloadSimpleTablePdf } from '@/modules/shared/exports/downloadSimpleTablePdf'
+import { cn } from '@/lib/utils'
 
 function normalizeListResponse(data) {
   if (Array.isArray(data)) {
@@ -27,376 +23,180 @@ function formatNumber(value) {
   return formatSmartNumber(value, { maximumFractionDigits: 2 })
 }
 
-function formatCurrency(value) {
-  return formatCurrencyCLP(value)
-}
-
 function InventarioResumenPage() {
   const [stocks, setStocks] = useState([])
-  const [productos, setProductos] = useState([])
-  const [bodegas, setBodegas] = useState([])
   const [resumen, setResumen] = useState(null)
-  const [filters, setFilters] = useState({
-    group_by: 'producto',
-    producto_id: '',
-    bodega_id: '',
-  })
-  const [onlyWithStock, setOnlyWithStock] = useState(true)
+  const [criticos, setCriticos] = useState([])
+  const [resumenMovimientos, setResumenMovimientos] = useState(null)
 
-  const loadCatalogs = async () => {
+  const loadPanel = useCallback(async () => {
     try {
-      const [{ data: stocksData }, productosData, { data: bodegasData }] = await Promise.all([
-        api.get('/stocks/', { suppressGlobalErrorToast: true }),
-        getProductosCatalog(),
-        api.get('/bodegas/', { suppressGlobalErrorToast: true }),
-      ])
+      const [{ data: stocksData }, { data: resumenData }, { data: criticosData }, { data: movimientosData }] =
+        await Promise.all([
+          api.get('/stocks/', { suppressGlobalErrorToast: true }),
+          api.get('/stocks/resumen/', {
+            params: { group_by: 'producto' },
+            suppressGlobalErrorToast: true,
+          }),
+          api.get('/stocks/criticos/', { suppressGlobalErrorToast: true }),
+          api.get('/movimientos-inventario/resumen_operativo/', { suppressGlobalErrorToast: true }),
+        ])
+
       setStocks(normalizeListResponse(stocksData))
-      setProductos(productosData)
-      setBodegas(normalizeListResponse(bodegasData))
+      setResumen(resumenData)
+      setCriticos(Array.isArray(criticosData?.detalle) ? criticosData.detalle : [])
+      setResumenMovimientos(movimientosData)
     } catch (error) {
-      toast.error(normalizeApiError(error, { fallback: 'No se pudieron cargar los catalogos de resumen.' }))
-    }
-  }
-
-  const loadResumen = useCallback(async (nextFilters) => {
-    try {
-      const { data } = await api.get('/stocks/resumen/', {
-        params: nextFilters,
-        suppressGlobalErrorToast: true,
-      })
-      setResumen(data)
-    } catch (error) {
-      toast.error(normalizeApiError(error, { fallback: 'No se pudo cargar el resumen valorizado.' }))
+      toast.error(normalizeApiError(error, { fallback: 'No se pudo cargar el panel de inventario.' }))
     }
   }, [])
 
   useEffect(() => {
     const timeoutId = setTimeout(() => {
-      void loadCatalogs()
-      void loadResumen({
-        group_by: 'producto',
-        producto_id: '',
-        bodega_id: '',
-      })
+      void loadPanel()
     }, 0)
 
     return () => clearTimeout(timeoutId)
-  }, [loadResumen])
+  }, [loadPanel])
 
-  const updateFilter = (key, value) => {
-    setFilters((prev) => ({ ...prev, [key]: value }))
-  }
-
-  const productoOptions = useMemo(
-    () =>
-      productos.map((producto) => ({
-        value: String(producto.id),
-        label: producto.nombre || `Producto ${producto.id}`,
-        keywords: `${producto.sku || ''} ${producto.tipo || ''}`,
-      })),
-    [productos],
+  const stockGeneral = useMemo(
+    () => stocks.reduce((acc, row) => acc + Number(row.stock || 0), 0),
+    [stocks],
   )
-
-  const productoById = useMemo(() => {
-    const map = new Map()
-    productos.forEach((producto) => {
-      map.set(String(producto.id), producto)
-    })
-    return map
-  }, [productos])
-
-  const bodegaOptions = useMemo(
-    () =>
-      bodegas.map((bodega) => ({
-        value: String(bodega.id),
-        label: bodega.nombre || `Bodega ${bodega.id}`,
-      })),
-    [bodegas],
-  )
-
-  const bodegaById = useMemo(() => {
-    const map = new Map()
-    bodegas.forEach((bodega) => {
-      map.set(String(bodega.id), bodega)
-    })
-    return map
-  }, [bodegas])
-
-  const onSubmit = async (event) => {
-    event.preventDefault()
-    await loadResumen(filters)
-  }
-
-  const summaryStock = useMemo(() => {
-    return stocks.reduce((acc, row) => acc + Number(row.stock || 0), 0)
-  }, [stocks])
-
-  const resumenStockTotal = Number(resumen?.totales?.stock_total || 0)
-
-  const getTodaySuffix = () => getChileDateSuffix()
-
-  const detalleRows = useMemo(() => {
-    const rows = Array.isArray(resumen?.detalle) ? resumen.detalle : []
-
-    if (filters.group_by === 'bodega') {
-      return rows.map((row) => ({
-        groupLabel: row.bodega__nombre || '-',
-        stockTotal: Number(row.stock_total || 0),
-        reservadoTotal: Number(row.reservado_total || 0),
-        disponibleTotal: Number(row.disponible_total || 0),
-        valorTotal: Number(row.valor_total || 0),
-      }))
-    }
-
-    return rows.map((row) => {
-      const productoId = String(row.producto_id || '')
-      const producto = productoById.get(productoId)
-      return {
-        groupLabel: row.producto__nombre || producto?.nombre || '-',
-        categoria: row.producto__categoria__nombre || '-',
-        sku: producto?.sku || '-',
-        tipo: producto?.tipo || '-',
-        stockTotal: Number(row.stock_total || 0),
-        reservadoTotal: Number(row.reservado_total || 0),
-        disponibleTotal: Number(row.disponible_total || 0),
-        valorTotal: Number(row.valor_total || 0),
-      }
-    })
-  }, [resumen, filters.group_by, productoById])
-
-  const visibleRows = useMemo(() => {
-    if (!onlyWithStock) {
-      return detalleRows
-    }
-    return detalleRows.filter((row) => Number(row.stockTotal || 0) > 0)
-  }, [detalleRows, onlyWithStock])
-
-  const handleExportExcel = async () => {
-    const rows = visibleRows
-    if (rows.length === 0) {
-      return
-    }
-
-    const filtroProductoLabel = filters.producto_id
-      ? productoById.get(String(filters.producto_id))?.nombre || String(filters.producto_id)
-      : 'Todos'
-    const filtroBodegaLabel = filters.bodega_id
-      ? bodegaById.get(String(filters.bodega_id))?.nombre || String(filters.bodega_id)
-      : 'Todas'
-    const valorTotalGeneral = Number(resumen?.totales?.valor_total || 0)
-    const now = new Date()
-
-    await downloadExcelFile({
-      sheetName: 'ResumenInventario',
-      fileName: `resumen_inventario_${getTodaySuffix()}.xlsx`,
-      columns:
-        filters.group_by === 'bodega'
-          ? [
-              { header: 'Bodega', key: 'grupo', width: 30 },
-              { header: 'Stock total', key: 'stock_total', width: 14 },
-              { header: 'Stock reservado', key: 'reservado_total', width: 16 },
-              { header: 'Stock disponible', key: 'disponible_total', width: 16 },
-              { header: 'Valor total', key: 'valor_total', width: 16 },
-              { header: 'Costo promedio', key: 'costo_promedio', width: 16 },
-              { header: '% valor inventario', key: 'participacion_valor_pct', width: 18 },
-              { header: 'Agrupacion', key: 'ctx_group_by', width: 14 },
-              { header: 'Filtro producto', key: 'ctx_producto', width: 24 },
-              { header: 'Filtro bodega', key: 'ctx_bodega', width: 24 },
-              { header: 'Solo con stock', key: 'ctx_only_with_stock', width: 16 },
-              { header: 'Exportado en', key: 'ctx_exportado_en', width: 22 },
-            ]
-          : [
-              { header: 'Producto', key: 'grupo', width: 30 },
-              { header: 'Categoria', key: 'categoria', width: 22 },
-              { header: 'SKU', key: 'sku', width: 18 },
-              { header: 'Tipo', key: 'tipo', width: 16 },
-              { header: 'Stock total', key: 'stock_total', width: 14 },
-              { header: 'Stock reservado', key: 'reservado_total', width: 16 },
-              { header: 'Stock disponible', key: 'disponible_total', width: 16 },
-              { header: 'Valor total', key: 'valor_total', width: 16 },
-              { header: 'Costo promedio', key: 'costo_promedio', width: 16 },
-              { header: '% valor inventario', key: 'participacion_valor_pct', width: 18 },
-              { header: 'Agrupacion', key: 'ctx_group_by', width: 14 },
-              { header: 'Filtro producto', key: 'ctx_producto', width: 24 },
-              { header: 'Filtro bodega', key: 'ctx_bodega', width: 24 },
-              { header: 'Solo con stock', key: 'ctx_only_with_stock', width: 16 },
-              { header: 'Exportado en', key: 'ctx_exportado_en', width: 22 },
-            ],
-      rows: rows.map((row) => ({
-        grupo: row.groupLabel,
-        categoria: row.categoria,
-        sku: row.sku,
-        tipo: row.tipo,
-        stock_total: row.stockTotal,
-        reservado_total: row.reservadoTotal,
-        disponible_total: row.disponibleTotal,
-        valor_total: row.valorTotal,
-        costo_promedio: Number(row.stockTotal || 0) > 0 ? row.valorTotal / row.stockTotal : 0,
-        participacion_valor_pct:
-          valorTotalGeneral > 0 ? Number(((row.valorTotal / valorTotalGeneral) * 100).toFixed(2)) : 0,
-        ctx_group_by: filters.group_by,
-        ctx_producto: filtroProductoLabel,
-        ctx_bodega: filtroBodegaLabel,
-        ctx_only_with_stock: onlyWithStock ? 'Si' : 'No',
-        ctx_exportado_en: formatDateTimeChile(now),
-      })),
-    })
-  }
-
-  const handleExportPdf = async () => {
-    const rows = visibleRows
-    if (rows.length === 0) {
-      return
-    }
-
-    await downloadSimpleTablePdf({
-      title: 'Resumen valorizado de inventario',
-      fileName: `resumen_inventario_${getTodaySuffix()}.pdf`,
-      headers:
-        filters.group_by === 'bodega'
-          ? ['Bodega', 'Stock', 'Valor']
-          : ['Producto', 'Categoria', 'SKU', 'Tipo', 'Stock', 'Valor'],
-      rows:
-        filters.group_by === 'bodega'
-          ? rows.map((row) => [
-              row.groupLabel,
-              formatNumber(row.stockTotal),
-              formatCurrency(row.valorTotal),
-            ])
-          : rows.map((row) => [
-              row.groupLabel,
-              row.categoria || '-',
-              row.sku || '-',
-              row.tipo || '-',
-              formatNumber(row.stockTotal),
-              formatCurrency(row.valorTotal),
-            ]),
-    })
-  }
 
   return (
     <section className="space-y-4">
       <div>
-        <h2 className="text-2xl font-semibold">Resumen valorizado</h2>
-        <p className="text-sm text-muted-foreground">Consolidado de stock y valor para dashboard de inventario.</p>
+        <h2 className="text-2xl font-semibold">Resumen de inventario</h2>
+        <p className="text-sm text-muted-foreground">
+          Panel ejecutivo con salud del stock, alertas y accesos rapidos a operacion y reportes.
+        </p>
       </div>
-
-      <form className="grid gap-3 rounded-md border border-border bg-card p-4 md:grid-cols-4" onSubmit={onSubmit}>
-        <label className="text-sm">
-          Agrupar por
-          <select
-            className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
-            value={filters.group_by}
-            onChange={(event) => updateFilter('group_by', event.target.value)}
-          >
-            <option value="producto">Producto</option>
-            <option value="bodega">Bodega</option>
-          </select>
-        </label>
-
-        <label className="text-sm">
-          Producto
-          <SearchableSelect
-            className="mt-1"
-            value={filters.producto_id}
-            onChange={(next) => updateFilter('producto_id', next)}
-            options={productoOptions}
-            ariaLabel="Producto"
-            placeholder="Buscar producto..."
-            emptyText="No hay productos coincidentes"
-          />
-        </label>
-
-        <label className="text-sm">
-          Bodega
-          <SearchableSelect
-            className="mt-1"
-            value={filters.bodega_id}
-            onChange={(next) => updateFilter('bodega_id', next)}
-            options={bodegaOptions}
-            ariaLabel="Bodega"
-            placeholder="Buscar bodega..."
-            emptyText="No hay bodegas coincidentes"
-          />
-        </label>
-
-        <div className="flex items-end gap-2">
-          <Button type="submit">Actualizar</Button>
-          <MenuButton
-            variant="outline"
-            onExportExcel={handleExportExcel}
-            onExportPdf={handleExportPdf}
-            disabled={visibleRows.length === 0}
-          />
-        </div>
-      </form>
 
       <div className="grid gap-3 md:grid-cols-3">
         <article className="rounded-md border border-border bg-card p-4">
-          <p className="text-sm text-muted-foreground">Stock total resumido</p>
-          <p className="text-xl font-semibold">{formatNumber(resumenStockTotal)}</p>
-          
+          <p className="text-sm text-muted-foreground">Stock total reportado</p>
+          <p className="text-xl font-semibold">{formatNumber(resumen?.totales?.stock_total || 0)}</p>
         </article>
         <article className="rounded-md border border-border bg-card p-4">
           <p className="text-sm text-muted-foreground">Valor total inventario</p>
-          <p className="text-xl font-semibold">{formatCurrency(resumen?.totales?.valor_total)}</p>
+          <p className="text-xl font-semibold">{formatCurrencyCLP(resumen?.totales?.valor_total || 0)}</p>
         </article>
-         <article className="rounded-md border border-border bg-card p-4">
-          <p className="text-sm text-muted-foreground">Stock total general (incluye inactivos)</p>
-          <p className="text-xl font-semibold">{formatNumber(summaryStock)}</p>
+        <article className="rounded-md border border-border bg-card p-4">
+          <p className="text-sm text-muted-foreground">Stock general cargado</p>
+          <p className="text-xl font-semibold">{formatNumber(stockGeneral)}</p>
         </article>
       </div>
 
-      <label className="inline-flex items-center gap-2 text-sm text-muted-foreground">
-        <input
-          type="checkbox"
-          checked={onlyWithStock}
-          onChange={(event) => setOnlyWithStock(event.target.checked)}
-        />
-        Mostrar solo items con stock mayor a 0
-      </label>
+      {resumenMovimientos ? (
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <article className="rounded-md border border-border bg-card p-4">
+            <p className="text-sm text-muted-foreground">Movimientos registrados</p>
+            <p className="text-xl font-semibold">{formatNumber(resumenMovimientos.total_movimientos || 0)}</p>
+            <p className="mt-1 text-sm text-muted-foreground">Ajustes: {formatNumber(resumenMovimientos.ajustes || 0)}</p>
+          </article>
+          <article className="rounded-md border border-border bg-card p-4">
+            <p className="text-sm text-muted-foreground">Entradas</p>
+            <p className="text-xl font-semibold">{formatNumber(resumenMovimientos.cantidad_entrada || 0)}</p>
+            <p className="mt-1 text-sm text-muted-foreground">Eventos: {formatNumber(resumenMovimientos.entradas || 0)}</p>
+          </article>
+          <article className="rounded-md border border-border bg-card p-4">
+            <p className="text-sm text-muted-foreground">Salidas</p>
+            <p className="text-xl font-semibold">{formatNumber(resumenMovimientos.cantidad_salida || 0)}</p>
+            <p className="mt-1 text-sm text-muted-foreground">Eventos: {formatNumber(resumenMovimientos.salidas || 0)}</p>
+          </article>
+          <article className="rounded-md border border-border bg-card p-4">
+            <p className="text-sm text-muted-foreground">Neto de unidades</p>
+            <p className="text-xl font-semibold">{formatNumber(resumenMovimientos.neto_unidades || 0)}</p>
+            <p className="mt-1 text-sm text-muted-foreground">Traslados: {formatNumber(resumenMovimientos.traslados || 0)}</p>
+          </article>
+        </div>
+      ) : null}
 
-      <div className="overflow-x-auto rounded-md border border-border bg-card">
-        <table className="min-w-full text-sm">
-          <thead className="bg-muted/40">
-            <tr>
-              <th className="px-3 py-2 text-left font-medium">
-                {filters.group_by === 'bodega' ? 'Bodega' : 'Producto'}
-              </th>
-              {filters.group_by === 'producto' ? (
-                <th className="px-3 py-2 text-left font-medium">Categoria</th>
-              ) : null}
-              {filters.group_by === 'producto' ? (
-                <th className="px-3 py-2 text-left font-medium">SKU</th>
-              ) : null}
-              {filters.group_by === 'producto' ? (
-                <th className="px-3 py-2 text-left font-medium">Tipo</th>
-              ) : null}
-              <th className="px-3 py-2 text-left font-medium">Stock</th>
-              <th className="px-3 py-2 text-left font-medium">Valor</th>
-            </tr>
-          </thead>
-          <tbody>
-            {visibleRows.length > 0 ? (
-              visibleRows.map((row, index) => (
-                <tr key={`${filters.group_by}-${index}`} className="border-t border-border">
-                  <td className="px-3 py-2">{row.groupLabel}</td>
-                  {filters.group_by === 'producto' ? <td className="px-3 py-2">{row.categoria || '-'}</td> : null}
-                  {filters.group_by === 'producto' ? <td className="px-3 py-2">{row.sku || '-'}</td> : null}
-                  {filters.group_by === 'producto' ? <td className="px-3 py-2">{row.tipo || '-'}</td> : null}
-                  <td className="px-3 py-2">{formatNumber(row.stockTotal)}</td>
-                  <td className="px-3 py-2">{formatCurrency(row.valorTotal)}</td>
-                </tr>
-              ))
-            ) : (
+      <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-4">
+        <div className="rounded-md border border-border bg-card p-4">
+          <p className="text-sm text-muted-foreground">Lectura analitica</p>
+          <h3 className="mt-1 text-lg font-semibold">Reportes de inventario</h3>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Revisa stock valorizado, criticidad, agrupaciones y exportaciones por producto o bodega.
+          </p>
+          <Link to="/inventario/reportes" className={cn(buttonVariants({ variant: 'outline', size: 'md' }), 'mt-4')}>
+            Ir a reportes
+          </Link>
+        </div>
+
+        <div className="rounded-md border border-border bg-card p-4">
+          <p className="text-sm text-muted-foreground">Historial auditable</p>
+          <h3 className="mt-1 text-lg font-semibold">Kardex</h3>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Consulta entradas, salidas, ajustes y documentos con trazabilidad valorizada.
+          </p>
+          <Link to="/inventario/kardex" className={cn(buttonVariants({ variant: 'outline', size: 'md' }), 'mt-4')}>
+            Ir a kardex
+          </Link>
+        </div>
+
+        <div className="rounded-md border border-border bg-card p-4">
+          <p className="text-sm text-muted-foreground">Operaciones sensibles</p>
+          <h3 className="mt-1 text-lg font-semibold">Ajustes de inventario</h3>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Gestiona conteos fisicos, previsualiza diferencias y aplica regularizaciones con trazabilidad.
+          </p>
+          <Link to="/inventario/ajustes" className={cn(buttonVariants({ variant: 'outline', size: 'md' }), 'mt-4')}>
+            Ir a ajustes
+          </Link>
+        </div>
+
+        <div className="rounded-md border border-border bg-card p-4">
+          <p className="text-sm text-muted-foreground">Movimientos internos</p>
+          <h3 className="mt-1 text-lg font-semibold">Traslados entre bodegas</h3>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Registra traspasos internos y consulta sus ultimos movimientos desde una vista dedicada.
+          </p>
+          <Link to="/inventario/traslados" className={cn(buttonVariants({ variant: 'outline', size: 'md' }), 'mt-4')}>
+            Ir a traslados
+          </Link>
+        </div>
+      </div>
+
+      <div className="rounded-md border border-border bg-card p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h3 className="text-lg font-semibold">Stock critico</h3>
+            <p className="text-sm text-muted-foreground">Productos bajo o al limite de stock minimo.</p>
+          </div>
+          <span className="rounded-full bg-muted px-3 py-1 text-sm font-medium">{criticos.length}</span>
+        </div>
+        <div className="mt-4 overflow-x-auto">
+          <table className="min-w-full text-sm">
+            <thead className="bg-muted/40">
               <tr>
-                <td className="px-3 py-3 text-muted-foreground" colSpan={filters.group_by === 'producto' ? 6 : 3}>
-                  Sin datos para mostrar.
-                </td>
+                <th className="px-3 py-2 text-left font-medium">Producto</th>
+                <th className="px-3 py-2 text-left font-medium">SKU</th>
+                <th className="px-3 py-2 text-left font-medium">Stock</th>
+                <th className="px-3 py-2 text-left font-medium">Minimo</th>
+                <th className="px-3 py-2 text-left font-medium">Faltante</th>
               </tr>
-            )}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {criticos.length > 0 ? (
+                criticos.map((row) => (
+                  <tr key={row.producto_id} className="border-t border-border">
+                    <td className="px-3 py-2">{row.producto__nombre}</td>
+                    <td className="px-3 py-2">{row.producto__sku || '-'}</td>
+                    <td className="px-3 py-2">{formatNumber(row.stock_total)}</td>
+                    <td className="px-3 py-2">{formatNumber(row.producto__stock_minimo)}</td>
+                    <td className="px-3 py-2 font-medium text-destructive">{formatNumber(row.faltante)}</td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td className="px-3 py-3 text-muted-foreground" colSpan={5}>No hay productos en nivel critico.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
     </section>
   )

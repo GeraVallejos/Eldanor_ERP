@@ -255,6 +255,12 @@ class OrdenCompraService:
 
 class RecepcionCompraService:
     @staticmethod
+    def validar_recepcion_editable(*, recepcion):
+        """Valida que la recepcion siga en BORRADOR antes de permitir cambios manuales."""
+        if recepcion.estado != EstadoRecepcion.BORRADOR:
+            raise ConflictError("Solo se puede editar una recepcion en estado borrador.")
+
+    @staticmethod
     def _cantidad_recibida_confirmada(*, empresa, orden_item, excluir_recepcion_id=None):
         queryset = RecepcionCompraItem.all_objects.filter(
             empresa=empresa,

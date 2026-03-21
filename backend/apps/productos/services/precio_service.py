@@ -2,7 +2,7 @@ from datetime import date
 
 from django.db import models
 
-from apps.core.services import TipoCambioService
+from apps.tesoreria.services import TipoCambioService
 from apps.productos.models import ListaPrecio, ListaPrecioItem
 
 

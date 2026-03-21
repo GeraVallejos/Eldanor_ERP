@@ -11,8 +11,8 @@ class Migration(migrations.Migration):
 
     dependencies = [
         ('contactos', '0003_alter_direccion_tipo'),
-        ('core', '0015_cuentaporcobrar_cuentaporpagar_tipocambio'),
         ('productos', '0005_alter_producto_permite_decimales'),
+        ('tesoreria', '0001_initial'),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 
@@ -36,7 +36,7 @@ class Migration(migrations.Migration):
                 ('cliente', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.CASCADE, related_name='listas_precio', to='contactos.cliente')),
                 ('creado_por', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='%(class)s_creados', to=settings.AUTH_USER_MODEL)),
                 ('empresa', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='%(class)s_registros', to='core.empresa')),
-                ('moneda', models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name='listas_precio', to='core.moneda')),
+                ('moneda', models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name='listas_precio', to='tesoreria.moneda')),
             ],
             managers=[
                 ('all_objects', django.db.models.manager.Manager()),

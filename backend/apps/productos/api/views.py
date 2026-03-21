@@ -1,11 +1,9 @@
-from decimal import Decimal
 from datetime import date
 
 from django.db.models.deletion import ProtectedError
 from rest_framework.viewsets import ModelViewSet
 
 from apps.core.exceptions import ConflictError
-from apps.inventario.models import Bodega, StockProducto
 from apps.core.roles import RolUsuario
 from apps.productos.models import Categoria, Impuesto, ListaPrecio, ListaPrecioItem, Producto
 from apps.productos.api.serializer import (
@@ -95,51 +93,6 @@ class ProductoViewSet(TenantViewSetMixin, ModelViewSet ):
             instance.activo = False
             instance.save(skip_clean=True, update_fields=["activo"])
 
-    def _sync_stock_producto(self, producto):
-        empresa = self.get_empresa() or getattr(producto, "empresa", None)
-        if not empresa or not producto:
-            return
-
-        if not producto.maneja_inventario:
-            StockProducto.all_objects.filter(empresa=empresa, producto=producto).update(
-                stock=Decimal("0"),
-                valor_stock=Decimal("0"),
-            )
-            return
-
-        bodega_default, _ = Bodega.all_objects.get_or_create(
-            empresa=empresa,
-            nombre="Principal",
-            defaults={"activa": True, "creado_por": self.request.user},
-        )
-
-        stock = Decimal(producto.stock_actual or 0).quantize(Decimal("0.01"))
-        valor_stock = (stock * Decimal(producto.precio_costo or 0)).quantize(Decimal("0.01"))
-
-        stock_obj, _ = StockProducto.all_objects.get_or_create(
-            empresa=empresa,
-            producto=producto,
-            bodega=bodega_default,
-            defaults={
-                "creado_por": self.request.user,
-                "stock": stock,
-                "valor_stock": valor_stock,
-            },
-        )
-
-        if stock_obj.stock != stock or stock_obj.valor_stock != valor_stock:
-            stock_obj.stock = stock
-            stock_obj.valor_stock = valor_stock
-            stock_obj.save(update_fields=["stock", "valor_stock"])
-
-    def perform_create(self, serializer):
-        super().perform_create(serializer)
-        self._sync_stock_producto(serializer.instance)
-
-    def perform_update(self, serializer):
-        super().perform_update(serializer)
-        self._sync_stock_producto(serializer.instance)
-
     @action(detail=False, methods=["post"], url_path="bulk_import", parser_classes=[MultiPartParser, FormParser])
     def bulk_import(self, request):
         self._set_tenant_context()
@@ -176,7 +129,7 @@ class ProductoViewSet(TenantViewSetMixin, ModelViewSet ):
         moneda_destino = None
         moneda_codigo = request.query_params.get("moneda")
         if moneda_codigo:
-            from apps.core.models import Moneda
+            from apps.tesoreria.models import Moneda
 
             moneda_destino = Moneda.all_objects.filter(
                 empresa=self.get_empresa(),

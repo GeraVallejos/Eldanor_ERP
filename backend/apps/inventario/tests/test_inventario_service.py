@@ -5,7 +5,7 @@ import pytest
 from apps.core.exceptions import BusinessRuleError
 from apps.core.tenant import set_current_empresa
 from apps.documentos.models import TipoDocumentoReferencia
-from apps.inventario.models import Bodega, InventorySnapshot, ReservaStock, StockLote, StockSerie
+from apps.inventario.models import Bodega, InventorySnapshot, ReservaStock, StockLote, StockProducto, StockSerie
 from apps.inventario.models.movimiento import TipoMovimiento
 from apps.inventario.services.inventario_service import InventarioService
 from apps.productos.models import Producto
@@ -263,6 +263,121 @@ class TestInventarioService:
             series=["S1", "S2"],
         )
 
+    def test_regularizar_stock_objetivo_crea_ajuste_desde_diferencia(self, empresa, usuario, producto_inventariable):
+        set_current_empresa(empresa)
+
+        InventarioService.registrar_movimiento(
+            producto_id=producto_inventariable.id,
+            tipo=TipoMovimiento.ENTRADA,
+            cantidad=Decimal("10.00"),
+            referencia="ENTRADA-BASE-REG",
+            empresa=empresa,
+            usuario=usuario,
+        )
+
+        movimiento = InventarioService.regularizar_stock(
+            producto_id=producto_inventariable.id,
+            stock_objetivo=Decimal("6.00"),
+            referencia="AJUSTE-CONTEO",
+            empresa=empresa,
+            usuario=usuario,
+        )
+
+        producto_inventariable.refresh_from_db()
+        assert movimiento.tipo == TipoMovimiento.SALIDA
+        assert movimiento.documento_tipo == TipoDocumentoReferencia.AJUSTE
+        assert Decimal(movimiento.cantidad) == Decimal("4.00")
+        assert producto_inventariable.stock_actual == Decimal("6.00")
+
+    def test_regularizar_rechaza_stock_objetivo_bajo_reservado(self, empresa, usuario, producto_inventariable):
+        set_current_empresa(empresa)
+
+        InventarioService.registrar_movimiento(
+            producto_id=producto_inventariable.id,
+            tipo=TipoMovimiento.ENTRADA,
+            cantidad=Decimal("5.00"),
+            referencia="ENTRADA-RESERVA-REG",
+            empresa=empresa,
+            usuario=usuario,
+        )
+        InventarioService.reservar_stock(
+            producto_id=producto_inventariable.id,
+            cantidad=Decimal("3.00"),
+            documento_tipo=TipoDocumentoReferencia.PRESUPUESTO,
+            documento_id="55555555-5555-5555-5555-555555555555",
+            empresa=empresa,
+            usuario=usuario,
+        )
+
+        with pytest.raises(BusinessRuleError) as excinfo:
+            InventarioService.regularizar_stock(
+                producto_id=producto_inventariable.id,
+                stock_objetivo=Decimal("2.00"),
+                referencia="AJUSTE-INVALIDO",
+                empresa=empresa,
+                usuario=usuario,
+            )
+
+        assert "reservado" in str(excinfo.value).lower()
+
+    def test_previsualizar_regularizacion_informa_diferencia_y_reservas(self, empresa, usuario, producto_inventariable):
+        set_current_empresa(empresa)
+
+        movimiento = InventarioService.registrar_movimiento(
+            producto_id=producto_inventariable.id,
+            tipo=TipoMovimiento.ENTRADA,
+            cantidad=Decimal("9.00"),
+            referencia="ENTRADA-PREVIA",
+            empresa=empresa,
+            usuario=usuario,
+        )
+        InventarioService.reservar_stock(
+            producto_id=producto_inventariable.id,
+            bodega_id=movimiento.bodega_id,
+            cantidad=Decimal("2.00"),
+            documento_tipo=TipoDocumentoReferencia.PRESUPUESTO,
+            documento_id="77777777-7777-7777-7777-777777777777",
+            empresa=empresa,
+            usuario=usuario,
+        )
+
+        preview = InventarioService.previsualizar_regularizacion_stock(
+            producto_id=producto_inventariable.id,
+            bodega_id=movimiento.bodega_id,
+            stock_objetivo=Decimal("6.00"),
+            empresa=empresa,
+        )
+
+        assert preview["tipo_movimiento"] == TipoMovimiento.SALIDA
+        assert Decimal(preview["diferencia"]) == Decimal("-3.00")
+        assert Decimal(preview["reservado_total"]) == Decimal("2.00")
+        assert preview["ajustable"] is True
+
+    def test_trazabilidad_series_marca_salida(self, empresa, usuario):
+        set_current_empresa(empresa)
+        producto = Producto.objects.create(
+            empresa=empresa,
+            creado_por=usuario,
+            nombre="Producto Serie Salida",
+            sku="SER-OUT-001",
+            maneja_inventario=True,
+            usa_lotes=True,
+            usa_series=True,
+            permite_decimales=False,
+            precio_referencia=Decimal("2000"),
+        )
+
+        InventarioService.registrar_movimiento(
+            producto_id=producto.id,
+            tipo=TipoMovimiento.ENTRADA,
+            cantidad=Decimal("2"),
+            referencia="ENTRADA-SERIE-SALIDA",
+            empresa=empresa,
+            usuario=usuario,
+            lote_codigo="L-SER-001",
+            series=["S1", "S2"],
+        )
+
         assert StockSerie.all_objects.filter(empresa=empresa, producto=producto, estado="DISPONIBLE").count() == 2
 
         InventarioService.registrar_movimiento(
@@ -282,4 +397,65 @@ class TestInventarioService:
             serie_codigo="S1",
             estado="SALIDA",
         ).exists()
+
+    def test_trasladar_stock_mueve_existencia_entre_bodegas(self, empresa, usuario, producto_inventariable):
+        set_current_empresa(empresa)
+        bodega_origen = Bodega.all_objects.create(empresa=empresa, creado_por=usuario, nombre="Origen")
+        bodega_destino = Bodega.all_objects.create(empresa=empresa, creado_por=usuario, nombre="Destino")
+
+        InventarioService.registrar_movimiento(
+            producto_id=producto_inventariable.id,
+            bodega_id=bodega_origen.id,
+            tipo=TipoMovimiento.ENTRADA,
+            cantidad=Decimal("7.00"),
+            referencia="ENTRADA-ORIGEN",
+            empresa=empresa,
+            usuario=usuario,
+        )
+
+        traslado = InventarioService.trasladar_stock(
+            producto_id=producto_inventariable.id,
+            bodega_origen_id=bodega_origen.id,
+            bodega_destino_id=bodega_destino.id,
+            cantidad=Decimal("3.00"),
+            referencia="TRASLADO-TEST",
+            empresa=empresa,
+            usuario=usuario,
+        )
+
+        stock_origen = StockProducto.all_objects.get(
+            empresa=empresa,
+            producto=producto_inventariable,
+            bodega=bodega_origen,
+        )
+        stock_destino = StockProducto.all_objects.get(
+            empresa=empresa,
+            producto=producto_inventariable,
+            bodega=bodega_destino,
+        )
+        producto_inventariable.refresh_from_db()
+        assert traslado["movimiento_salida"].documento_tipo == TipoDocumentoReferencia.TRASLADO
+        assert traslado["movimiento_entrada"].documento_tipo == TipoDocumentoReferencia.TRASLADO
+        assert traslado["movimiento_salida"].stock_nuevo == Decimal("4.00")
+        assert traslado["movimiento_entrada"].stock_nuevo == Decimal("3.00")
+        assert producto_inventariable.stock_actual == Decimal("7.00")
+        assert Decimal(stock_origen.stock) == Decimal("4.00")
+        assert Decimal(stock_destino.stock) == Decimal("3.00")
+
+    def test_trasladar_stock_rechaza_misma_bodega(self, empresa, usuario, producto_inventariable):
+        set_current_empresa(empresa)
+        bodega = Bodega.all_objects.create(empresa=empresa, creado_por=usuario, nombre="Unica")
+
+        with pytest.raises(BusinessRuleError) as excinfo:
+            InventarioService.trasladar_stock(
+                producto_id=producto_inventariable.id,
+                bodega_origen_id=bodega.id,
+                bodega_destino_id=bodega.id,
+                cantidad=Decimal("1.00"),
+                referencia="TRASLADO-INVALIDO",
+                empresa=empresa,
+                usuario=usuario,
+            )
+
+        assert "distintas" in str(excinfo.value)
 

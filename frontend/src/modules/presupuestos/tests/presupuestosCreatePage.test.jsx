@@ -1,4 +1,4 @@
-import { screen, waitFor } from '@testing-library/react'
+import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -100,5 +100,56 @@ describe('presupuestos/PresupuestosCreatePage', () => {
       precio_unitario: 35000,
       impuesto: '5',
     })
+  })
+
+  it('muestra contrato de error backend cuando falla la cabecera', async () => {
+    server.use(
+      http.get('*/clientes/', async () => HttpResponse.json([{ id: 501, contacto: 601 }])),
+      http.get('*/contactos/', async () =>
+        HttpResponse.json([{ id: 601, nombre: 'Cliente Demo', rut: '11.111.111-1' }]),
+      ),
+      http.get('*/productos/', async () =>
+        HttpResponse.json([
+          {
+            id: 700,
+            nombre: 'Producto A',
+            tipo: 'PRODUCTO',
+            precio_referencia: 35000,
+            impuesto: 5,
+          },
+        ]),
+      ),
+      http.get('*/impuestos/', async () => HttpResponse.json([{ id: 5, nombre: 'IVA', porcentaje: 19 }])),
+      http.post('*/presupuestos/', async () =>
+        HttpResponse.json(
+          {
+            detail: 'El cliente seleccionado esta inactivo.',
+            error_code: 'BUSINESS_RULE_ERROR',
+          },
+          { status: 400 },
+        ),
+      ),
+    )
+
+    renderWithProviders(<PresupuestosCreatePage />)
+
+    const clienteInput = await screen.findByPlaceholderText('Buscar y seleccionar cliente...')
+    await userEvent.type(clienteInput, 'Cliente Demo')
+
+    const productoInput = screen.getByPlaceholderText('Buscar producto...')
+    await userEvent.type(productoInput, 'Producto A')
+    await userEvent.clear(screen.getByLabelText('Descripcion'))
+    await userEvent.type(screen.getByLabelText('Descripcion'), 'Producto A')
+    await userEvent.clear(screen.getByLabelText('Precio unitario'))
+    await userEvent.type(screen.getByLabelText('Precio unitario'), '35000')
+    await userEvent.selectOptions(screen.getByLabelText('Impuesto'), '5')
+
+    await userEvent.click(screen.getByRole('button', { name: 'Crear presupuesto' }))
+
+    const form = screen.getByRole('button', { name: 'Crear presupuesto' }).closest('form')
+    expect(form).not.toBeNull()
+    const errorMatches = await within(form).findAllByText('El cliente seleccionado esta inactivo.')
+    expect(errorMatches.length).toBeGreaterThan(0)
+    expect(within(form).getByText(/Codigo: BUSINESS_RULE_ERROR/i)).toBeInTheDocument()
   })
 })

@@ -3,6 +3,7 @@ import { toast } from 'sonner'
 import { api } from '@/api/client'
 import { normalizeApiError } from '@/api/errors'
 import Button from '@/components/ui/Button'
+import { usePermissions } from '@/modules/shared/auth/usePermission'
 
 function normalizeListResponse(data) {
   if (Array.isArray(data)) {
@@ -15,6 +16,7 @@ function normalizeListResponse(data) {
 }
 
 function ProductosListasPrecioPage() {
+  const permissions = usePermissions(['PRODUCTOS.CREAR', 'PRODUCTOS.EDITAR'])
   const [listas, setListas] = useState([])
   const [items, setItems] = useState([])
   const [productos, setProductos] = useState([])
@@ -65,6 +67,10 @@ function ProductosListasPrecioPage() {
 
   const createLista = async (event) => {
     event.preventDefault()
+    if (!permissions['PRODUCTOS.CREAR']) {
+      toast.error('No tiene permiso para crear listas de precio.')
+      return
+    }
     try {
       await api.post('/listas-precio/', formLista, { suppressGlobalErrorToast: true })
       toast.success('Lista de precio creada.')
@@ -77,6 +83,10 @@ function ProductosListasPrecioPage() {
 
   const createItem = async (event) => {
     event.preventDefault()
+    if (!permissions['PRODUCTOS.EDITAR']) {
+      toast.error('No tiene permiso para editar listas de precio.')
+      return
+    }
     try {
       await api.post('/listas-precio-items/', {
         lista: selectedLista,

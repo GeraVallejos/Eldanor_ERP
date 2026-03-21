@@ -83,6 +83,7 @@ class AsientoContableViewSet(TenantViewSetMixin, ModelViewSet):
         "destroy": Acciones.CONTABILIZAR,
         "contabilizar": Acciones.CONTABILIZAR,
         "anular": Acciones.CONTABILIZAR,
+        "revertir": Acciones.CONTABILIZAR,
         "procesar_solicitudes": Acciones.CONTABILIZAR,
         "reprocesar_errores": Acciones.CONTABILIZAR,
         "errores": Acciones.VER,
@@ -90,6 +91,19 @@ class AsientoContableViewSet(TenantViewSetMixin, ModelViewSet):
         "balance_comprobacion": Acciones.VER,
         "estado_resultados": Acciones.VER,
     }
+
+    def perform_update(self, serializer):
+        """Valida que el asiento siga editable antes de persistir cambios manuales."""
+        self._set_tenant_context()
+        asiento = self.get_object()
+        ContabilidadService.validar_editable(asiento=asiento)
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        """Impide eliminar asientos fuera de borrador para preservar trazabilidad."""
+        self._set_tenant_context()
+        ContabilidadService.validar_editable(asiento=instance)
+        instance.delete()
 
     def create(self, request, *args, **kwargs):
         self._set_tenant_context()
@@ -146,6 +160,18 @@ class AsientoContableViewSet(TenantViewSetMixin, ModelViewSet):
             asiento_id=pk,
             empresa=self.get_empresa(),
             usuario=request.user,
+        )
+        return Response(self.get_serializer(asiento).data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"])
+    def revertir(self, request, pk=None):
+        self._set_tenant_context()
+        motivo = request.data.get("motivo", "")
+        asiento = ContabilidadService.generar_reversa_asiento(
+            asiento_id=pk,
+            empresa=self.get_empresa(),
+            usuario=request.user,
+            motivo=motivo,
         )
         return Response(self.get_serializer(asiento).data, status=status.HTTP_200_OK)
 
@@ -229,3 +255,19 @@ class MovimientoContableViewSet(TenantViewSetMixin, ModelViewSet):
         "partial_update": Acciones.CONTABILIZAR,
         "destroy": Acciones.CONTABILIZAR,
     }
+
+    def perform_update(self, serializer):
+        """Valida que el asiento padre siga editable y recalcula su cuadratura."""
+        self._set_tenant_context()
+        movimiento = self.get_object()
+        ContabilidadService.validar_editable(asiento=movimiento.asiento)
+        serializer.save()
+        ContabilidadService.recalcular_totales(asiento=movimiento.asiento)
+
+    def perform_destroy(self, instance):
+        """Impide borrar lineas de asientos ya contabilizados y recalcula totales."""
+        self._set_tenant_context()
+        asiento = instance.asiento
+        ContabilidadService.validar_editable(asiento=asiento)
+        instance.delete()
+        ContabilidadService.recalcular_totales(asiento=asiento)

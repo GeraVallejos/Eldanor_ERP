@@ -1,5 +1,9 @@
+from datetime import date
+
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import IntegrityError
+from django.db.models import Count, DecimalField, ExpressionWrapper, F, Q, Sum
+from django.db.models.functions import TruncMonth, TruncWeek
 from rest_framework import status
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError as DRFValidationError
@@ -19,6 +23,7 @@ from apps.compras.models import (
     DocumentoCompraProveedor,
     DocumentoCompraProveedorItem,
     EstadoDocumentoCompra,
+    EstadoOrdenCompra,
     OrdenCompra,
     OrdenCompraItem,
     EstadoRecepcion,
@@ -34,6 +39,29 @@ from apps.core.permisos.constantes_permisos import Acciones, Modulos
 from apps.core.permisos.permissions import TienePermisoModuloAccion, TieneRelacionActiva
 from apps.core.models import TipoDocumento
 from apps.core.services import SecuenciaService
+
+
+def _parse_date_param(value, field_name):
+    if not value:
+        return None
+    try:
+        return date.fromisoformat(str(value))
+    except ValueError as exc:
+        raise DRFValidationError({field_name: ["Debe usar formato YYYY-MM-DD."]}) from exc
+
+
+def _analytics_grouping_expression(grouping, field_name):
+    if grouping == "semanal":
+        return TruncWeek(field_name)
+    return TruncMonth(field_name)
+
+
+def _serialize_period(value):
+    if not value:
+        return None
+    if hasattr(value, "date"):
+        return value.date().isoformat()
+    return value.isoformat()
 
 
 def _as_bool(value):
@@ -120,6 +148,8 @@ class OrdenCompraViewSet(ComprasAuditoriaMixin, TenantViewSetMixin, ModelViewSet
         "corregir": Acciones.EDITAR,
         "duplicar": Acciones.CREAR,
         "trazabilidad": Acciones.VER,
+        "resumen_operativo": Acciones.VER,
+        "analytics": Acciones.VER,
     }
 
     @staticmethod
@@ -176,6 +206,7 @@ class OrdenCompraViewSet(ComprasAuditoriaMixin, TenantViewSetMixin, ModelViewSet
         )
 
     def perform_destroy(self, instance):
+        OrdenCompraService.validar_orden_editable(orden=instance)
         summary = f"Orden de compra #{instance.numero} eliminada."
         pk = instance.pk
         empresa = instance.empresa
@@ -306,6 +337,170 @@ class OrdenCompraViewSet(ComprasAuditoriaMixin, TenantViewSetMixin, ModelViewSet
 
         return Response(data, status=status.HTTP_200_OK)
 
+    @action(detail=False, methods=["get"])
+    def resumen_operativo(self, request):
+        """Retorna metricas base para seguimiento operativo del abastecimiento."""
+        self._set_tenant_context()
+        agregados = self.get_queryset().aggregate(
+            total_ordenes=Count("id"),
+            monto_total=Sum("total"),
+            borrador=Count("id", filter=Q(estado=EstadoOrdenCompra.BORRADOR)),
+            enviadas=Count("id", filter=Q(estado=EstadoOrdenCompra.ENVIADA)),
+            parciales=Count("id", filter=Q(estado=EstadoOrdenCompra.PARCIAL)),
+            recibidas=Count("id", filter=Q(estado=EstadoOrdenCompra.RECIBIDA)),
+            canceladas=Count("id", filter=Q(estado=EstadoOrdenCompra.CANCELADA)),
+            monto_pendiente=Sum(
+                "total",
+                filter=Q(estado__in=[EstadoOrdenCompra.ENVIADA, EstadoOrdenCompra.PARCIAL]),
+            ),
+            pendientes_recepcion=Count(
+                "id",
+                filter=Q(estado__in=[EstadoOrdenCompra.ENVIADA, EstadoOrdenCompra.PARCIAL]),
+            ),
+        )
+        return Response(
+            {
+                "total_ordenes": agregados["total_ordenes"] or 0,
+                "monto_total": agregados["monto_total"] or 0,
+                "borrador": agregados["borrador"] or 0,
+                "enviadas": agregados["enviadas"] or 0,
+                "parciales": agregados["parciales"] or 0,
+                "recibidas": agregados["recibidas"] or 0,
+                "canceladas": agregados["canceladas"] or 0,
+                "monto_pendiente": agregados["monto_pendiente"] or 0,
+                "pendientes_recepcion": agregados["pendientes_recepcion"] or 0,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    @action(detail=False, methods=["get"])
+    def analytics(self, request):
+        """Retorna analitica filtrable para reportes de ordenes de compra."""
+        self._set_tenant_context()
+        queryset = self.get_queryset().select_related("proveedor__contacto")
+        fecha_desde = _parse_date_param(request.query_params.get("fecha_desde"), "fecha_desde")
+        fecha_hasta = _parse_date_param(request.query_params.get("fecha_hasta"), "fecha_hasta")
+        proveedor_id = request.query_params.get("proveedor_id")
+        estado = request.query_params.get("estado")
+        agrupacion = request.query_params.get("agrupacion") or "mensual"
+
+        if fecha_desde:
+            queryset = queryset.filter(fecha_emision__gte=fecha_desde)
+        if fecha_hasta:
+            queryset = queryset.filter(fecha_emision__lte=fecha_hasta)
+        if proveedor_id:
+            queryset = queryset.filter(proveedor_id=proveedor_id)
+        if estado and estado != "ALL":
+            queryset = queryset.filter(estado=estado)
+
+        metrics = queryset.aggregate(
+            total_ordenes=Count("id"),
+            monto_comprometido=Sum("total"),
+            pendientes_recepcion=Count("id", filter=Q(estado__in=[EstadoOrdenCompra.ENVIADA, EstadoOrdenCompra.PARCIAL])),
+            enviadas=Count("id", filter=Q(estado=EstadoOrdenCompra.ENVIADA)),
+            parciales=Count("id", filter=Q(estado=EstadoOrdenCompra.PARCIAL)),
+            recibidas=Count("id", filter=Q(estado=EstadoOrdenCompra.RECIBIDA)),
+        )
+
+        top_proveedores = list(
+            queryset.values("proveedor_id", "proveedor__contacto__nombre")
+            .annotate(total=Sum("total"))
+            .order_by("-total")[:5]
+        )
+
+        series = list(
+            queryset.annotate(periodo=_analytics_grouping_expression(agrupacion, "fecha_emision"))
+            .values("periodo")
+            .annotate(cantidad=Count("id"), monto=Sum("total"))
+            .order_by("periodo")
+        )
+
+        detail = list(
+            queryset.order_by("-fecha_emision", "-creado_en").values(
+                "id",
+                "numero",
+                "fecha_emision",
+                "estado",
+                "total",
+                "proveedor_id",
+                "proveedor__contacto__nombre",
+            )
+        )
+
+        top_productos = list(
+            OrdenCompraItem.objects.filter(empresa=self.get_empresa(), orden_compra__in=queryset)
+            .annotate(
+                line_total=ExpressionWrapper(
+                    F("cantidad") * F("precio_unitario"),
+                    output_field=DecimalField(max_digits=18, decimal_places=2),
+                )
+            )
+            .values("producto_id", "descripcion")
+            .annotate(
+                cantidad=Sum("cantidad"),
+                monto=Sum("line_total"),
+            )
+            .order_by("-monto")[:5]
+        )
+
+        return Response(
+            {
+                "filters": {
+                    "fecha_desde": fecha_desde,
+                    "fecha_hasta": fecha_hasta,
+                    "proveedor_id": proveedor_id,
+                    "estado": estado or "ALL",
+                    "agrupacion": agrupacion,
+                },
+                "metrics": {
+                    "total_ordenes": metrics["total_ordenes"] or 0,
+                    "monto_comprometido": metrics["monto_comprometido"] or 0,
+                    "pendientes_recepcion": metrics["pendientes_recepcion"] or 0,
+                    "enviadas": metrics["enviadas"] or 0,
+                    "parciales": metrics["parciales"] or 0,
+                    "recibidas": metrics["recibidas"] or 0,
+                },
+                "top_proveedores": [
+                    {
+                        "proveedor_id": row["proveedor_id"],
+                        "nombre": row["proveedor__contacto__nombre"] or "-",
+                        "total": row["total"] or 0,
+                    }
+                    for row in top_proveedores
+                ],
+                "top_productos": [
+                    {
+                        "producto_id": row["producto_id"],
+                        "nombre": row["descripcion"] or f"Producto {row['producto_id'] or '-'}",
+                        "cantidad": row["cantidad"] or 0,
+                        "monto": row["monto"] or 0,
+                    }
+                    for row in top_productos
+                ],
+                "series": [
+                    {
+                        "periodo": _serialize_period(row["periodo"]),
+                        "cantidad": row["cantidad"] or 0,
+                        "monto": row["monto"] or 0,
+                    }
+                    for row in series
+                ],
+                "detail": [
+                    {
+                        "id": row["id"],
+                        "numero": row["numero"],
+                        "fecha_emision": row["fecha_emision"],
+                        "estado": row["estado"],
+                        "total": row["total"] or 0,
+                        "proveedor_id": row["proveedor_id"],
+                        "proveedor_nombre": row["proveedor__contacto__nombre"] or "-",
+                    }
+                    for row in detail
+                ],
+            },
+            status=status.HTTP_200_OK,
+        )
+
 
 class OrdenCompraItemViewSet(TenantViewSetMixin, ModelViewSet):
     model = OrdenCompraItem
@@ -368,6 +563,8 @@ class DocumentoCompraProveedorViewSet(ComprasAuditoriaMixin, TenantViewSetMixin,
         "anular": Acciones.ANULAR,
         "corregir": Acciones.EDITAR,
         "duplicar": Acciones.CREAR,
+        "resumen_operativo": Acciones.VER,
+        "analytics": Acciones.VER,
     }
 
     def perform_update(self, serializer):
@@ -480,6 +677,176 @@ class DocumentoCompraProveedorViewSet(ComprasAuditoriaMixin, TenantViewSetMixin,
         serializer = self.get_serializer(documento)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
+    @action(detail=False, methods=["get"])
+    def resumen_operativo(self, request):
+        """Retorna metricas base de documentos de compra para control documental."""
+        agregados = self.get_queryset().aggregate(
+            total_documentos=Count("id"),
+            monto_total=Sum("total"),
+            monto_confirmado=Sum("total", filter=Q(estado=EstadoDocumentoCompra.CONFIRMADO)),
+            borradores=Count("id", filter=Q(estado=EstadoDocumentoCompra.BORRADOR)),
+            confirmados=Count("id", filter=Q(estado=EstadoDocumentoCompra.CONFIRMADO)),
+            anulados=Count("id", filter=Q(estado=EstadoDocumentoCompra.ANULADO)),
+            guias=Count("id", filter=Q(tipo_documento="GUIA_RECEPCION")),
+            facturas=Count("id", filter=Q(tipo_documento="FACTURA_COMPRA")),
+            boletas=Count("id", filter=Q(tipo_documento="BOLETA_COMPRA")),
+            sin_recepcion=Count(
+                "id",
+                filter=Q(estado=EstadoDocumentoCompra.CONFIRMADO, recepcion_compra__isnull=True),
+            ),
+        )
+        return Response(
+            {
+                "total_documentos": agregados["total_documentos"] or 0,
+                "monto_total": agregados["monto_total"] or 0,
+                "monto_confirmado": agregados["monto_confirmado"] or 0,
+                "borradores": agregados["borradores"] or 0,
+                "confirmados": agregados["confirmados"] or 0,
+                "anulados": agregados["anulados"] or 0,
+                "guias": agregados["guias"] or 0,
+                "facturas": agregados["facturas"] or 0,
+                "boletas": agregados["boletas"] or 0,
+                "sin_recepcion": agregados["sin_recepcion"] or 0,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    @action(detail=False, methods=["get"])
+    def analytics(self, request):
+        """Retorna analitica filtrable para reportes documentales de compras."""
+        self._set_tenant_context()
+        queryset = self.get_queryset().select_related("proveedor__contacto")
+        fecha_desde = _parse_date_param(request.query_params.get("fecha_desde"), "fecha_desde")
+        fecha_hasta = _parse_date_param(request.query_params.get("fecha_hasta"), "fecha_hasta")
+        proveedor_id = request.query_params.get("proveedor_id")
+        estado = request.query_params.get("estado")
+        tipo = request.query_params.get("tipo_documento")
+        agrupacion = request.query_params.get("agrupacion") or "mensual"
+
+        if fecha_desde:
+            queryset = queryset.filter(fecha_emision__gte=fecha_desde)
+        if fecha_hasta:
+            queryset = queryset.filter(fecha_emision__lte=fecha_hasta)
+        if proveedor_id:
+            queryset = queryset.filter(proveedor_id=proveedor_id)
+        if estado and estado != "ALL":
+            queryset = queryset.filter(estado=estado)
+        if tipo and tipo != "ALL":
+            queryset = queryset.filter(tipo_documento=tipo)
+
+        metrics = queryset.aggregate(
+            total_documentos=Count("id"),
+            monto_documental=Sum("total"),
+            monto_confirmado=Sum("total", filter=Q(estado=EstadoDocumentoCompra.CONFIRMADO)),
+            pendientes_documentales=Count("id", filter=Q(estado=EstadoDocumentoCompra.BORRADOR)),
+            facturas=Count("id", filter=Q(tipo_documento="FACTURA_COMPRA")),
+            guias=Count("id", filter=Q(tipo_documento="GUIA_RECEPCION")),
+            boletas=Count("id", filter=Q(tipo_documento="BOLETA_COMPRA")),
+        )
+
+        top_proveedores = list(
+            queryset.values("proveedor_id", "proveedor__contacto__nombre")
+            .annotate(total=Sum("total"))
+            .order_by("-total")[:5]
+        )
+
+        series = list(
+            queryset.annotate(periodo=_analytics_grouping_expression(agrupacion, "fecha_emision"))
+            .values("periodo")
+            .annotate(cantidad=Count("id"), monto=Sum("total"))
+            .order_by("periodo")
+        )
+
+        detail = list(
+            queryset.order_by("-fecha_emision", "-creado_en").values(
+                "id",
+                "tipo_documento",
+                "folio",
+                "fecha_emision",
+                "estado",
+                "total",
+                "proveedor_id",
+                "proveedor__contacto__nombre",
+            )
+        )
+
+        top_productos = list(
+            DocumentoCompraProveedorItem.objects.filter(empresa=self.get_empresa(), documento__in=queryset)
+            .annotate(
+                line_total=ExpressionWrapper(
+                    F("cantidad") * F("precio_unitario"),
+                    output_field=DecimalField(max_digits=18, decimal_places=2),
+                )
+            )
+            .values("producto_id", "descripcion")
+            .annotate(
+                cantidad=Sum("cantidad"),
+                monto=Sum("line_total"),
+            )
+            .order_by("-monto")[:5]
+        )
+
+        return Response(
+            {
+                "filters": {
+                    "fecha_desde": fecha_desde,
+                    "fecha_hasta": fecha_hasta,
+                    "proveedor_id": proveedor_id,
+                    "estado": estado or "ALL",
+                    "tipo_documento": tipo or "ALL",
+                    "agrupacion": agrupacion,
+                },
+                "metrics": {
+                    "total_documentos": metrics["total_documentos"] or 0,
+                    "monto_documental": metrics["monto_documental"] or 0,
+                    "monto_confirmado": metrics["monto_confirmado"] or 0,
+                    "pendientes_documentales": metrics["pendientes_documentales"] or 0,
+                    "facturas": metrics["facturas"] or 0,
+                    "guias": metrics["guias"] or 0,
+                    "boletas": metrics["boletas"] or 0,
+                },
+                "top_proveedores": [
+                    {
+                        "proveedor_id": row["proveedor_id"],
+                        "nombre": row["proveedor__contacto__nombre"] or "-",
+                        "total": row["total"] or 0,
+                    }
+                    for row in top_proveedores
+                ],
+                "top_productos": [
+                    {
+                        "producto_id": row["producto_id"],
+                        "nombre": row["descripcion"] or f"Producto {row['producto_id'] or '-'}",
+                        "cantidad": row["cantidad"] or 0,
+                        "monto": row["monto"] or 0,
+                    }
+                    for row in top_productos
+                ],
+                "series": [
+                    {
+                        "periodo": _serialize_period(row["periodo"]),
+                        "cantidad": row["cantidad"] or 0,
+                        "monto": row["monto"] or 0,
+                    }
+                    for row in series
+                ],
+                "detail": [
+                    {
+                        "id": row["id"],
+                        "tipo_documento": row["tipo_documento"],
+                        "folio": row["folio"],
+                        "fecha_emision": row["fecha_emision"],
+                        "estado": row["estado"],
+                        "total": row["total"] or 0,
+                        "proveedor_id": row["proveedor_id"],
+                        "proveedor_nombre": row["proveedor__contacto__nombre"] or "-",
+                    }
+                    for row in detail
+                ],
+            },
+            status=status.HTTP_200_OK,
+        )
+
 
 class DocumentoCompraProveedorItemViewSet(TenantViewSetMixin, ModelViewSet):
     model = DocumentoCompraProveedorItem
@@ -560,6 +927,7 @@ class RecepcionCompraViewSet(ComprasAuditoriaMixin, TenantViewSetMixin, ModelVie
 
     def perform_update(self, serializer):
         self._set_tenant_context()
+        RecepcionCompraService.validar_recepcion_editable(recepcion=self.get_object())
         serializer.save()
         self._registrar_auditoria_compras(
             instance=serializer.instance,
@@ -570,6 +938,7 @@ class RecepcionCompraViewSet(ComprasAuditoriaMixin, TenantViewSetMixin, ModelVie
 
     def perform_destroy(self, instance):
         self._set_tenant_context()
+        RecepcionCompraService.validar_recepcion_editable(recepcion=instance)
         pk = instance.pk
         empresa = instance.empresa
         payload = self._build_auditoria_payload(instance)

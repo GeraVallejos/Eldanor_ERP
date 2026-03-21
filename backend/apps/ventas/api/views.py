@@ -1,9 +1,15 @@
+from datetime import date, timedelta
+
 from django.db import IntegrityError
+from django.db.models import Count, DecimalField, ExpressionWrapper, F, Q, Sum
+from django.db.models.functions import TruncMonth, TruncWeek
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet
+from rest_framework.exceptions import ValidationError as DRFValidationError
 
 from apps.core.mixins import TenantViewSetMixin
 from apps.core.permisos.constantes_permisos import Acciones, Modulos
@@ -30,6 +36,7 @@ from apps.ventas.api.serializers import (
     VentaHistorialSerializer,
 )
 from apps.ventas.models import (
+    EstadoFacturaVenta,
     FacturaVenta,
     FacturaVentaItem,
     GuiaDespacho,
@@ -261,6 +268,29 @@ class PedidoVentaItemViewSet(VentasAuditoriaMixin, TenantViewSetMixin, ModelView
         PedidoVentaService.recalcular_totales(pedido=pedido)
 
 
+def _parse_date_param(value, field_name):
+    if not value:
+        return None
+    try:
+        return date.fromisoformat(str(value))
+    except ValueError as exc:
+        raise DRFValidationError({field_name: ["Debe usar formato YYYY-MM-DD."]}) from exc
+
+
+def _analytics_grouping_expression(grouping, field_name):
+    if grouping == "semanal":
+        return TruncWeek(field_name)
+    return TruncMonth(field_name)
+
+
+def _serialize_period(value):
+    if not value:
+        return None
+    if hasattr(value, "date"):
+        return value.date().isoformat()
+    return value.isoformat()
+
+
 # ─── Guía de Despacho ─────────────────────────────────────────────────────────
 
 class GuiaDespachoViewSet(VentasAuditoriaMixin, TenantViewSetMixin, ModelViewSet):
@@ -306,6 +336,12 @@ class GuiaDespachoViewSet(VentasAuditoriaMixin, TenantViewSetMixin, ModelViewSet
         guia = self.get_object()
         GuiaDespachoService.validar_editable(guia=guia)
         return super().destroy(request, *args, **kwargs)
+
+    def perform_update(self, serializer):
+        """Valida que la guía siga editable antes de persistir cambios de cabecera."""
+        self._set_tenant_context()
+        GuiaDespachoService.validar_editable(guia=self.get_object())
+        serializer.save()
 
     @action(detail=True, methods=["post"])
     def confirmar(self, request, pk=None):
@@ -428,6 +464,8 @@ class FacturaVentaViewSet(VentasAuditoriaMixin, TenantViewSetMixin, ModelViewSet
         "anular": Acciones.ANULAR,
         "siguiente_numero": Acciones.CREAR,
         "historial": Acciones.VER,
+        "resumen_operativo": Acciones.VER,
+        "analytics": Acciones.VER,
     }
 
     def get_queryset(self):
@@ -461,6 +499,12 @@ class FacturaVentaViewSet(VentasAuditoriaMixin, TenantViewSetMixin, ModelViewSet
         factura = self.get_object()
         FacturaVentaService.validar_editable(factura=factura)
         return super().destroy(request, *args, **kwargs)
+
+    def perform_update(self, serializer):
+        """Valida que la factura siga editable antes de persistir cambios de cabecera."""
+        self._set_tenant_context()
+        FacturaVentaService.validar_editable(factura=self.get_object())
+        serializer.save()
 
     @action(detail=True, methods=["post"])
     def emitir(self, request, pk=None):
@@ -502,6 +546,254 @@ class FacturaVentaViewSet(VentasAuditoriaMixin, TenantViewSetMixin, ModelViewSet
             documento_id=pk,
         ).order_by("-creado_en")
         return Response(VentaHistorialSerializer(qs, many=True).data)
+
+    @action(detail=False, methods=["get"])
+    def resumen_operativo(self, request):
+        """Retorna metricas operativas simples para seguimiento comercial de facturas."""
+        self._set_tenant_context()
+        hoy = timezone.localdate()
+        agregados = self.get_queryset().aggregate(
+            total_documentos=Count("id"),
+            monto_total=Sum("total"),
+            monto_emitido=Sum("total", filter=Q(estado=EstadoFacturaVenta.EMITIDA)),
+            monto_vencido=Sum(
+                "total",
+                filter=Q(
+                    estado=EstadoFacturaVenta.EMITIDA,
+                    fecha_vencimiento__lt=hoy,
+                ),
+            ),
+            monto_por_vencer_7_dias=Sum(
+                "total",
+                filter=Q(
+                    estado=EstadoFacturaVenta.EMITIDA,
+                    fecha_vencimiento__gte=hoy,
+                    fecha_vencimiento__lte=hoy + timedelta(days=7),
+                ),
+            ),
+            borradores=Count("id", filter=Q(estado=EstadoFacturaVenta.BORRADOR)),
+            emitidas=Count("id", filter=Q(estado=EstadoFacturaVenta.EMITIDA)),
+            anuladas=Count("id", filter=Q(estado=EstadoFacturaVenta.ANULADA)),
+            vencidas=Count(
+                "id",
+                filter=Q(
+                    estado=EstadoFacturaVenta.EMITIDA,
+                    fecha_vencimiento__lt=hoy,
+                ),
+            ),
+            por_vencer_7_dias=Count(
+                "id",
+                filter=Q(
+                    estado=EstadoFacturaVenta.EMITIDA,
+                    fecha_vencimiento__gte=hoy,
+                    fecha_vencimiento__lte=hoy + timedelta(days=7),
+                ),
+            ),
+        )
+        return Response(
+            {
+                "fecha_corte": hoy,
+                "total_documentos": agregados["total_documentos"] or 0,
+                "monto_total": agregados["monto_total"] or 0,
+                "monto_emitido": agregados["monto_emitido"] or 0,
+                "monto_vencido": agregados["monto_vencido"] or 0,
+                "monto_por_vencer_7_dias": agregados["monto_por_vencer_7_dias"] or 0,
+                "borradores": agregados["borradores"] or 0,
+                "emitidas": agregados["emitidas"] or 0,
+                "anuladas": agregados["anuladas"] or 0,
+                "vencidas": agregados["vencidas"] or 0,
+                "por_vencer_7_dias": agregados["por_vencer_7_dias"] or 0,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    @action(detail=False, methods=["get"])
+    def analytics(self, request):
+        """Retorna analitica filtrable para reportes profesionales de facturas."""
+        self._set_tenant_context()
+        queryset = self.get_queryset()
+        fecha_desde = _parse_date_param(request.query_params.get("fecha_desde"), "fecha_desde")
+        fecha_hasta = _parse_date_param(request.query_params.get("fecha_hasta"), "fecha_hasta")
+        cliente = request.query_params.get("cliente")
+        estado = request.query_params.get("estado")
+        cartera = request.query_params.get("cartera") or "ALL"
+        agrupacion = request.query_params.get("agrupacion") or "mensual"
+        hoy = timezone.localdate()
+
+        if fecha_desde:
+            queryset = queryset.filter(fecha_emision__gte=fecha_desde)
+        if fecha_hasta:
+            queryset = queryset.filter(fecha_emision__lte=fecha_hasta)
+        if cliente:
+            queryset = queryset.filter(cliente__contacto__nombre=cliente)
+        if estado and estado != "ALL":
+            queryset = queryset.filter(estado=estado)
+        if cartera == "VENCIDAS":
+            queryset = queryset.filter(estado=EstadoFacturaVenta.EMITIDA, fecha_vencimiento__lt=hoy)
+        elif cartera == "POR_VENCER_7_DIAS":
+            queryset = queryset.filter(
+                estado=EstadoFacturaVenta.EMITIDA,
+                fecha_vencimiento__gte=hoy,
+                fecha_vencimiento__lte=hoy + timedelta(days=7),
+            )
+        elif cartera == "BORRADORES":
+            queryset = queryset.filter(estado=EstadoFacturaVenta.BORRADOR)
+
+        metrics = queryset.aggregate(
+            total_facturas=Count("id"),
+            facturacion_total=Sum("total"),
+            monto_emitido=Sum("total", filter=Q(estado=EstadoFacturaVenta.EMITIDA)),
+            emitidas=Count("id", filter=Q(estado=EstadoFacturaVenta.EMITIDA)),
+            borradores=Count("id", filter=Q(estado=EstadoFacturaVenta.BORRADOR)),
+            anuladas=Count("id", filter=Q(estado=EstadoFacturaVenta.ANULADA)),
+            vencidas=Count("id", filter=Q(estado=EstadoFacturaVenta.EMITIDA, fecha_vencimiento__lt=hoy)),
+            monto_vencido=Sum("total", filter=Q(estado=EstadoFacturaVenta.EMITIDA, fecha_vencimiento__lt=hoy)),
+            por_vencer=Count(
+                "id",
+                filter=Q(
+                    estado=EstadoFacturaVenta.EMITIDA,
+                    fecha_vencimiento__gte=hoy,
+                    fecha_vencimiento__lte=hoy + timedelta(days=7),
+                ),
+            ),
+            monto_por_vencer=Sum(
+                "total",
+                filter=Q(
+                    estado=EstadoFacturaVenta.EMITIDA,
+                    fecha_vencimiento__gte=hoy,
+                    fecha_vencimiento__lte=hoy + timedelta(days=7),
+                ),
+            ),
+        )
+
+        top_clientes = list(
+            queryset.values("cliente_id", "cliente__contacto__nombre")
+            .annotate(total=Sum("total"))
+            .order_by("-total")[:5]
+        )
+
+        series = list(
+            queryset.annotate(periodo=_analytics_grouping_expression(agrupacion, "fecha_emision"))
+            .values("periodo")
+            .annotate(cantidad=Count("id"), monto=Sum("total"))
+            .order_by("periodo")
+        )
+
+        detail = list(
+            queryset.order_by("-fecha_emision", "-creado_en").values(
+                "id",
+                "numero",
+                "cliente_id",
+                "cliente__contacto__nombre",
+                "fecha_emision",
+                "fecha_vencimiento",
+                "estado",
+                "total",
+            )
+        )
+
+        top_productos = list(
+            FacturaVentaItem.objects.filter(empresa=self.get_empresa(), factura_venta__in=queryset)
+            .annotate(
+                line_total=ExpressionWrapper(
+                    F("cantidad") * F("precio_unitario"),
+                    output_field=DecimalField(max_digits=18, decimal_places=2),
+                )
+            )
+            .values("producto_id", "descripcion")
+            .annotate(
+                cantidad=Sum("cantidad"),
+                monto=Sum("line_total"),
+            )
+            .order_by("-monto")[:5]
+        )
+
+        vencidos = list(
+            queryset.filter(estado=EstadoFacturaVenta.EMITIDA, fecha_vencimiento__lt=hoy)
+            .order_by("fecha_vencimiento")
+            .values(
+                "id",
+                "numero",
+                "cliente__contacto__nombre",
+                "fecha_vencimiento",
+                "total",
+            )[:10]
+        )
+
+        return Response(
+            {
+                "filters": {
+                    "fecha_desde": fecha_desde,
+                    "fecha_hasta": fecha_hasta,
+                    "cliente": cliente or "",
+                    "estado": estado or "ALL",
+                    "cartera": cartera,
+                    "agrupacion": agrupacion,
+                    "fecha_corte": hoy,
+                },
+                "metrics": {
+                    "total_facturas": metrics["total_facturas"] or 0,
+                    "facturacion_total": metrics["facturacion_total"] or 0,
+                    "monto_emitido": metrics["monto_emitido"] or 0,
+                    "emitidas": metrics["emitidas"] or 0,
+                    "borradores": metrics["borradores"] or 0,
+                    "anuladas": metrics["anuladas"] or 0,
+                    "vencidas": metrics["vencidas"] or 0,
+                    "monto_vencido": metrics["monto_vencido"] or 0,
+                    "por_vencer": metrics["por_vencer"] or 0,
+                    "monto_por_vencer": metrics["monto_por_vencer"] or 0,
+                },
+                "top_clientes": [
+                    {
+                        "cliente_id": row["cliente_id"],
+                        "nombre": row["cliente__contacto__nombre"] or "-",
+                        "total": row["total"] or 0,
+                    }
+                    for row in top_clientes
+                ],
+                "top_productos": [
+                    {
+                        "producto_id": row["producto_id"],
+                        "nombre": row["descripcion"] or f"Producto {row['producto_id'] or '-'}",
+                        "cantidad": row["cantidad"] or 0,
+                        "monto": row["monto"] or 0,
+                    }
+                    for row in top_productos
+                ],
+                "series": [
+                    {
+                        "periodo": _serialize_period(row["periodo"]),
+                        "cantidad": row["cantidad"] or 0,
+                        "monto": row["monto"] or 0,
+                    }
+                    for row in series
+                ],
+                "documentos_vencidos": [
+                    {
+                        "id": row["id"],
+                        "numero": row["numero"],
+                        "cliente_nombre": row["cliente__contacto__nombre"] or "-",
+                        "fecha_vencimiento": row["fecha_vencimiento"],
+                        "total": row["total"] or 0,
+                    }
+                    for row in vencidos
+                ],
+                "detail": [
+                    {
+                        "id": row["id"],
+                        "numero": row["numero"],
+                        "cliente_id": row["cliente_id"],
+                        "cliente_nombre": row["cliente__contacto__nombre"] or "-",
+                        "fecha_emision": row["fecha_emision"],
+                        "fecha_vencimiento": row["fecha_vencimiento"],
+                        "estado": row["estado"],
+                        "total": row["total"] or 0,
+                    }
+                    for row in detail
+                ],
+            },
+            status=status.HTTP_200_OK,
+        )
 
 
 class FacturaVentaItemViewSet(VentasAuditoriaMixin, TenantViewSetMixin, ModelViewSet):
@@ -620,6 +912,12 @@ class NotaCreditoVentaViewSet(VentasAuditoriaMixin, TenantViewSetMixin, ModelVie
         nota = self.get_object()
         NotaCreditoVentaService.validar_editable(nota=nota)
         return super().destroy(request, *args, **kwargs)
+
+    def perform_update(self, serializer):
+        """Valida que la nota siga editable antes de persistir cambios de cabecera."""
+        self._set_tenant_context()
+        NotaCreditoVentaService.validar_editable(nota=self.get_object())
+        serializer.save()
 
     @action(detail=True, methods=["post"])
     def emitir(self, request, pk=None):

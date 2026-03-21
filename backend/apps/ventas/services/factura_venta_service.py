@@ -5,13 +5,15 @@ from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 from apps.core.exceptions import BusinessRuleError, ConflictError, ResourceNotFoundError
-from apps.core.services import CarteraService, DomainEventService, OutboxService, SecuenciaService
+from apps.core.services import DomainEventService, OutboxService, SecuenciaService
+from apps.tesoreria.services import CarteraService
 from apps.core.services.accounting_bridge import AccountingBridge
 from apps.core.models import TipoDocumento
-from apps.documentos.models import EstadoContable
+from apps.documentos.models import EstadoContable, TipoDocumentoReferencia
 from apps.documentos.services.integracion_tributaria_service import IntegracionTributariaService
 from apps.ventas.models import (
     EstadoFacturaVenta,
+    EstadoGuiaDespacho,
     EstadoPedidoVenta,
     FacturaVenta,
     FacturaVentaItem,
@@ -23,6 +25,94 @@ from apps.ventas.services.calculo_ventas_service import CalculoVentasService
 
 class FacturaVentaService:
     """Servicio para la gestión de facturas de venta y su integración con cartera."""
+
+    @classmethod
+    def _flujo_ya_despachado(cls, *, factura):
+        """Indica si la salida fÃ­sica ya fue ejecutada mediante una guÃ­a confirmada."""
+        return (
+            factura.guia_despacho_id
+            and factura.guia_despacho
+            and factura.guia_despacho.estado == EstadoGuiaDespacho.CONFIRMADA
+        )
+
+    @classmethod
+    def _registrar_salida_inventario_si_corresponde(cls, *, factura, items, empresa, usuario):
+        """Registra salida de inventario para facturas directas y consume reservas del pedido."""
+        from apps.inventario.services.inventario_service import InventarioService
+
+        if cls._flujo_ya_despachado(factura=factura):
+            return
+
+        # Si la factura nace de un pedido, liberamos primero su reserva para que la
+        # salida real quede asociada a la factura sin arrastrar bloqueos artificiales.
+        for item in items:
+            if not item.producto_id or not item.producto.maneja_inventario:
+                continue
+
+            bodega_id = factura.guia_despacho.bodega_id if factura.guia_despacho_id else None
+
+            if factura.pedido_venta_id:
+                InventarioService.liberar_reserva(
+                    producto_id=item.producto_id,
+                    bodega_id=bodega_id,
+                    documento_tipo=TipoDocumentoReferencia.PEDIDO_VENTA,
+                    documento_id=factura.pedido_venta_id,
+                    empresa=empresa,
+                    cantidad=item.cantidad,
+                )
+
+            InventarioService.registrar_movimiento(
+                producto_id=item.producto_id,
+                bodega_id=bodega_id,
+                tipo="SALIDA",
+                cantidad=item.cantidad,
+                referencia=f"FV-{factura.numero}",
+                empresa=empresa,
+                usuario=usuario,
+                documento_tipo=TipoDocumentoReferencia.VENTA_FACTURA,
+                documento_id=factura.id,
+            )
+
+    @classmethod
+    def _revertir_salida_inventario_si_corresponde(cls, *, factura, empresa, usuario):
+        """Revierte la salida fisica solo cuando la factura fue el documento que movio stock."""
+        from apps.inventario.models import MovimientoInventario, TipoMovimiento
+        from apps.inventario.services.inventario_service import InventarioService
+
+        if cls._flujo_ya_despachado(factura=factura):
+            return
+
+        items = FacturaVentaItem.all_objects.filter(factura_venta=factura).select_related("producto")
+        for item in items:
+            if not item.producto_id or not item.producto.maneja_inventario:
+                continue
+
+            movimiento_salida = (
+                MovimientoInventario.all_objects.filter(
+                    empresa=empresa,
+                    producto_id=item.producto_id,
+                    documento_tipo=TipoDocumentoReferencia.VENTA_FACTURA,
+                    documento_id=factura.id,
+                    tipo=TipoMovimiento.SALIDA,
+                )
+                .order_by("-creado_en", "-id")
+                .first()
+            )
+            if not movimiento_salida:
+                continue
+
+            InventarioService.registrar_movimiento(
+                producto_id=item.producto_id,
+                bodega_id=movimiento_salida.bodega_id,
+                tipo=TipoMovimiento.ENTRADA,
+                cantidad=item.cantidad,
+                referencia=f"ANULACION-FV-{factura.numero}",
+                empresa=empresa,
+                usuario=usuario,
+                costo_unitario=movimiento_salida.costo_unitario,
+                documento_tipo=TipoDocumentoReferencia.VENTA_FACTURA,
+                documento_id=factura.id,
+            )
 
     @classmethod
     def recalcular_totales(cls, *, factura):
@@ -76,9 +166,16 @@ class FacturaVentaService:
         if Decimal(factura.total or 0) <= 0:
             raise BusinessRuleError("No se puede emitir una factura con total cero o negativo.")
 
-        items = FacturaVentaItem.all_objects.filter(factura_venta=factura)
+        items = FacturaVentaItem.all_objects.filter(factura_venta=factura).select_related("producto")
         if not items.exists():
             raise BusinessRuleError("No se puede emitir una factura sin líneas.")
+
+        cls._registrar_salida_inventario_si_corresponde(
+            factura=factura,
+            items=items,
+            empresa=empresa,
+            usuario=usuario,
+        )
 
         estado_anterior = factura.estado
         factura.estado = EstadoFacturaVenta.EMITIDA
@@ -157,6 +254,12 @@ class FacturaVentaService:
             raise ConflictError(
                 f"Solo se puede anular una factura EMITIDA (estado actual: {factura.get_estado_display()})."
             )
+
+        cls._revertir_salida_inventario_si_corresponde(
+            factura=factura,
+            empresa=empresa,
+            usuario=usuario,
+        )
 
         estado_anterior = factura.estado
         factura.estado = EstadoFacturaVenta.ANULADA

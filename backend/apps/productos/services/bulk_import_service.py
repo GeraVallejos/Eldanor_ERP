@@ -4,7 +4,7 @@ import re
 from apps.auditoria.models import AuditSeverity
 from apps.auditoria.services import AuditoriaService
 from apps.core.exceptions import AuthorizationError, BusinessRuleError
-from apps.core.models import Moneda
+from apps.tesoreria.models import Moneda
 from apps.core.roles import RolUsuario
 from apps.core.services import DomainEventService, OutboxService
 from apps.core.services.csv_import import parse_csv_upload

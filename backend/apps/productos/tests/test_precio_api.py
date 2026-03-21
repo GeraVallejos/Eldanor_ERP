@@ -8,8 +8,9 @@ from rest_framework import status
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from apps.contactos.models import Cliente, Contacto
-from apps.core.models import Moneda, UserEmpresa
-from apps.core.services import TipoCambioService
+from apps.core.models import UserEmpresa
+from apps.tesoreria.models import Moneda
+from apps.tesoreria.services import TipoCambioService
 from apps.productos.models import ListaPrecio, ListaPrecioItem, Producto
 
 

@@ -4,16 +4,15 @@ from decimal import Decimal
 from apps.contactos.models.cliente import Cliente
 from apps.contactos.models.contacto import Contacto
 from apps.core.models import (
-    ConfiguracionTributaria,
     DomainEvent,
     OutboxEvent,
-    RangoFolioTributario,
-    TipoDocumentoTributario,
     UserEmpresa,
 )
-from apps.core.models.cartera import CuentaPorCobrar
+from apps.facturacion.models import ConfiguracionTributaria, RangoFolioTributario, TipoDocumentoTributario
+from apps.tesoreria.models import CuentaPorCobrar
 from apps.core.tenant import set_current_empresa, set_current_user
-from apps.documentos.models import EstadoIntegracionTributaria
+from apps.documentos.models import EstadoIntegracionTributaria, TipoDocumentoReferencia
+from apps.inventario.models import MovimientoInventario, ReservaStock
 from apps.productos.models import Impuesto, Producto
 from apps.ventas.models import (
     EstadoFacturaVenta,
@@ -269,6 +268,183 @@ class TestGuiaDespachoService:
 @pytest.mark.django_db
 class TestFacturaNotaCreditoServices:
 
+    def test_emitir_factura_directa_desde_pedido_descuenta_stock_y_libera_reserva(
+        self, empresa, usuario_owner, cliente, producto, impuesto, rangos_sii
+    ):
+        _ = rangos_sii
+        set_current_empresa(empresa)
+        set_current_user(usuario_owner)
+
+        pedido = _crear_pedido_base(empresa, usuario_owner, cliente)
+        PedidoVentaItem.all_objects.create(
+            empresa=empresa,
+            creado_por=usuario_owner,
+            pedido_venta=pedido,
+            producto=producto,
+            descripcion=producto.nombre,
+            cantidad=Decimal("2"),
+            precio_unitario=Decimal("1000"),
+            impuesto=impuesto,
+            impuesto_porcentaje=Decimal("19"),
+        )
+        PedidoVentaService.recalcular_totales(pedido=pedido)
+        PedidoVentaService.confirmar_pedido(
+            pedido_id=pedido.id,
+            empresa=empresa,
+            usuario=usuario_owner,
+        )
+
+        factura = FacturaVentaService.crear_factura(
+            datos={
+                "cliente": cliente,
+                "pedido_venta": pedido,
+                "fecha_emision": "2026-01-03",
+                "fecha_vencimiento": "2026-02-02",
+            },
+            empresa=empresa,
+            usuario=usuario_owner,
+        )
+        FacturaVentaItem.all_objects.create(
+            empresa=empresa,
+            creado_por=usuario_owner,
+            factura_venta=factura,
+            producto=producto,
+            descripcion=producto.nombre,
+            cantidad=Decimal("2"),
+            precio_unitario=Decimal("1000"),
+            descuento=Decimal("0"),
+            impuesto=impuesto,
+            impuesto_porcentaje=Decimal("19"),
+        )
+        FacturaVentaService.recalcular_totales(factura=factura)
+
+        factura = FacturaVentaService.emitir_factura(
+            factura_id=factura.id,
+            empresa=empresa,
+            usuario=usuario_owner,
+        )
+
+        producto.refresh_from_db()
+        pedido.refresh_from_db()
+
+        assert factura.estado == EstadoFacturaVenta.EMITIDA
+        assert producto.stock_actual == Decimal("98")
+        assert pedido.estado == EstadoPedidoVenta.FACTURADO
+        assert MovimientoInventario.all_objects.filter(
+            empresa=empresa,
+            producto=producto,
+            documento_tipo=TipoDocumentoReferencia.VENTA_FACTURA,
+            documento_id=factura.id,
+        ).count() == 1
+        assert not ReservaStock.all_objects.filter(
+            empresa=empresa,
+            producto=producto,
+            documento_tipo=TipoDocumentoReferencia.PEDIDO_VENTA,
+            documento_id=pedido.id,
+        ).exists()
+
+    def test_emitir_factura_con_guia_confirmada_no_duplica_salida_inventario(
+        self, empresa, usuario_owner, cliente, producto, impuesto, rangos_sii
+    ):
+        _ = rangos_sii
+        set_current_empresa(empresa)
+        set_current_user(usuario_owner)
+
+        pedido = _crear_pedido_base(empresa, usuario_owner, cliente)
+        pedido_item = PedidoVentaItem.all_objects.create(
+            empresa=empresa,
+            creado_por=usuario_owner,
+            pedido_venta=pedido,
+            producto=producto,
+            descripcion=producto.nombre,
+            cantidad=Decimal("1"),
+            precio_unitario=Decimal("1000"),
+            impuesto=impuesto,
+            impuesto_porcentaje=Decimal("19"),
+        )
+        PedidoVentaService.recalcular_totales(pedido=pedido)
+        PedidoVentaService.confirmar_pedido(
+            pedido_id=pedido.id,
+            empresa=empresa,
+            usuario=usuario_owner,
+        )
+
+        guia = GuiaDespachoService.crear_guia(
+            datos={
+                "cliente": cliente,
+                "pedido_venta": pedido,
+                "fecha_despacho": "2026-01-02",
+            },
+            empresa=empresa,
+            usuario=usuario_owner,
+        )
+        GuiaDespachoItem.all_objects.create(
+            empresa=empresa,
+            creado_por=usuario_owner,
+            guia_despacho=guia,
+            pedido_item=pedido_item,
+            producto=producto,
+            descripcion=producto.nombre,
+            cantidad=Decimal("1"),
+            precio_unitario=Decimal("1000"),
+            impuesto=impuesto,
+            impuesto_porcentaje=Decimal("19"),
+        )
+        GuiaDespachoService.recalcular_totales(guia=guia)
+        guia = GuiaDespachoService.confirmar_guia(
+            guia_id=guia.id,
+            empresa=empresa,
+            usuario=usuario_owner,
+            bodega_id=None,
+        )
+
+        factura = FacturaVentaService.crear_factura(
+            datos={
+                "cliente": cliente,
+                "pedido_venta": pedido,
+                "guia_despacho": guia,
+                "fecha_emision": "2026-01-03",
+                "fecha_vencimiento": "2026-02-02",
+            },
+            empresa=empresa,
+            usuario=usuario_owner,
+        )
+        FacturaVentaItem.all_objects.create(
+            empresa=empresa,
+            creado_por=usuario_owner,
+            factura_venta=factura,
+            producto=producto,
+            descripcion=producto.nombre,
+            cantidad=Decimal("1"),
+            precio_unitario=Decimal("1000"),
+            descuento=Decimal("0"),
+            impuesto=impuesto,
+            impuesto_porcentaje=Decimal("19"),
+        )
+        FacturaVentaService.recalcular_totales(factura=factura)
+
+        FacturaVentaService.emitir_factura(
+            factura_id=factura.id,
+            empresa=empresa,
+            usuario=usuario_owner,
+        )
+
+        producto.refresh_from_db()
+
+        assert producto.stock_actual == Decimal("99")
+        assert MovimientoInventario.all_objects.filter(
+            empresa=empresa,
+            producto=producto,
+            documento_tipo=TipoDocumentoReferencia.VENTA_FACTURA,
+            documento_id=factura.id,
+        ).count() == 0
+        assert MovimientoInventario.all_objects.filter(
+            empresa=empresa,
+            producto=producto,
+            documento_tipo=TipoDocumentoReferencia.VENTA_FACTURA,
+            documento_id=guia.id,
+        ).count() == 1
+
     def test_emitir_factura_crea_cxc_y_anular_genera_nc(
         self, empresa, usuario_owner, cliente, producto, impuesto, rangos_sii
     ):
@@ -333,7 +509,15 @@ class TestFacturaNotaCreditoServices:
             usuario=usuario_owner,
             motivo="Anulación de prueba",
         )
+        producto.refresh_from_db()
         assert factura.estado == EstadoFacturaVenta.ANULADA
+        assert producto.stock_actual == Decimal("100")
+        assert MovimientoInventario.all_objects.filter(
+            empresa=empresa,
+            producto=producto,
+            documento_tipo=TipoDocumentoReferencia.VENTA_FACTURA,
+            documento_id=factura.id,
+        ).count() == 2
 
         nc = NotaCreditoVenta.all_objects.filter(
             empresa=empresa,
@@ -343,6 +527,107 @@ class TestFacturaNotaCreditoServices:
         assert nc is not None
         assert nc.estado == EstadoNotaCreditoVenta.EMITIDA
         assert nc.folio_tributario == "200"
+
+    def test_anular_factura_respaldada_por_guia_no_reingresa_stock(
+        self, empresa, usuario_owner, cliente, producto, impuesto, rangos_sii
+    ):
+        _ = rangos_sii
+        set_current_empresa(empresa)
+        set_current_user(usuario_owner)
+
+        pedido = _crear_pedido_base(empresa, usuario_owner, cliente)
+        pedido_item = PedidoVentaItem.all_objects.create(
+            empresa=empresa,
+            creado_por=usuario_owner,
+            pedido_venta=pedido,
+            producto=producto,
+            descripcion=producto.nombre,
+            cantidad=Decimal("1"),
+            precio_unitario=Decimal("1000"),
+            impuesto=impuesto,
+            impuesto_porcentaje=Decimal("19"),
+        )
+        PedidoVentaService.recalcular_totales(pedido=pedido)
+        PedidoVentaService.confirmar_pedido(
+            pedido_id=pedido.id,
+            empresa=empresa,
+            usuario=usuario_owner,
+        )
+
+        guia = GuiaDespachoService.crear_guia(
+            datos={
+                "cliente": cliente,
+                "pedido_venta": pedido,
+                "fecha_despacho": "2026-01-02",
+            },
+            empresa=empresa,
+            usuario=usuario_owner,
+        )
+        GuiaDespachoItem.all_objects.create(
+            empresa=empresa,
+            creado_por=usuario_owner,
+            guia_despacho=guia,
+            pedido_item=pedido_item,
+            producto=producto,
+            descripcion=producto.nombre,
+            cantidad=Decimal("1"),
+            precio_unitario=Decimal("1000"),
+            impuesto=impuesto,
+            impuesto_porcentaje=Decimal("19"),
+        )
+        GuiaDespachoService.recalcular_totales(guia=guia)
+        guia = GuiaDespachoService.confirmar_guia(
+            guia_id=guia.id,
+            empresa=empresa,
+            usuario=usuario_owner,
+            bodega_id=None,
+        )
+
+        factura = FacturaVentaService.crear_factura(
+            datos={
+                "cliente": cliente,
+                "pedido_venta": pedido,
+                "guia_despacho": guia,
+                "fecha_emision": "2026-01-03",
+                "fecha_vencimiento": "2026-02-02",
+            },
+            empresa=empresa,
+            usuario=usuario_owner,
+        )
+        FacturaVentaItem.all_objects.create(
+            empresa=empresa,
+            creado_por=usuario_owner,
+            factura_venta=factura,
+            producto=producto,
+            descripcion=producto.nombre,
+            cantidad=Decimal("1"),
+            precio_unitario=Decimal("1000"),
+            descuento=Decimal("0"),
+            impuesto=impuesto,
+            impuesto_porcentaje=Decimal("19"),
+        )
+        FacturaVentaService.recalcular_totales(factura=factura)
+        FacturaVentaService.emitir_factura(
+            factura_id=factura.id,
+            empresa=empresa,
+            usuario=usuario_owner,
+        )
+
+        FacturaVentaService.anular_factura(
+            factura_id=factura.id,
+            empresa=empresa,
+            usuario=usuario_owner,
+            motivo="Anulacion solo tributaria",
+        )
+        producto.refresh_from_db()
+
+        assert producto.stock_actual == Decimal("99")
+        assert MovimientoInventario.all_objects.filter(
+            empresa=empresa,
+            producto=producto,
+            documento_tipo=TipoDocumentoReferencia.VENTA_FACTURA,
+            documento_id=factura.id,
+        ).count() == 0
 
     def test_emitir_nota_credito_manual_aplica_saldo_cxc(
         self, empresa, usuario_owner, cliente, producto, impuesto, rangos_sii
@@ -425,6 +710,100 @@ class TestFacturaNotaCreditoServices:
         referencia = f"FV-{factura.numero}-{str(factura.id)[:8]}"
         cxc = CuentaPorCobrar.all_objects.get(empresa=empresa, referencia=referencia)
         assert cxc.saldo < cxc.monto_total
+
+    def test_emitir_nota_credito_devolucion_reingresa_stock_y_anularla_revierte(
+        self, empresa, usuario_owner, cliente, producto, impuesto, rangos_sii
+    ):
+        _ = rangos_sii
+        set_current_empresa(empresa)
+        set_current_user(usuario_owner)
+
+        factura = FacturaVentaService.crear_factura(
+            datos={
+                "cliente": cliente,
+                "fecha_emision": "2026-01-03",
+                "fecha_vencimiento": "2026-02-02",
+            },
+            empresa=empresa,
+            usuario=usuario_owner,
+        )
+        f_item = FacturaVentaItem.all_objects.create(
+            empresa=empresa,
+            creado_por=usuario_owner,
+            factura_venta=factura,
+            producto=producto,
+            descripcion=producto.nombre,
+            cantidad=Decimal("2"),
+            precio_unitario=Decimal("1000"),
+            descuento=Decimal("0"),
+            impuesto=impuesto,
+            impuesto_porcentaje=Decimal("19"),
+        )
+        FacturaVentaService.recalcular_totales(factura=factura)
+        FacturaVentaService.emitir_factura(
+            factura_id=factura.id,
+            empresa=empresa,
+            usuario=usuario_owner,
+        )
+
+        nota = NotaCreditoVentaService.crear_nota_credito(
+            datos={
+                "factura_origen": factura,
+                "cliente": cliente,
+                "tipo": TipoNotaCreditoVenta.DEVOLUCION,
+                "fecha_emision": "2026-01-10",
+                "motivo": "Devolucion parcial",
+            },
+            empresa=empresa,
+            usuario=usuario_owner,
+        )
+        NotaCreditoVentaItem.all_objects.create(
+            empresa=empresa,
+            creado_por=usuario_owner,
+            nota_credito=nota,
+            factura_item=f_item,
+            producto=producto,
+            descripcion=producto.nombre,
+            cantidad=Decimal("1"),
+            precio_unitario=Decimal("1000"),
+            impuesto=impuesto,
+            impuesto_porcentaje=Decimal("19"),
+        )
+        NotaCreditoVentaService.recalcular_totales(nota=nota)
+
+        nota = NotaCreditoVentaService.emitir_nota_credito(
+            nota_id=nota.id,
+            empresa=empresa,
+            usuario=usuario_owner,
+        )
+        producto.refresh_from_db()
+
+        assert nota.estado == EstadoNotaCreditoVenta.EMITIDA
+        assert producto.stock_actual == Decimal("99")
+        assert MovimientoInventario.all_objects.filter(
+            empresa=empresa,
+            producto=producto,
+            documento_tipo=TipoDocumentoReferencia.AJUSTE,
+            documento_id=nota.id,
+            referencia=f"NCV-{nota.numero}",
+        ).count() == 1
+
+        nota = NotaCreditoVentaService.anular_nota_credito(
+            nota_id=nota.id,
+            empresa=empresa,
+            usuario=usuario_owner,
+            motivo="Se revierte devolucion",
+        )
+        producto.refresh_from_db()
+
+        assert nota.estado == EstadoNotaCreditoVenta.ANULADA
+        assert producto.stock_actual == Decimal("98")
+        assert MovimientoInventario.all_objects.filter(
+            empresa=empresa,
+            producto=producto,
+            documento_tipo=TipoDocumentoReferencia.AJUSTE,
+            documento_id=nota.id,
+        ).count() == 2
 
     def test_confirmar_guia_encola_integracion_tributaria(
         self, empresa, usuario_owner, cliente, producto, impuesto, rangos_sii

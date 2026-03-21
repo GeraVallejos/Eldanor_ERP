@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { api } from '@/api/client'
-import { normalizeApiError } from '@/api/errors'
+import { extractApiErrorContract, normalizeApiError } from '@/api/errors'
+import ApiContractError from '@/components/ui/ApiContractError'
 import Button from '@/components/ui/Button'
 import { buttonVariants } from '@/components/ui/buttonVariants'
 import SearchableSelect from '@/components/ui/SearchableSelect'
@@ -50,6 +51,7 @@ function ComprasOrdenesCreatePage() {
   const [productos, setProductos] = useState([])
   const [impuestos, setImpuestos] = useState([])
   const [numeroPreview, setNumeroPreview] = useState('...')
+  const [submitError, setSubmitError] = useState(null)
   const [form, setForm] = useState({
     proveedor: '',
     fecha_emision: todayDate(),
@@ -197,10 +199,12 @@ function ComprasOrdenesCreatePage() {
   }, [impuestos])
 
   const updateField = (key, value) => {
+    setSubmitError(null)
     setForm((prev) => ({ ...prev, [key]: value }))
   }
 
   const updateItemField = (index, key, value) => {
+    setSubmitError(null)
     setItems((prev) => {
       const next = [...prev]
       const row = {
@@ -267,6 +271,7 @@ function ComprasOrdenesCreatePage() {
     }
 
     setStatus('loading')
+    setSubmitError(null)
 
     try {
       const totals = items.map(computeItemTotals)
@@ -330,10 +335,12 @@ function ComprasOrdenesCreatePage() {
       toast.success(isEditMode ? 'Orden de compra actualizada correctamente.' : 'Orden de compra creada correctamente.')
       navigate('/compras/ordenes')
     } catch (error) {
+      const contractError = extractApiErrorContract(error, {
+        fallback: isEditMode ? 'No se pudo actualizar la orden de compra.' : 'No se pudo crear la orden de compra.',
+      })
+      setSubmitError(contractError)
       toast.error(
-        normalizeApiError(error, {
-          fallback: isEditMode ? 'No se pudo actualizar la orden de compra.' : 'No se pudo crear la orden de compra.',
-        }),
+        contractError.message,
       )
     } finally {
       setStatus('idle')
@@ -357,6 +364,10 @@ function ComprasOrdenesCreatePage() {
       </div>
 
       <form className="space-y-4 rounded-md border border-border bg-card p-4" onSubmit={onSubmit}>
+        <ApiContractError
+          error={submitError}
+          title={isEditMode ? 'No se pudo actualizar la orden de compra.' : 'No se pudo crear la orden de compra.'}
+        />
         <div className="grid gap-3 md:grid-cols-2">
           <div className="text-sm">
             <span className="font-medium">Proveedor</span>

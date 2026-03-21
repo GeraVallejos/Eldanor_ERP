@@ -12,6 +12,7 @@ import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import TablePagination from '@/components/ui/TablePagination'
 import { getChileDateSuffix } from '@/lib/dateTimeFormat'
 import { useTableSorting } from '@/lib/tableSorting'
+import { useResponsiveTablePageSize } from '@/lib/useResponsiveTablePageSize'
 import { cn } from '@/lib/utils'
 import { downloadExcelFile } from '@/modules/shared/exports/downloadExcelFile'
 import { downloadSimpleTablePdf } from '@/modules/shared/exports/downloadSimpleTablePdf'
@@ -30,6 +31,7 @@ function normalizeListResponse(data) {
 }
 
 function ProveedoresListPage() {
+  const pageSize = useResponsiveTablePageSize({ reservedHeight: 450 })
   const currentUser = useSelector(selectCurrentUser)
   const [proveedores, setProveedores] = useState([])
   const [contactos, setContactos] = useState([])
@@ -113,7 +115,7 @@ function ProveedoresListPage() {
     })
   }, [proveedores, contactoById, search])
 
-  const { paginatedRows: paginatedProveedores, toggleSort, getSortIndicator, currentPage, totalPages, totalRows, pageSize, nextPage, prevPage } = useTableSorting(filteredProveedores, {
+  const { paginatedRows: paginatedProveedores, toggleSort, getSortIndicator, currentPage, totalPages, totalRows, nextPage, prevPage } = useTableSorting(filteredProveedores, {
     accessors: {
       creado_en: (proveedor) => proveedor.creado_en,
       nombre: (proveedor) => contactoById.get(String(proveedor.contacto))?.nombre || '',
@@ -129,6 +131,7 @@ function ProveedoresListPage() {
     },
     initialKey: 'creado_en',
     initialDirection: 'desc',
+    pageSize,
   })
 
   const openEditModal = (proveedor) => {

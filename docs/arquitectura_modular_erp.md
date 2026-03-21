@@ -13,7 +13,7 @@ Definir una base estable para incorporar modulos (Ventas, Contaduria, Tesoreria,
 
 ## Componentes transversales
 
-Seis servicios reutilizables centralizan logica transversal. Todos estan en `apps/core/services/` con importacion en `__init__.py`.
+Cinco servicios reutilizables centralizan logica transversal en `apps/core/services/`. Los servicios propios de tesoreria viven en `apps/tesoreria/services/`.
 
 ### 1) WorkflowService
 Archivo: `apps/core/services/workflow_service.py`
@@ -93,7 +93,7 @@ Uso recomendado:
 - Manejo de reintentos en API: si `select_for_update()` falla por timeout, ViewSet reintenta N veces.
 
 ### 5) TipoCambioService
-Archivo: `apps/core/services/tipo_cambio_service.py`
+Archivo: `apps/tesoreria/services/tipo_cambio_service.py`
 
 Responsabilidad:
 - Gestionar tasas de cambio por moneda, fecha y empresa.
@@ -112,7 +112,7 @@ Uso recomendado:
 - Mantener tasas actualizadas diariamente (cron job o feed externo).
 
 ### 6) CarteraService
-Archivo: `apps/core/services/cartera_service.py`
+Archivo: `apps/tesoreria/services/cartera_service.py`
 
 Responsabilidad:
 - Gestionar cuentas por pagar (CxP) y cuentas por cobrar (CxC).

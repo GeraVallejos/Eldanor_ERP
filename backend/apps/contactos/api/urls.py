@@ -5,6 +5,6 @@ router = DefaultRouter()
 router.register(r"contactos", ContactoViewSet, basename="contacto")
 router.register(r"clientes", ClienteViewSet, basename="cliente")
 router.register(r"proveedores", ProveedorViewSet, basename="proveedor")
-router.register(r"cuentas-bancarias", CuentaBancariaViewSet, basename="cuenta-bancaria")
+router.register(r"contactos/cuentas-bancarias", CuentaBancariaViewSet, basename="contacto-cuenta-bancaria")
 router.register(r"direcciones", DireccionViewSet, basename="direccion")
 urlpatterns = router.urls

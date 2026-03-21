@@ -26,6 +26,7 @@ function VentasFacturasFormPage() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [numeroPreview, setNumeroPreview] = useState('...')
+  const [estadoActual, setEstadoActual] = useState('')
   const [clientes, setClientes] = useState([])
   const [pedidos, setPedidos] = useState([])
   const [guias, setGuias] = useState([])
@@ -37,9 +38,11 @@ function VentasFacturasFormPage() {
   const canCreate = usePermission(VENTAS_PERMISSIONS.crear)
   const canEdit = usePermission(VENTAS_PERMISSIONS.editar)
   const canSubmit = isEdit ? canEdit : canCreate
+  const isEditableState = !isEdit || estadoActual === 'BORRADOR'
   const noPermissionMessage = isEdit
     ? 'No tiene permiso para editar facturas de venta.'
     : 'No tiene permiso para crear facturas de venta.'
+  const blockedByStateMessage = 'Solo se pueden editar facturas en estado BORRADOR.'
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -59,6 +62,7 @@ function VentasFacturasFormPage() {
 
       if (isEdit) {
         const factura = await ventasApi.getOne(ventasApi.endpoints.facturas, id)
+        setEstadoActual(String(factura.estado || ''))
         const itemRows = await ventasApi.getList(ventasApi.endpoints.facturasItems)
         const scoped = itemRows.filter((row) => String(row.factura_venta) === String(id))
         setNumeroPreview(String(factura.numero || '-'))
@@ -82,6 +86,7 @@ function VentasFacturasFormPage() {
           presupuesto_item_origen: row.presupuesto_item_origen ? String(row.presupuesto_item_origen) : '',
         })) : [emptyItem()])
       } else {
+        setEstadoActual('BORRADOR')
         const next = await ventasApi.getOne(ventasApi.endpoints.facturas, 'siguiente_numero')
         setNumeroPreview(String(next?.numero || '-'))
         if (presupuestoId) {
@@ -161,8 +166,8 @@ function VentasFacturasFormPage() {
 
   const submit = async (event) => {
     event.preventDefault()
-    if (!canSubmit) {
-      toast.error(noPermissionMessage)
+    if (!canSubmit || !isEditableState) {
+      toast.error(!canSubmit ? noPermissionMessage : blockedByStateMessage)
       return
     }
     if (!form.cliente) {
@@ -249,13 +254,14 @@ function VentasFacturasFormPage() {
         <Link to="/ventas/facturas" className={cn(buttonVariants({ variant: 'outline', size: 'md' }))}>Volver</Link>
       </div>
 
-      {!canSubmit ? (
+      {!canSubmit || !isEditableState ? (
         <p className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
-          {noPermissionMessage}
+          {!canSubmit ? noPermissionMessage : blockedByStateMessage}
         </p>
       ) : null}
 
       <form onSubmit={submit} className="space-y-4">
+        <fieldset disabled={!canSubmit || !isEditableState} className="space-y-4">
         <div className="grid gap-3 rounded-md border border-border bg-card p-4 md:grid-cols-3">
           <SearchableSelect
             value={form.cliente}
@@ -312,8 +318,9 @@ function VentasFacturasFormPage() {
 
         <div className="flex justify-end gap-2">
           <Link to="/ventas/facturas" className={cn(buttonVariants({ variant: 'outline', size: 'md' }))}>Cancelar</Link>
-          <Button type="submit" disabled={saving || !canSubmit}>{saving ? 'Guardando...' : isEdit ? 'Guardar cambios' : 'Crear factura'}</Button>
+          <Button type="submit" disabled={saving || !canSubmit || !isEditableState}>{saving ? 'Guardando...' : isEdit ? 'Guardar cambios' : 'Crear factura'}</Button>
         </div>
+        </fieldset>
       </form>
     </section>
   )

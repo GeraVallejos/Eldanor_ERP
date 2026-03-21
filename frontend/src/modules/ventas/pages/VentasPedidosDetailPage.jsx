@@ -12,6 +12,18 @@ import { VENTAS_PERMISSIONS } from '@/modules/ventas/constants'
 import EstadoVentaBadge from '@/modules/ventas/components/EstadoVentaBadge'
 import { usePermissions } from '@/modules/shared/auth/usePermission'
 
+function canEditPedido(pedido, permissions) {
+  return permissions[VENTAS_PERMISSIONS.editar] && pedido?.estado === 'BORRADOR'
+}
+
+function canConfirmPedido(pedido, permissions) {
+  return permissions[VENTAS_PERMISSIONS.aprobar] && pedido?.estado === 'BORRADOR'
+}
+
+function canAnularPedido(pedido, permissions) {
+  return permissions[VENTAS_PERMISSIONS.anular] && ['BORRADOR', 'CONFIRMADO', 'EN_PROCESO'].includes(String(pedido?.estado))
+}
+
 function VentasPedidosDetailPage() {
   const { id } = useParams()
   const [status, setStatus] = useState('idle')
@@ -23,10 +35,6 @@ function VentasPedidosDetailPage() {
     VENTAS_PERMISSIONS.aprobar,
     VENTAS_PERMISSIONS.anular,
   ])
-  const canEdit = permissions[VENTAS_PERMISSIONS.editar]
-  const canApprove = permissions[VENTAS_PERMISSIONS.aprobar]
-  const canAnular = permissions[VENTAS_PERMISSIONS.anular]
-
   const load = useCallback(async () => {
     setStatus('loading')
     try {
@@ -79,9 +87,9 @@ function VentasPedidosDetailPage() {
           <div className="mt-1"><EstadoVentaBadge estado={pedido.estado} /></div>
         </div>
         <div className="flex gap-2">
-          {canEdit ? <Link to={`/ventas/pedidos/${pedido.id}/editar`} className={cn(buttonVariants({ variant: 'outline', size: 'md' }))}>Editar</Link> : null}
-          {canApprove && pedido.estado === 'BORRADOR' ? <Button disabled={updating} onClick={() => execute('confirmar')}>Confirmar</Button> : null}
-          {canAnular && ['BORRADOR', 'CONFIRMADO', 'EN_PROCESO'].includes(String(pedido.estado)) ? (
+          {canEditPedido(pedido, permissions) ? <Link to={`/ventas/pedidos/${pedido.id}/editar`} className={cn(buttonVariants({ variant: 'outline', size: 'md' }))}>Editar</Link> : null}
+          {canConfirmPedido(pedido, permissions) ? <Button disabled={updating} onClick={() => execute('confirmar')}>Confirmar</Button> : null}
+          {canAnularPedido(pedido, permissions) ? (
             <Button disabled={updating} variant="destructive" onClick={() => execute('anular')}>Anular</Button>
           ) : null}
           <Link to="/ventas/pedidos" className={cn(buttonVariants({ variant: 'outline', size: 'md' }))}>Volver</Link>

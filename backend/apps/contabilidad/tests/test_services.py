@@ -4,6 +4,7 @@ from decimal import Decimal
 import pytest
 from django.contrib.auth import get_user_model
 
+from apps.auditoria.models import AuditEvent
 from apps.contabilidad.models import EstadoAsientoContable
 from apps.contabilidad.services import ContabilidadService
 from apps.core.exceptions import BusinessRuleError
@@ -78,6 +79,77 @@ class TestContabilidadService:
             topic="contabilidad.asiento",
             event_name="asiento.contabilizado",
         ).exists()
+        assert AuditEvent.all_objects.filter(
+            empresa=empresa,
+            event_type="CONTABILIDAD_ASIENTO_CONTABILIZADO",
+            entity_id=str(asiento.id),
+        ).exists()
+
+    def test_reversa_y_anulacion_generan_auditoria(self, empresa, usuario_owner_contabilidad):
+        set_current_empresa(empresa)
+        set_current_user(usuario_owner_contabilidad)
+
+        ContabilidadService.seed_plan_base(empresa=empresa, usuario=usuario_owner_contabilidad)
+        clientes = ContabilidadService._buscar_cuenta_por_codigo(empresa=empresa, codigo="112100")
+        ventas = ContabilidadService._buscar_cuenta_por_codigo(empresa=empresa, codigo="411100")
+
+        asiento = ContabilidadService.crear_asiento(
+            empresa=empresa,
+            fecha=date(2026, 3, 19),
+            glosa="Asiento reversible",
+            movimientos_data=[
+                {"cuenta": clientes, "debe": "1190", "haber": "0"},
+                {"cuenta": ventas, "debe": "0", "haber": "1190"},
+            ],
+            usuario=usuario_owner_contabilidad,
+        )
+        asiento = ContabilidadService.contabilizar_asiento(
+            asiento_id=asiento.id,
+            empresa=empresa,
+            usuario=usuario_owner_contabilidad,
+        )
+
+        reversa = ContabilidadService.generar_reversa_asiento(
+            asiento_id=asiento.id,
+            empresa=empresa,
+            usuario=usuario_owner_contabilidad,
+            motivo="Correccion operativa",
+        )
+
+        assert reversa.estado == EstadoAsientoContable.CONTABILIZADO
+        assert AuditEvent.all_objects.filter(
+            empresa=empresa,
+            event_type="CONTABILIDAD_ASIENTO_REVERTIDO",
+            entity_id=str(asiento.id),
+        ).exists()
+
+        otro = ContabilidadService.crear_asiento(
+            empresa=empresa,
+            fecha=date(2026, 3, 20),
+            glosa="Asiento anulable",
+            movimientos_data=[
+                {"cuenta": clientes, "debe": "500", "haber": "0"},
+                {"cuenta": ventas, "debe": "0", "haber": "500"},
+            ],
+            usuario=usuario_owner_contabilidad,
+        )
+        otro = ContabilidadService.contabilizar_asiento(
+            asiento_id=otro.id,
+            empresa=empresa,
+            usuario=usuario_owner_contabilidad,
+        )
+        anulado = ContabilidadService.anular_asiento(
+            asiento_id=otro.id,
+            empresa=empresa,
+            usuario=usuario_owner_contabilidad,
+        )
+
+        assert anulado.estado == EstadoAsientoContable.ANULADO
+        assert AuditEvent.all_objects.filter(
+            empresa=empresa,
+            event_type="CONTABILIDAD_ASIENTO_ANULADO",
+            entity_id=str(otro.id),
+        ).exists()
 
     def test_no_contabiliza_asiento_descuadrado(self, empresa, usuario_owner_contabilidad):
         set_current_empresa(empresa)
@@ -138,4 +210,3 @@ class TestContabilidadService:
         assert procesados[0].estado == EstadoAsientoContable.CONTABILIZADO
         evento.refresh_from_db()
         assert evento.status == OutboxStatus.SENT
-

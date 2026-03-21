@@ -4,13 +4,26 @@ from datetime import timedelta
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+
+def config_bool(name, default=False):
+    value = config(name, default=default)
+    if isinstance(value, bool):
+        return value
+
+    normalized = str(value).strip().lower()
+    if normalized in {"1", "true", "t", "yes", "y", "on", "debug", "dev", "development"}:
+        return True
+    if normalized in {"0", "false", "f", "no", "n", "off", "release", "prod", "production"}:
+        return False
+    return default
+
 # =========================================================
 # BASIC CONFIG
 # =========================================================
 
 SECRET_KEY = config("SECRET_KEY_DJANGO")
 
-DEBUG = config("DEBUG", default=False, cast=bool)
+DEBUG = config_bool("DEBUG", default=False)
 
 ALLOWED_HOSTS = config("ALLOWED_HOSTS", default="").split(",")
 
@@ -44,6 +57,8 @@ INSTALLED_APPS = [
     'apps.inventario.apps.InventarioConfig',
     'apps.auditoria.apps.AuditoriaConfig',
     'apps.ventas.apps.VentasConfig',
+    'apps.facturacion.apps.FacturacionConfig',
+    'apps.tesoreria.apps.TesoreriaConfig',
     'apps.contabilidad.apps.ContabilidadConfig',
 ]
 
@@ -131,7 +146,7 @@ AXES_RESET_ON_SUCCESS = True
 # En local evita bloqueos por pruebas repetidas; en produccion (DEBUG=False) sigue activo.
 AXES_ENABLED = not DEBUG
 
-ENABLE_DRF_THROTTLING = config("ENABLE_DRF_THROTTLING", default=not DEBUG, cast=bool)
+ENABLE_DRF_THROTTLING = config_bool("ENABLE_DRF_THROTTLING", default=not DEBUG)
 
 
 # =========================================================
@@ -181,23 +196,23 @@ SIMPLE_JWT = {
 
 AUTH_COOKIE_ACCESS_NAME = config("AUTH_COOKIE_ACCESS_NAME", default="erp_access")
 AUTH_COOKIE_REFRESH_NAME = config("AUTH_COOKIE_REFRESH_NAME", default="erp_refresh")
-AUTH_COOKIE_SECURE = config("AUTH_COOKIE_SECURE", default=not DEBUG, cast=bool)
+AUTH_COOKIE_SECURE = config_bool("AUTH_COOKIE_SECURE", default=not DEBUG)
 AUTH_COOKIE_SAMESITE = config("AUTH_COOKIE_SAMESITE", default="Strict")
 AUTH_COOKIE_DOMAIN = config("AUTH_COOKIE_DOMAIN", default=None)
 AUTH_COOKIE_PATH = config("AUTH_COOKIE_PATH", default="/")
 
 # Cookies/session security for production
-SESSION_COOKIE_SECURE = config("SESSION_COOKIE_SECURE", default=not DEBUG, cast=bool)
-CSRF_COOKIE_SECURE = config("CSRF_COOKIE_SECURE", default=not DEBUG, cast=bool)
+SESSION_COOKIE_SECURE = config_bool("SESSION_COOKIE_SECURE", default=not DEBUG)
+CSRF_COOKIE_SECURE = config_bool("CSRF_COOKIE_SECURE", default=not DEBUG)
 CSRF_TRUSTED_ORIGINS = [
     origin for origin in config("CSRF_TRUSTED_ORIGINS", default="").split(",") if origin
 ]
 
 # Transport/security hardening (safe defaults for production)
-SECURE_SSL_REDIRECT = config("SECURE_SSL_REDIRECT", default=not DEBUG, cast=bool)
+SECURE_SSL_REDIRECT = config_bool("SECURE_SSL_REDIRECT", default=not DEBUG)
 SECURE_HSTS_SECONDS = config("SECURE_HSTS_SECONDS", default=0 if DEBUG else 31536000, cast=int)
-SECURE_HSTS_INCLUDE_SUBDOMAINS = config("SECURE_HSTS_INCLUDE_SUBDOMAINS", default=not DEBUG, cast=bool)
-SECURE_HSTS_PRELOAD = config("SECURE_HSTS_PRELOAD", default=not DEBUG, cast=bool)
+SECURE_HSTS_INCLUDE_SUBDOMAINS = config_bool("SECURE_HSTS_INCLUDE_SUBDOMAINS", default=not DEBUG)
+SECURE_HSTS_PRELOAD = config_bool("SECURE_HSTS_PRELOAD", default=not DEBUG)
 SECURE_PROXY_SSL_HEADER = (
     tuple(config("SECURE_PROXY_SSL_HEADER", cast=lambda v: tuple(x.strip() for x in v.split(","))))
     if config("SECURE_PROXY_SSL_HEADER", default="").strip()

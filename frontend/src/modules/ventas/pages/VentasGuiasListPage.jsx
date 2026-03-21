@@ -12,6 +12,18 @@ import { formatMoney } from '@/modules/ventas/utils'
 import EstadoVentaBadge from '@/modules/ventas/components/EstadoVentaBadge'
 import { usePermissions } from '@/modules/shared/auth/usePermission'
 
+function canEditGuia(row, permissions) {
+  return permissions[VENTAS_PERMISSIONS.editar] && row?.estado === 'BORRADOR'
+}
+
+function canConfirmGuia(row, permissions) {
+  return permissions[VENTAS_PERMISSIONS.aprobar] && row?.estado === 'BORRADOR'
+}
+
+function canAnularGuia(row, permissions) {
+  return permissions[VENTAS_PERMISSIONS.anular] && row?.estado === 'CONFIRMADA'
+}
+
 function VentasGuiasListPage() {
   const [search, setSearch] = useState('')
   const [updatingId, setUpdatingId] = useState(null)
@@ -23,9 +35,6 @@ function VentasGuiasListPage() {
     VENTAS_PERMISSIONS.anular,
   ])
   const canCreate = permissions[VENTAS_PERMISSIONS.crear]
-  const canEdit = permissions[VENTAS_PERMISSIONS.editar]
-  const canApprove = permissions[VENTAS_PERMISSIONS.aprobar]
-  const canAnular = permissions[VENTAS_PERMISSIONS.anular]
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
@@ -96,11 +105,11 @@ function VentasGuiasListPage() {
                 <td className="px-3 py-2 text-right">{formatMoney(row.total)}</td>
                 <td className="px-3 py-2">
                   <div className="flex justify-end gap-2">
-                    {canEdit ? <Link to={`/ventas/guias/${row.id}/editar`} className={cn(buttonVariants({ variant: 'outline', size: 'sm' }))}>Editar</Link> : null}
-                    {canApprove && row.estado === 'BORRADOR' ? (
+                    {canEditGuia(row, permissions) ? <Link to={`/ventas/guias/${row.id}/editar`} className={cn(buttonVariants({ variant: 'outline', size: 'sm' }))}>Editar</Link> : null}
+                    {canConfirmGuia(row, permissions) ? (
                       <Button size="sm" disabled={updatingId === row.id} onClick={() => execute(row, 'confirmar')}>Confirmar</Button>
                     ) : null}
-                    {canAnular && row.estado === 'CONFIRMADA' ? (
+                    {canAnularGuia(row, permissions) ? (
                       <Button variant="destructive" size="sm" disabled={updatingId === row.id} onClick={() => execute(row, 'anular')}>Anular</Button>
                     ) : null}
                   </div>

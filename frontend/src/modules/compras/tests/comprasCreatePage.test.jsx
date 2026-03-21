@@ -1,4 +1,4 @@
-import { screen, waitFor } from '@testing-library/react'
+import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { http, HttpResponse } from 'msw'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -100,5 +100,44 @@ describe('compras/CreatePage', () => {
     await waitFor(() => {
       expect(createOrdenSpy).not.toHaveBeenCalled()
     })
+  })
+
+  it('muestra contrato de error backend dentro del formulario', async () => {
+    server.use(
+      http.get('*/proveedores/', async () => HttpResponse.json([{ id: 'p-1', contacto: 'c-1' }])),
+      http.get('*/contactos/', async () => HttpResponse.json([{ id: 'c-1', nombre: 'Proveedor Uno' }])),
+      http.get('*/ordenes-compra/siguiente_numero/', async () => HttpResponse.json({ numero: 'ORD-00001' })),
+      http.get('*/productos/', async () =>
+        HttpResponse.json([{ id: 'prod-1', nombre: 'Producto A', tipo: 'PRODUCTO', precio_referencia: 1000, impuesto: 'imp-1' }]),
+      ),
+      http.get('*/impuestos/', async () => HttpResponse.json([{ id: 'imp-1', nombre: 'IVA', porcentaje: 19 }])),
+      http.post('*/ordenes-compra/', async () =>
+        HttpResponse.json(
+          {
+            detail: 'El proveedor seleccionado no esta activo.',
+            error_code: 'BUSINESS_RULE_ERROR',
+          },
+          { status: 400 },
+        ),
+      ),
+    )
+
+    renderWithProviders(<ComprasOrdenesCreatePage />)
+
+    const proveedorInput = await screen.findByLabelText('Proveedor')
+    await userEvent.type(proveedorInput, 'Proveedor')
+    await userEvent.click(await screen.findByRole('button', { name: 'Proveedor Uno' }))
+
+    const productoInputs = screen.getAllByLabelText(/Producto item/)
+    await userEvent.type(productoInputs[0], 'Producto')
+    await userEvent.click(await screen.findByRole('button', { name: 'Producto A' }))
+
+    await userEvent.click(screen.getByRole('button', { name: 'Crear orden' }))
+
+    const form = screen.getByRole('button', { name: 'Crear orden' }).closest('form')
+    expect(form).not.toBeNull()
+    const errorMatches = await within(form).findAllByText('El proveedor seleccionado no esta activo.')
+    expect(errorMatches.length).toBeGreaterThan(0)
+    expect(within(form).getByText(/Codigo: BUSINESS_RULE_ERROR/i)).toBeInTheDocument()
   })
 })

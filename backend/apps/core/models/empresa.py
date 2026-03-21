@@ -1,5 +1,6 @@
 import uuid
 from django.db import models
+from django.utils.text import slugify
 from apps.core.validators import formatear_rut, normalizar_texto, validar_rut_con_dv
 from apps.core.storage.public_storage import PublicMediaStorage
 from apps.core.utils.optimizador_imagen import optimize_image
@@ -79,6 +80,12 @@ class Empresa(models.Model):
     creado_en = models.DateTimeField(auto_now_add=True)
     actualizado_en = models.DateTimeField(auto_now=True)
 
+    def _build_logo_path(self):
+        nombre_slug = slugify((self.nombre or "").strip())
+        if nombre_slug:
+            return f"empresas/{nombre_slug}/logo.webp"
+        return f"empresas/empresa-{self.id}/logo.webp"
+
     def save(self, *args, **kwargs):
 
         self.nombre = normalizar_texto(self.nombre)
@@ -103,9 +110,11 @@ class Empresa(models.Model):
                 should_process_logo = previous_logo != current_logo
 
         if should_process_logo:
+            if not self.id:
+                self.id = uuid.uuid4()
             optimized = optimize_image(self.logo)
             # Keep one deterministic public logo per company to avoid cross-tenant overwrites.
-            self.logo.save(f"empresas/{self.id}/logo.webp", optimized, save=False)
+            self.logo.save(self._build_logo_path(), optimized, save=False)
 
         if self.rut:
             self.rut = formatear_rut(self.rut)

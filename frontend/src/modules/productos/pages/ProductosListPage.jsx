@@ -21,6 +21,7 @@ import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import TablePagination from '@/components/ui/TablePagination'
 import { getChileDateSuffix } from '@/lib/dateTimeFormat'
 import { formatCurrencyCLP, formatSmartNumber } from '@/lib/numberFormat'
+import { useResponsiveTablePageSize } from '@/lib/useResponsiveTablePageSize'
 import { cn } from '@/lib/utils'
 import { invalidateProductosCatalogCache } from '@/modules/productos/services/productosCatalogCache'
 import { downloadExcelFile } from '@/modules/shared/exports/downloadExcelFile'
@@ -34,6 +35,7 @@ import {
   selectProductosStatus,
 } from '@/modules/productos/productosSlice'
 import { selectCurrentUser } from '@/modules/auth/authSlice'
+import { usePermissions } from '@/modules/shared/auth/usePermission'
 
 const columnHelper = createColumnHelper()
 
@@ -42,16 +44,18 @@ function formatMoney(value) {
 }
 
 function ProductosListPage() {
+  const responsivePageSize = useResponsiveTablePageSize({ mobileRows: 20, reservedHeight: 470, desktopMaxRows: 14 })
   const dispatch = useDispatch()
   const productos = useSelector(selectProductos)
   const categorias = useSelector(selectCategorias)
   const currentUser = useSelector(selectCurrentUser)
+  const permissions = usePermissions(['PRODUCTOS.CREAR', 'PRODUCTOS.EDITAR', 'PRODUCTOS.BORRAR'])
   const status = useSelector(selectProductosStatus)
   const error = useSelector(selectProductosError)
   const [sorting, setSorting] = useState([{ id: 'creado_en', desc: true }])
   const [globalFilter, setGlobalFilter] = useState('')
   const [categoryFilter, setCategoryFilter] = useState('ALL')
-  const [pagination, setPagination] = useState({ pageIndex: 0, pageSize: 20 })
+  const [pagination, setPagination] = useState({ pageIndex: 0, pageSize: responsivePageSize })
   const [editModalOpen, setEditModalOpen] = useState(false)
   const [savingEdit, setSavingEdit] = useState(false)
   const [deletingId, setDeletingId] = useState(null)
@@ -73,6 +77,9 @@ function ProductosListPage() {
   const userRole = String(currentUser?.rol || '').toUpperCase()
   const canViewInactive = userRole === 'OWNER' || userRole === 'ADMIN'
   const canBulkImport = userRole === 'ADMIN'
+  const canCreate = permissions['PRODUCTOS.CREAR']
+  const canEdit = permissions['PRODUCTOS.EDITAR']
+  const canDelete = permissions['PRODUCTOS.BORRAR']
 
   useEffect(() => {
     dispatch(fetchProductos({ includeInactive: canViewInactive && includeInactive }))
@@ -81,6 +88,14 @@ function ProductosListPage() {
   useEffect(() => {
     dispatch(fetchCatalogosProducto())
   }, [dispatch])
+
+  useEffect(() => {
+    setPagination((prev) => (
+      prev.pageSize === responsivePageSize
+        ? prev
+        : { ...prev, pageIndex: 0, pageSize: responsivePageSize }
+    ))
+  }, [responsivePageSize])
 
   const categoriaLabelById = useMemo(() => {
     const map = new Map()
@@ -235,23 +250,27 @@ function ProductosListPage() {
 
           return (
             <div className="flex items-center gap-1">
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => openEditModal(producto)}
-                className="h-7 px-2 text-xs"
-              >
-                Editar
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={deletingId === producto.id}
+              {canEdit ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => openEditModal(producto)}
+                  className="h-7 px-2 text-xs"
+                >
+                  Editar
+                </Button>
+              ) : null}
+              {canDelete ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={deletingId === producto.id}
                   onClick={() => requestDeleteProducto(producto)}
-                className="h-7 border-destructive/40 px-2 text-xs text-destructive hover:bg-destructive/10"
-              >
-                {deletingId === producto.id ? 'Eliminando...' : 'Eliminar'}
-              </Button>
+                  className="h-7 border-destructive/40 px-2 text-xs text-destructive hover:bg-destructive/10"
+                >
+                  {deletingId === producto.id ? 'Eliminando...' : 'Eliminar'}
+                </Button>
+              ) : null}
             </div>
           )
         },
@@ -381,12 +400,14 @@ function ProductosListPage() {
             fullWidth
             className="sm:w-auto"
           />
-          <Link
-            to="/productos/nuevo"
-            className={cn(buttonVariants({ variant: 'default', size: 'md', fullWidth: true }), 'sm:w-auto')}
-          >
-            Nuevo producto
-          </Link>
+          {canCreate ? (
+            <Link
+              to="/productos/nuevo"
+              className={cn(buttonVariants({ variant: 'default', size: 'md', fullWidth: true }), 'sm:w-auto')}
+            >
+              Nuevo producto
+            </Link>
+          ) : null}
         </div>
       </div>
 

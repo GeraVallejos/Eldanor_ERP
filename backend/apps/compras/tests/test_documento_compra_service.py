@@ -14,7 +14,8 @@ from apps.compras.models import (
 from apps.compras.services import DocumentoCompraService
 from apps.contactos.models import Contacto, Proveedor
 from apps.core.exceptions import BusinessRuleError, ConflictError, ResourceNotFoundError
-from apps.core.models import CuentaPorPagar, UserEmpresa
+from apps.core.models import UserEmpresa
+from apps.tesoreria.models import CuentaPorPagar
 from apps.inventario.models import MovimientoInventario
 from apps.inventario.models import StockProducto
 from apps.inventario.services.inventario_service import InventarioService
@@ -418,6 +419,125 @@ class TestDocumentoCompraService:
 
         orden.refresh_from_db()
         assert orden.estado == EstadoOrdenCompra.ENVIADA
+
+    def test_anular_factura_revierte_solo_el_pendiente_movido_por_ese_documento(
+        self, empresa, owner_usuario, proveedor
+    ):
+        orden = OrdenCompra.objects.create(
+            empresa=empresa,
+            creado_por=owner_usuario,
+            numero="OC-PARC-001",
+            proveedor=proveedor,
+            estado=EstadoOrdenCompra.ENVIADA,
+            fecha_emision=date.today(),
+        )
+
+        producto_oc = Producto.objects.create(
+            empresa=empresa,
+            creado_por=owner_usuario,
+            nombre="Producto Parcial OC",
+            sku="PPOC-001",
+            stock_actual=Decimal("0.00"),
+            maneja_inventario=True,
+            precio_referencia=Decimal("5000"),
+        )
+
+        OrdenCompraItem.objects.create(
+            empresa=empresa,
+            creado_por=owner_usuario,
+            orden_compra=orden,
+            producto=producto_oc,
+            descripcion="Item parcial",
+            cantidad=Decimal("5"),
+            precio_unitario=Decimal("5000"),
+            subtotal=Decimal("25000"),
+        )
+
+        guia = DocumentoCompraProveedor.objects.create(
+            empresa=empresa,
+            creado_por=owner_usuario,
+            tipo_documento="GUIA_RECEPCION",
+            proveedor=proveedor,
+            orden_compra=orden,
+            folio="GR-PARC-001",
+            fecha_emision=date.today(),
+            fecha_recepcion=date.today(),
+            subtotal_neto=Decimal("15000"),
+            total=Decimal("15000"),
+        )
+        DocumentoCompraProveedorItem.objects.create(
+            empresa=empresa,
+            creado_por=owner_usuario,
+            documento=guia,
+            producto=producto_oc,
+            cantidad=Decimal("3"),
+            precio_unitario=Decimal("5000"),
+            subtotal=Decimal("15000"),
+        )
+        DocumentoCompraService.confirmar_guia(
+            documento_id=guia.id,
+            empresa=empresa,
+            usuario=owner_usuario,
+        )
+
+        factura = DocumentoCompraProveedor.objects.create(
+            empresa=empresa,
+            creado_por=owner_usuario,
+            tipo_documento="FACTURA_COMPRA",
+            proveedor=proveedor,
+            orden_compra=orden,
+            folio="FAC-PARC-001",
+            fecha_emision=date.today(),
+            fecha_recepcion=date.today(),
+            subtotal_neto=Decimal("25000"),
+            impuestos=Decimal("4750"),
+            total=Decimal("29750"),
+        )
+        DocumentoCompraProveedorItem.objects.create(
+            empresa=empresa,
+            creado_por=owner_usuario,
+            documento=factura,
+            producto=producto_oc,
+            cantidad=Decimal("5"),
+            precio_unitario=Decimal("5000"),
+            subtotal=Decimal("25000"),
+        )
+
+        DocumentoCompraService.confirmar_factura(
+            documento_id=factura.id,
+            empresa=empresa,
+            usuario=owner_usuario,
+        )
+        producto_oc.refresh_from_db()
+        orden.refresh_from_db()
+        assert producto_oc.stock_actual == Decimal("5")
+        assert orden.estado == EstadoOrdenCompra.RECIBIDA
+
+        DocumentoCompraService.anular_documento(
+            documento_id=factura.id,
+            empresa=empresa,
+            usuario=owner_usuario,
+        )
+
+        producto_oc.refresh_from_db()
+        orden.refresh_from_db()
+
+        assert producto_oc.stock_actual == Decimal("3")
+        assert orden.estado == EstadoOrdenCompra.PARCIAL
+        assert MovimientoInventario.all_objects.filter(
+            empresa=empresa,
+            producto=producto_oc,
+            documento_tipo="FACTURA_COMPRA",
+            documento_id=factura.id,
+            tipo="ENTRADA",
+        ).count() == 1
+        assert MovimientoInventario.all_objects.filter(
+            empresa=empresa,
+            producto=producto_oc,
+            documento_tipo="FACTURA_COMPRA",
+            documento_id=factura.id,
+            tipo="SALIDA",
+        ).count() == 1
 
     def test_reingreso_factura_mismo_folio_tras_anulacion_no_colisiona_cxp(self, empresa, owner_usuario, proveedor):
         producto = Producto.objects.create(
