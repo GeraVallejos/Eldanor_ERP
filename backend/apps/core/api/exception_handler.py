@@ -31,12 +31,8 @@ def _as_response_detail(detail):
 
 def _app_error_payload(exc):
     detail = exc.detail
-    if isinstance(detail, (dict, list)):
-        # Keep field-oriented payload shape for forms.
-        return detail
-
     payload = {
-        "detail": str(detail),
+        "detail": detail if isinstance(detail, (dict, list)) else str(detail),
         "error_code": exc.error_code,
     }
     if exc.meta is not None:
@@ -130,7 +126,13 @@ def custom_exception_handler(exc, context):
             detail = exc.messages
         else:
             detail = str(exc)
-        return Response(_as_response_detail(detail), status=status.HTTP_400_BAD_REQUEST)
+        return Response(
+            {
+                "detail": detail if isinstance(detail, (dict, list)) else str(detail),
+                "error_code": "VALIDATION_ERROR",
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
 
     logger.exception("Unhandled exception in API", exc_info=exc)
     return Response(

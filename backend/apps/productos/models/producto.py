@@ -59,7 +59,7 @@ class Producto(TenantRelationValidationMixin, BaseModel):
     )
 
     moneda = models.ForeignKey(
-        "core.Moneda",
+        "tesoreria.Moneda",
         on_delete=models.PROTECT,
         null=True,
         blank=True,
@@ -150,7 +150,7 @@ class Producto(TenantRelationValidationMixin, BaseModel):
                 self.empresa = empresa_contexto
 
         if self.empresa_id and not self.moneda_id:
-            from apps.core.models import Moneda
+            from apps.tesoreria.models import Moneda
 
             self.moneda = Moneda.all_objects.filter(
                 empresa_id=self.empresa_id,
@@ -182,7 +182,7 @@ class Producto(TenantRelationValidationMixin, BaseModel):
         super().save(*args, **kwargs)
 
         if self.empresa_id and not self.moneda_id:
-            from apps.core.models import Moneda
+            from apps.tesoreria.models import Moneda
 
             moneda_base = Moneda.all_objects.filter(
                 empresa_id=self.empresa_id,

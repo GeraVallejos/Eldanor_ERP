@@ -3,6 +3,8 @@ from decimal import Decimal
 from django.db import transaction
 from django.utils import timezone
 
+from apps.auditoria.models import AuditSeverity
+from apps.auditoria.services import AuditoriaService
 from apps.contabilidad.models import (
     AsientoContable,
     ClaveCuentaContable,
@@ -61,6 +63,25 @@ class ContabilidadService:
         """Valida que el asiento siga en borrador antes de aceptar cambios manuales."""
         if asiento.estado != EstadoAsientoContable.BORRADOR:
             raise ConflictError("Solo se puede modificar un asiento en estado BORRADOR.")
+
+    @staticmethod
+    def _registrar_auditoria_asiento(*, asiento, usuario, action_code, event_type, summary, changes=None, payload=None, severity=AuditSeverity.INFO):
+        """Registra auditoria funcional para operaciones sensibles sobre asientos."""
+        AuditoriaService.registrar_evento(
+            empresa=asiento.empresa,
+            usuario=usuario,
+            module_code="CONTABILIDAD",
+            action_code=action_code,
+            event_type=event_type,
+            entity_type="ASIENTO_CONTABLE",
+            entity_id=str(asiento.id),
+            summary=summary,
+            severity=severity,
+            changes=changes or {},
+            payload=payload or {},
+            source="ContabilidadService",
+            idempotency_key=f"audit:contabilidad-asiento:{asiento.id}:{event_type}",
+        )
 
     @staticmethod
     @transaction.atomic
@@ -196,6 +217,19 @@ class ContabilidadService:
             usuario=usuario,
             dedup_key=dedup_key,
         )
+        ContabilidadService._registrar_auditoria_asiento(
+            asiento=asiento,
+            usuario=usuario,
+            action_code="CONTABILIZAR",
+            event_type="CONTABILIDAD_ASIENTO_CONTABILIZADO",
+            summary=f"Asiento {asiento.numero} contabilizado.",
+            changes={"estado": [EstadoAsientoContable.BORRADOR, EstadoAsientoContable.CONTABILIZADO]},
+            payload={
+                "numero": asiento.numero,
+                "total_debe": str(asiento.total_debe),
+                "total_haber": str(asiento.total_haber),
+            },
+        )
         return asiento
 
     @staticmethod
@@ -212,6 +246,15 @@ class ContabilidadService:
 
         asiento.estado = EstadoAsientoContable.ANULADO
         asiento.save(update_fields=["estado", "actualizado_en"])
+        ContabilidadService._registrar_auditoria_asiento(
+            asiento=asiento,
+            usuario=usuario,
+            action_code="CONTABILIZAR",
+            event_type="CONTABILIDAD_ASIENTO_ANULADO",
+            summary=f"Asiento {asiento.numero} anulado.",
+            changes={"estado": [EstadoAsientoContable.CONTABILIZADO, EstadoAsientoContable.ANULADO]},
+            severity=AuditSeverity.WARNING,
+        )
         return asiento
 
     @staticmethod
@@ -273,7 +316,7 @@ class ContabilidadService:
             "FacturaVenta": ("apps.ventas.models", "FacturaVenta"),
             "NotaCreditoVenta": ("apps.ventas.models", "NotaCreditoVenta"),
             "DocumentoCompraProveedor": ("apps.compras.models", "DocumentoCompraProveedor"),
-            "MovimientoBancario": ("apps.core.models", "MovimientoBancario"),
+            "MovimientoBancario": ("apps.tesoreria.models", "MovimientoBancario"),
         }
         mapping = model_map.get(aggregate_type)
         if not mapping:
@@ -293,7 +336,7 @@ class ContabilidadService:
             "FacturaVenta": ("apps.ventas.models", "FacturaVenta"),
             "NotaCreditoVenta": ("apps.ventas.models", "NotaCreditoVenta"),
             "DocumentoCompraProveedor": ("apps.compras.models", "DocumentoCompraProveedor"),
-            "MovimientoBancario": ("apps.core.models", "MovimientoBancario"),
+            "MovimientoBancario": ("apps.tesoreria.models", "MovimientoBancario"),
         }
         mapping = model_map.get(aggregate_type)
         if not mapping:
@@ -350,11 +393,25 @@ class ContabilidadService:
             referencia_id=asiento.id,
             origen=OrigenAsientoContable.INTEGRACION,
         )
-        return ContabilidadService.contabilizar_asiento(
+        reversa = ContabilidadService.contabilizar_asiento(
             asiento_id=reversa.id,
             empresa=empresa,
             usuario=usuario,
         )
+        ContabilidadService._registrar_auditoria_asiento(
+            asiento=asiento,
+            usuario=usuario,
+            action_code="CONTABILIZAR",
+            event_type="CONTABILIDAD_ASIENTO_REVERTIDO",
+            summary=f"Asiento {asiento.numero} revertido con contra-asiento {reversa.numero}.",
+            payload={
+                "reversa_id": str(reversa.id),
+                "reversa_numero": reversa.numero,
+                "motivo": motivo,
+            },
+            severity=AuditSeverity.WARNING,
+        )
+        return reversa
 
     @staticmethod
     def listar_eventos_fallidos(*, empresa):
@@ -554,7 +611,7 @@ class ContabilidadService:
                             "FacturaVenta": ("apps.ventas.models", "FacturaVenta"),
                             "NotaCreditoVenta": ("apps.ventas.models", "NotaCreditoVenta"),
                             "DocumentoCompraProveedor": ("apps.compras.models", "DocumentoCompraProveedor"),
-                            "MovimientoBancario": ("apps.core.models", "MovimientoBancario"),
+                            "MovimientoBancario": ("apps.tesoreria.models", "MovimientoBancario"),
                         }
                         mapping = model_map.get(module_name)
                         if mapping:

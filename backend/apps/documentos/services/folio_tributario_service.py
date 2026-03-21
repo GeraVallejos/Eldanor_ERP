@@ -2,11 +2,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from apps.core.exceptions import BusinessRuleError
-from apps.core.models import (
-    ConfiguracionTributaria,
-    RangoFolioTributario,
-    TipoDocumentoTributario,
-)
+from apps.facturacion.models import ConfiguracionTributaria, RangoFolioTributario, TipoDocumentoTributario
 
 
 class FolioTributarioService:

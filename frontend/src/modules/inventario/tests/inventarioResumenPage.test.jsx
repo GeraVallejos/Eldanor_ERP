@@ -1,5 +1,4 @@
-import { screen, waitFor } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
+import { screen } from '@testing-library/react'
 import { http, HttpResponse } from 'msw'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import InventarioResumenPage from '@/modules/inventario/pages/InventarioResumenPage'
@@ -18,9 +17,7 @@ describe('inventario/InventarioResumenPage', () => {
     vi.clearAllMocks()
   })
 
-  it('carga resumen valorizado y permite agrupar por bodega', async () => {
-    let resumenParams = null
-
+  it('carga panel de inventario con accesos a reportes y operacion', async () => {
     server.use(
       http.get('*/stocks/', async () =>
         HttpResponse.json([
@@ -28,47 +25,55 @@ describe('inventario/InventarioResumenPage', () => {
           { id: 'st-2', producto: 'prod-2', bodega: 'bod-1', stock: '5.00' },
         ]),
       ),
-      http.get('*/productos/', async () =>
-        HttpResponse.json([
-          { id: 'prod-1', nombre: 'Tijera poda' },
-          { id: 'prod-2', nombre: 'Motosierra' },
-        ]),
+      http.get('*/stocks/criticos/', async () =>
+        HttpResponse.json({
+          count: 1,
+          detalle: [
+            {
+              producto_id: 'prod-2',
+              producto__nombre: 'Motosierra',
+              producto__sku: 'MOT-01',
+              producto__stock_minimo: 8,
+              stock_total: 5,
+              faltante: 3,
+            },
+          ],
+        }),
       ),
-      http.get('*/bodegas/', async () => HttpResponse.json([{ id: 'bod-1', nombre: 'Principal' }])),
-      http.get('*/stocks/resumen/', async ({ request }) => {
-        resumenParams = Object.fromEntries(new URL(request.url).searchParams.entries())
-        const groupBy = resumenParams.group_by || 'producto'
-
-        if (groupBy === 'bodega') {
-          return HttpResponse.json({
-            totales: { stock_total: 15, valor_total: 180000 },
-            detalle: [{ bodega__nombre: 'Principal', stock_total: 15, valor_total: 180000 }],
-          })
-        }
-
-        return HttpResponse.json({
+      http.get('*/movimientos-inventario/resumen_operativo/', async () =>
+        HttpResponse.json({
+          total_movimientos: 4,
+          entradas: 2,
+          salidas: 2,
+          ajustes: 1,
+          traslados: 2,
+          cantidad_entrada: 13,
+          cantidad_salida: 5,
+          neto_unidades: 8,
+        }),
+      ),
+      http.get('*/stocks/resumen/', async () =>
+        HttpResponse.json({
           totales: { stock_total: 15, valor_total: 180000 },
           detalle: [
             { producto__nombre: 'Tijera poda', stock_total: 10, valor_total: 120000 },
             { producto__nombre: 'Motosierra', stock_total: 5, valor_total: 60000 },
           ],
-        })
-      }),
+        }),
+      ),
     )
 
     renderWithProviders(<InventarioResumenPage />)
 
-    expect(await screen.findByRole('heading', { name: 'Resumen valorizado' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Resumen de inventario' })).toBeInTheDocument()
     expect(await screen.findByText('$ 180.000')).toBeInTheDocument()
-
-    await userEvent.selectOptions(screen.getByLabelText('Agrupar por'), 'bodega')
-    await userEvent.click(screen.getByRole('button', { name: 'Actualizar' }))
-
-    await waitFor(() => {
-      expect(resumenParams).toMatchObject({ group_by: 'bodega' })
-    })
-
-    const principalMatches = await screen.findAllByText('Principal')
-    expect(principalMatches.length).toBeGreaterThanOrEqual(1)
+    expect(await screen.findByText('Stock critico')).toBeInTheDocument()
+    expect(await screen.findByText('Movimientos registrados')).toBeInTheDocument()
+    expect(screen.getByText('Neto de unidades')).toBeInTheDocument()
+    expect((await screen.findAllByText('Motosierra')).length).toBeGreaterThan(0)
+    expect(screen.getByRole('link', { name: 'Ir a reportes' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Ir a kardex' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Ir a ajustes' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Ir a traslados' })).toBeInTheDocument()
   })
 })

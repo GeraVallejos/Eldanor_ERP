@@ -1,6 +1,7 @@
 from decimal import Decimal
+from uuid import uuid4
 from django.db import transaction
-from apps.core.exceptions import BusinessRuleError
+from apps.core.exceptions import BusinessRuleError, ResourceNotFoundError
 from apps.documentos.models import TipoDocumentoReferencia
 from apps.inventario.models.bodega import Bodega
 from apps.inventario.models.inventario_snapshot import InventorySnapshot
@@ -238,6 +239,27 @@ class InventarioService:
         return total
 
     @staticmethod
+    def _stock_defaults_para_bodega(*, empresa, producto):
+        """Define stock inicial por bodega sin duplicar stock global ya distribuido."""
+        existe_stock_por_bodega = StockProducto.all_objects.filter(
+            empresa=empresa,
+            producto=producto,
+        ).exists()
+        if existe_stock_por_bodega:
+            return {
+                "stock": Decimal("0"),
+                "valor_stock": Decimal("0"),
+            }
+
+        stock_inicial = Decimal(producto.stock_actual)
+        return {
+            "stock": stock_inicial,
+            "valor_stock": InventarioService._money(
+                stock_inicial * Decimal(producto.costo_promedio)
+            ),
+        }
+
+    @staticmethod
     @transaction.atomic
     def reservar_stock(
         *,
@@ -275,12 +297,10 @@ class InventarioService:
             empresa=empresa,
             producto=producto,
             bodega_id=bodega_id,
-            defaults={
-                "stock": producto.stock_actual,
-                "valor_stock": InventarioService._money(
-                    Decimal(producto.stock_actual) * Decimal(producto.costo_promedio)
-                ),
-            },
+            defaults=InventarioService._stock_defaults_para_bodega(
+                empresa=empresa,
+                producto=producto,
+            ),
         )
 
         reservado_total = InventarioService._reservado_total(
@@ -440,12 +460,10 @@ class InventarioService:
                 empresa=empresa,
                 producto=producto,
                 bodega_id=bodega_id,
-                defaults={
-                    "stock": producto.stock_actual,
-                    "valor_stock": InventarioService._money(
-                        Decimal(producto.stock_actual) * Decimal(producto.costo_promedio)
-                    ),
-                }
+                defaults=InventarioService._stock_defaults_para_bodega(
+                    empresa=empresa,
+                    producto=producto,
+                )
             )
         )
 
@@ -688,3 +706,213 @@ class InventarioService:
         if hasta is not None:
             queryset = queryset.filter(creado_en__lte=hasta)
         return queryset.order_by("-creado_en", "-id").first()
+
+    @staticmethod
+    @transaction.atomic
+    def regularizar_stock(
+        *,
+        producto_id,
+        stock_objetivo,
+        referencia,
+        empresa,
+        usuario,
+        bodega_id=None,
+        costo_unitario=None,
+        lote_codigo="",
+        fecha_vencimiento=None,
+        series=None,
+    ):
+        """Ajusta una bodega a stock objetivo preservando reservas y trazabilidad."""
+        stock_objetivo = Decimal(stock_objetivo)
+        if stock_objetivo < 0:
+            raise BusinessRuleError("El stock objetivo no puede ser negativo.")
+
+        bodega_id = InventarioService._resolver_bodega_id(empresa=empresa, bodega_id=bodega_id)
+        producto = Producto.all_objects.select_for_update().filter(pk=producto_id, empresa=empresa).first()
+        if not producto:
+            raise ResourceNotFoundError("Producto no encontrado para regularizacion de inventario.")
+        stock_obj, _ = StockProducto.all_objects.select_for_update().get_or_create(
+            empresa=empresa,
+            producto=producto,
+            bodega_id=bodega_id,
+            defaults=InventarioService._stock_defaults_para_bodega(
+                empresa=empresa,
+                producto=producto,
+            ),
+        )
+
+        stock_actual_bodega = Decimal(stock_obj.stock)
+        stock_objetivo = InventarioService._validar_cantidad_producto(
+            producto=producto,
+            cantidad=stock_objetivo,
+            field_name="stock objetivo",
+        )
+
+        reservado_total = InventarioService._reservado_total(
+            empresa=empresa,
+            producto=producto,
+            bodega_id=bodega_id,
+        )
+        if stock_objetivo < reservado_total:
+            raise BusinessRuleError(
+                "No se puede regularizar por debajo del stock reservado en la bodega."
+            )
+
+        diferencia = stock_objetivo - stock_actual_bodega
+        if diferencia == 0:
+            raise BusinessRuleError("El stock objetivo coincide con el stock actual de la bodega.")
+
+        tipo = TipoMovimiento.ENTRADA if diferencia > 0 else TipoMovimiento.SALIDA
+        return InventarioService.registrar_movimiento(
+            producto_id=producto_id,
+            bodega_id=bodega_id,
+            tipo=tipo,
+            cantidad=abs(diferencia),
+            referencia=referencia,
+            empresa=empresa,
+            usuario=usuario,
+            costo_unitario=costo_unitario,
+            documento_tipo=TipoDocumentoReferencia.AJUSTE,
+            documento_id=None,
+            lote_codigo=lote_codigo,
+            fecha_vencimiento=fecha_vencimiento,
+            series=series,
+        )
+
+    @staticmethod
+    def previsualizar_regularizacion_stock(*, producto_id, stock_objetivo, empresa, bodega_id=None):
+        """Calcula impacto de un conteo fisico antes de aplicar el ajuste."""
+        stock_objetivo = Decimal(stock_objetivo)
+        if stock_objetivo < 0:
+            raise BusinessRuleError("El stock objetivo no puede ser negativo.")
+
+        bodega_id = InventarioService._resolver_bodega_id(empresa=empresa, bodega_id=bodega_id)
+        producto = Producto.all_objects.filter(pk=producto_id, empresa=empresa).first()
+        if not producto:
+            raise ResourceNotFoundError("Producto no encontrado para previsualizacion de inventario.")
+
+        stock_obj, _ = StockProducto.all_objects.get_or_create(
+            empresa=empresa,
+            producto=producto,
+            bodega_id=bodega_id,
+            defaults=InventarioService._stock_defaults_para_bodega(
+                empresa=empresa,
+                producto=producto,
+            ),
+        )
+
+        stock_actual_bodega = Decimal(stock_obj.stock)
+        stock_objetivo = InventarioService._validar_cantidad_producto(
+            producto=producto,
+            cantidad=stock_objetivo,
+            field_name="stock objetivo",
+        )
+        reservado_total = InventarioService._reservado_total(
+            empresa=empresa,
+            producto=producto,
+            bodega_id=bodega_id,
+        )
+        diferencia = stock_objetivo - stock_actual_bodega
+        warnings = []
+        ajustable = True
+
+        if diferencia == 0:
+            warnings.append("El stock contado coincide con el stock actual.")
+
+        if stock_objetivo < reservado_total:
+            ajustable = False
+            warnings.append("El stock objetivo queda por debajo del reservado actual.")
+
+        if diferencia > 0:
+            tipo_movimiento = TipoMovimiento.ENTRADA
+        elif diferencia < 0:
+            tipo_movimiento = TipoMovimiento.SALIDA
+        else:
+            tipo_movimiento = None
+
+        return {
+            "producto_id": str(producto.id),
+            "producto_nombre": producto.nombre,
+            "bodega_id": str(bodega_id),
+            "stock_actual": stock_actual_bodega,
+            "stock_objetivo": stock_objetivo,
+            "diferencia": diferencia,
+            "reservado_total": reservado_total,
+            "disponible_actual": stock_actual_bodega - reservado_total,
+            "tipo_movimiento": tipo_movimiento,
+            "ajustable": ajustable,
+            "warnings": warnings,
+        }
+
+    @staticmethod
+    @transaction.atomic
+    def trasladar_stock(
+        *,
+        producto_id,
+        bodega_origen_id,
+        bodega_destino_id,
+        cantidad,
+        referencia,
+        empresa,
+        usuario,
+        lote_codigo="",
+    ):
+        """Traslada stock entre bodegas preservando trazabilidad y stock global."""
+        cantidad = Decimal(cantidad)
+        if cantidad <= 0:
+            raise BusinessRuleError("La cantidad a trasladar debe ser mayor a cero.")
+        if str(bodega_origen_id) == str(bodega_destino_id):
+            raise BusinessRuleError("La bodega origen y destino deben ser distintas.")
+
+        producto = Producto.all_objects.select_for_update().filter(pk=producto_id, empresa=empresa).first()
+        if not producto:
+            raise ResourceNotFoundError("Producto no encontrado para traslado de inventario.")
+        if producto.usa_series:
+            raise BusinessRuleError(
+                f"El producto {producto.nombre} con series requiere un flujo de traslado unitario especializado."
+            )
+
+        bodega_origen_id = InventarioService._resolver_bodega_id(empresa=empresa, bodega_id=bodega_origen_id)
+        bodega_destino_id = InventarioService._resolver_bodega_id(empresa=empresa, bodega_id=bodega_destino_id)
+        cantidad = InventarioService._validar_cantidad_producto(
+            producto=producto,
+            cantidad=cantidad,
+            field_name="cantidad a trasladar",
+        )
+
+        traslado_id = str(uuid4())
+        referencia_origen = f"{referencia} [SALIDA]"
+        referencia_destino = f"{referencia} [ENTRADA]"
+
+        movimiento_salida = InventarioService.registrar_movimiento(
+            producto_id=producto_id,
+            bodega_id=bodega_origen_id,
+            tipo=TipoMovimiento.SALIDA,
+            cantidad=cantidad,
+            referencia=referencia_origen,
+            empresa=empresa,
+            usuario=usuario,
+            costo_unitario=producto.costo_promedio,
+            documento_tipo=TipoDocumentoReferencia.TRASLADO,
+            documento_id=traslado_id,
+            lote_codigo=lote_codigo,
+        )
+        movimiento_entrada = InventarioService.registrar_movimiento(
+            producto_id=producto_id,
+            bodega_id=bodega_destino_id,
+            tipo=TipoMovimiento.ENTRADA,
+            cantidad=cantidad,
+            referencia=referencia_destino,
+            empresa=empresa,
+            usuario=usuario,
+            costo_unitario=movimiento_salida.costo_unitario,
+            documento_tipo=TipoDocumentoReferencia.TRASLADO,
+            documento_id=traslado_id,
+            lote_codigo=lote_codigo,
+        )
+
+        return {
+            "traslado_id": traslado_id,
+            "movimiento_salida": movimiento_salida,
+            "movimiento_entrada": movimiento_entrada,
+        }

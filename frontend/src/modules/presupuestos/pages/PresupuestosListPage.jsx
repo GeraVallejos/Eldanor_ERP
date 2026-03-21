@@ -11,6 +11,7 @@ import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import { formatCurrencyCLP } from '@/lib/numberFormat'
 import TablePagination from '@/components/ui/TablePagination'
 import { useTableSorting } from '@/lib/tableSorting'
+import { useResponsiveTablePageSize } from '@/lib/useResponsiveTablePageSize'
 import { cn } from '@/lib/utils'
 import { selectCurrentUser } from '@/modules/auth/authSlice'
 import PresupuestoPdfDocument from '@/modules/presupuestos/components/PresupuestoPdfDocument'
@@ -57,6 +58,7 @@ function formatMoney(value) {
 }
 
 function PresupuestosListPage() {
+  const pageSize = useResponsiveTablePageSize({ reservedHeight: 470 })
   const navigate = useNavigate()
   const currentUser = useSelector(selectCurrentUser)
   const [presupuestos, setPresupuestos] = useState([])
@@ -152,7 +154,7 @@ function PresupuestosListPage() {
     return contacto?.nombre || `Cliente #${clienteId}`
   }
 
-  const { paginatedRows: paginatedPresupuestos, toggleSort, getSortIndicator, currentPage, totalPages, totalRows, pageSize, nextPage, prevPage } = useTableSorting(presupuestos, {
+  const { paginatedRows: paginatedPresupuestos, toggleSort, getSortIndicator, currentPage, totalPages, totalRows, nextPage, prevPage } = useTableSorting(presupuestos, {
     accessors: {
       creado_en: (presupuesto) => presupuesto.creado_en,
       numero: (presupuesto) => presupuesto.numero,
@@ -164,6 +166,7 @@ function PresupuestosListPage() {
     },
     initialKey: 'creado_en',
     initialDirection: 'desc',
+    pageSize,
   })
 
   const requestDeletePresupuesto = (presupuesto) => {

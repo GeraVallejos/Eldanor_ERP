@@ -12,9 +12,11 @@ import { formatDateChile, getChileDateSuffix } from '@/lib/dateTimeFormat'
 import { formatCurrencyCLP } from '@/lib/numberFormat'
 import TablePagination from '@/components/ui/TablePagination'
 import { useTableSorting } from '@/lib/tableSorting'
+import { useResponsiveTablePageSize } from '@/lib/useResponsiveTablePageSize'
 import { cn } from '@/lib/utils'
 import { downloadExcelFile } from '@/modules/shared/exports/downloadExcelFile'
 import { downloadSimpleTablePdf } from '@/modules/shared/exports/downloadSimpleTablePdf'
+import { usePermissions } from '@/modules/shared/auth/usePermission'
 
 const TIPO_LABELS = {
   GUIA_RECEPCION: 'Guía de recepción',
@@ -28,13 +30,6 @@ const ESTADO_LABELS = {
   ANULADO: 'Anulado',
 }
 
-const ESTADO_CONTABLE_LABELS = {
-  NO_APLICA: 'No aplica',
-  PENDIENTE: 'Pendiente',
-  CONTABILIZADO: 'Contabilizado',
-  ERROR: 'Error',
-}
-
 function normalizeListResponse(data) {
   if (Array.isArray(data)) return data
   if (Array.isArray(data?.results)) return data.results
@@ -45,7 +40,33 @@ function formatMoney(value) {
   return formatCurrencyCLP(value)
 }
 
+function canCrearDocumento(permissions) {
+  return permissions['COMPRAS.CREAR']
+}
+
+function canEditarDocumento(doc, permissions) {
+  return permissions['COMPRAS.EDITAR'] && doc?.estado === 'BORRADOR'
+}
+
+function canConfirmarDocumento(doc, permissions) {
+  return permissions['COMPRAS.APROBAR'] && doc?.estado === 'BORRADOR'
+}
+
+function canDuplicarDocumento(doc, permissions) {
+  return permissions['COMPRAS.CREAR'] && ['BORRADOR', 'CONFIRMADO'].includes(String(doc?.estado))
+}
+
+function canAnularDocumento(doc, permissions) {
+  return permissions['COMPRAS.ANULAR'] && ['BORRADOR', 'CONFIRMADO'].includes(String(doc?.estado))
+}
+
+function canCorregirDocumento(doc, permissions) {
+  return permissions['COMPRAS.EDITAR'] && doc?.estado === 'CONFIRMADO'
+}
+
 function ComprasDocumentosListPage() {
+  const pageSize = useResponsiveTablePageSize({ reservedHeight: 470 })
+  const permissions = usePermissions(['COMPRAS.CREAR', 'COMPRAS.EDITAR', 'COMPRAS.APROBAR', 'COMPRAS.ANULAR'])
   const [status, setStatus] = useState('idle')
   const [documentos, setDocumentos] = useState([])
   const [proveedores, setProveedores] = useState([])
@@ -179,7 +200,7 @@ function ComprasDocumentosListPage() {
     })
   }, [documentos, search, estadoFilter, tipoFilter, proveedorById, contactoById])
 
-  const { paginatedRows: paginatedDocumentos, toggleSort, getSortIndicator, currentPage, totalPages, totalRows, pageSize, nextPage, prevPage } = useTableSorting(filtered, {
+  const { paginatedRows: paginatedDocumentos, toggleSort, getSortIndicator, currentPage, totalPages, totalRows, nextPage, prevPage } = useTableSorting(filtered, {
     accessors: {
       creado_en: (doc) => doc.creado_en,
       tipo: (doc) => TIPO_LABELS[doc.tipo_documento] || doc.tipo_documento,
@@ -193,7 +214,7 @@ function ComprasDocumentosListPage() {
       estado: (doc) => ESTADO_LABELS[doc.estado] || doc.estado,
       total: (doc) => Number(doc.total || 0),
     },
-    pageSize: 10,
+    pageSize,
     initialKey: 'creado_en',
     initialDirection: 'desc',
   })
@@ -324,12 +345,14 @@ function ComprasDocumentosListPage() {
           >
             Ver ordenes
           </Link>
-          <Link
-            to="/compras/documentos/nuevo"
-            className={cn(buttonVariants({ variant: 'default', size: 'md', fullWidth: true }), 'sm:w-auto')}
-          >
-            Nuevo documento
-          </Link>
+          {canCrearDocumento(permissions) ? (
+            <Link
+              to="/compras/documentos/nuevo"
+              className={cn(buttonVariants({ variant: 'default', size: 'md', fullWidth: true }), 'sm:w-auto')}
+            >
+              Nuevo documento
+            </Link>
+          ) : null}
         </div>
       </div>
 
@@ -407,7 +430,6 @@ function ComprasDocumentosListPage() {
                     Estado <span className="text-xs text-muted-foreground">{getSortIndicator('estado')}</span>
                   </button>
                 </th>
-                <th className="px-3 py-2 text-left font-medium">Estado contable</th>
                 <th className="px-3 py-2 text-right font-medium">
                   <button type="button" onClick={() => toggleSort('total')} className="inline-flex items-center gap-1 hover:text-primary">
                     Total <span className="text-xs text-muted-foreground">{getSortIndicator('total')}</span>
@@ -419,7 +441,7 @@ function ComprasDocumentosListPage() {
             <tbody>
               {filtered.length === 0 ? (
                 <tr>
-                  <td className="px-3 py-3 text-muted-foreground" colSpan={8}>
+                  <td className="px-3 py-3 text-muted-foreground" colSpan={7}>
                     No hay documentos de compra.
                   </td>
                 </tr>
@@ -436,7 +458,6 @@ function ComprasDocumentosListPage() {
                       <td className="px-3 py-2">{ctc?.nombre || '-'}</td>
                       <td className="px-3 py-2">{formatDateChile(doc.fecha_emision)}</td>
                       <td className="px-3 py-2">{ESTADO_LABELS[doc.estado] || doc.estado}</td>
-                      <td className="px-3 py-2 text-xs text-muted-foreground">{ESTADO_CONTABLE_LABELS[doc.estado_contable] || doc.estado_contable || '-'}</td>
                       <td className="px-3 py-2 text-right">{formatMoney(doc.total)}</td>
                       <td className="px-3 py-2">
                         <div className="flex flex-wrap justify-end gap-1">
@@ -448,78 +469,92 @@ function ComprasDocumentosListPage() {
                           </Link>
                           {doc.estado === 'BORRADOR' ? (
                             <>
-                              <Link
-                                to={`/compras/documentos/${doc.id}/editar`}
-                                className={cn(
-                                  buttonVariants({ variant: 'outline', size: 'sm' }),
-                                  'text-xs',
-                                )}
-                              >
-                                Editar
-                              </Link>
-                              <Button
-                                variant="default"
-                                size="sm"
-                                className="text-xs"
-                                disabled={isBusy}
-                                onClick={() => {
-                                  if (doc.tipo_documento === 'FACTURA_COMPRA' || doc.tipo_documento === 'BOLETA_COMPRA') {
-                                    openFacturaConfirmDialog(doc)
-                                    return
-                                  }
-                                  void handleAccion(doc, 'confirmar')
-                                }}
-                              >
-                                {isBusy ? 'Procesando...' : 'Confirmar'}
-                              </Button>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="text-xs"
-                                disabled={isBusy}
-                                onClick={() => handleAccion(doc, 'duplicar')}
-                              >
-                                {isBusy ? 'Procesando...' : 'Duplicar'}
-                              </Button>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="h-8 border-destructive/40 px-3 text-xs text-destructive hover:bg-destructive/10"
-                                disabled={isBusy}
-                                onClick={() => openActionDialog(doc, 'anular')}
-                              >
-                                Anular
-                              </Button>
+                              {canEditarDocumento(doc, permissions) ? (
+                                <Link
+                                  to={`/compras/documentos/${doc.id}/editar`}
+                                  className={cn(
+                                    buttonVariants({ variant: 'outline', size: 'sm' }),
+                                    'text-xs',
+                                  )}
+                                >
+                                  Editar
+                                </Link>
+                              ) : null}
+                              {canConfirmarDocumento(doc, permissions) ? (
+                                <Button
+                                  variant="default"
+                                  size="sm"
+                                  className="text-xs"
+                                  disabled={isBusy}
+                                  onClick={() => {
+                                    if (doc.tipo_documento === 'FACTURA_COMPRA' || doc.tipo_documento === 'BOLETA_COMPRA') {
+                                      openFacturaConfirmDialog(doc)
+                                      return
+                                    }
+                                    void handleAccion(doc, 'confirmar')
+                                  }}
+                                >
+                                  {isBusy ? 'Procesando...' : 'Confirmar'}
+                                </Button>
+                              ) : null}
+                              {canDuplicarDocumento(doc, permissions) ? (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="text-xs"
+                                  disabled={isBusy}
+                                  onClick={() => handleAccion(doc, 'duplicar')}
+                                >
+                                  {isBusy ? 'Procesando...' : 'Duplicar'}
+                                </Button>
+                              ) : null}
+                              {canAnularDocumento(doc, permissions) ? (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-8 border-destructive/40 px-3 text-xs text-destructive hover:bg-destructive/10"
+                                  disabled={isBusy}
+                                  onClick={() => openActionDialog(doc, 'anular')}
+                                >
+                                  Anular
+                                </Button>
+                              ) : null}
                             </>
                           ) : doc.estado === 'CONFIRMADO' ? (
                             <>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="text-xs"
-                                disabled={isBusy}
-                                onClick={() => openCorrectionDialog(doc)}
-                              >
-                                {isBusy ? 'Procesando...' : 'Corregir'}
-                              </Button>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="text-xs"
-                                disabled={isBusy}
-                                onClick={() => handleAccion(doc, 'duplicar')}
-                              >
-                                {isBusy ? 'Procesando...' : 'Duplicar'}
-                              </Button>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="h-8 border-destructive/40 px-3 text-xs text-destructive hover:bg-destructive/10"
-                                disabled={isBusy}
-                                onClick={() => openActionDialog(doc, 'anular')}
-                              >
-                                {isBusy ? 'Procesando...' : 'Anular'}
-                              </Button>
+                              {canCorregirDocumento(doc, permissions) ? (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="text-xs"
+                                  disabled={isBusy}
+                                  onClick={() => openCorrectionDialog(doc)}
+                                >
+                                  {isBusy ? 'Procesando...' : 'Corregir'}
+                                </Button>
+                              ) : null}
+                              {canDuplicarDocumento(doc, permissions) ? (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="text-xs"
+                                  disabled={isBusy}
+                                  onClick={() => handleAccion(doc, 'duplicar')}
+                                >
+                                  {isBusy ? 'Procesando...' : 'Duplicar'}
+                                </Button>
+                              ) : null}
+                              {canAnularDocumento(doc, permissions) ? (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-8 border-destructive/40 px-3 text-xs text-destructive hover:bg-destructive/10"
+                                  disabled={isBusy}
+                                  onClick={() => openActionDialog(doc, 'anular')}
+                                >
+                                  {isBusy ? 'Procesando...' : 'Anular'}
+                                </Button>
+                              ) : null}
                             </>
                           ) : null}
                         </div>

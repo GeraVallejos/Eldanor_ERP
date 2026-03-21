@@ -42,7 +42,7 @@ class DocumentoCompraProveedor(BaseModel):
     total = models.DecimalField(max_digits=14, decimal_places=2, default=0)
 
     moneda = models.ForeignKey(
-        "core.Moneda",
+        "tesoreria.Moneda",
         on_delete=models.PROTECT,
         null=True,
         blank=True,

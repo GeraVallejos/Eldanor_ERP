@@ -86,6 +86,36 @@ export function normalizeApiError(error, options = {}) {
   return fallback
 }
 
+export function extractApiErrorContract(error, options = {}) {
+  const fallback = normalizeApiError(error, options)
+  const data = error?.response?.data
+
+  if (data && typeof data === 'object' && !Array.isArray(data)) {
+    return {
+      message: fallback,
+      detail: data.detail ?? null,
+      errorCode: data.error_code || null,
+      meta: data.meta ?? null,
+    }
+  }
+
+  if (error && typeof error === 'object' && 'message' in error) {
+    return {
+      message: String(error.message || fallback),
+      detail: error.detail ?? null,
+      errorCode: error.errorCode ?? error.error_code ?? null,
+      meta: error.meta ?? null,
+    }
+  }
+
+  return {
+    message: fallback,
+    detail: null,
+    errorCode: null,
+    meta: null,
+  }
+}
+
 function shouldShowGlobalToast(error) {
   if (!error) {
     return false

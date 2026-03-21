@@ -8,8 +8,9 @@ from rest_framework import status
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from apps.contactos.models import Cliente, Contacto
-from apps.core.models import Moneda, UserEmpresa
-from apps.core.services import TipoCambioService
+from apps.core.models import UserEmpresa
+from apps.tesoreria.models import Moneda
+from apps.tesoreria.services import TipoCambioService
 from apps.productos.models import ListaPrecio, ListaPrecioItem, Producto
 
 
@@ -91,5 +92,63 @@ class TestPrecioApi:
         assert resp.data["fuente"] == "LISTA_PRECIO"
         assert resp.data["moneda"] == "USD"
         assert Decimal(str(resp.data["precio"])) == Decimal("9.50")
+        assert resp.data["lista_id"] == str(lista.id)
+
+    def test_producto_precio_endpoint_no_expone_lista_id_si_cae_a_referencia(self, api_client, owner_usuario, empresa):
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
+
+        producto = Producto.objects.create(
+            empresa=empresa,
+            creado_por=owner_usuario,
+            nombre="Producto Fallback API",
+            sku="PFA-001",
+            precio_referencia=Decimal("11000"),
+        )
+        otro_producto = Producto.objects.create(
+            empresa=empresa,
+            creado_por=owner_usuario,
+            nombre="Producto Con Lista API",
+            sku="PCL-001",
+            precio_referencia=Decimal("9000"),
+        )
+        contacto = Contacto.objects.create(
+            empresa=empresa,
+            nombre="Cliente Fallback API",
+            rut="16161616-8",
+            email="cliente_fallback_api@test.com",
+        )
+        cliente = Cliente.objects.create(empresa=empresa, contacto=contacto)
+
+        clp = Moneda.all_objects.get(empresa=empresa, codigo="CLP")
+        lista = ListaPrecio.objects.create(
+            empresa=empresa,
+            creado_por=owner_usuario,
+            nombre="Lista Fallback API",
+            moneda=clp,
+            cliente=cliente,
+            fecha_desde=date(2026, 1, 1),
+            activa=True,
+            prioridad=10,
+        )
+        ListaPrecioItem.objects.create(
+            empresa=empresa,
+            creado_por=owner_usuario,
+            lista=lista,
+            producto=otro_producto,
+            precio=Decimal("8500"),
+        )
+
+        resp = api_client.get(
+            reverse("producto-precio", args=[producto.id]),
+            {
+                "cliente_id": str(cliente.id),
+                "fecha": "2026-03-12",
+            },
+        )
+
+        assert resp.status_code == status.HTTP_200_OK, resp.data
+        assert resp.data["fuente"] == "PRODUCTO_REFERENCIA"
+        assert Decimal(str(resp.data["precio"])) == Decimal("11000")
+        assert resp.data["lista_id"] is None
 
 

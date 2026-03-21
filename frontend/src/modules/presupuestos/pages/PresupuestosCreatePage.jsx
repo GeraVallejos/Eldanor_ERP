@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { api } from '@/api/client'
-import { normalizeApiError } from '@/api/errors'
+import { extractApiErrorContract, normalizeApiError } from '@/api/errors'
+import ApiContractError from '@/components/ui/ApiContractError'
 import Button from '@/components/ui/Button'
 import { getChileDateSuffix } from '@/lib/dateTimeFormat'
 import { getProductosCatalog } from '@/modules/productos/services/productosCatalogCache'
@@ -101,6 +102,7 @@ function PresupuestosCreatePage() {
     items: '',
   })
   const [itemErrors, setItemErrors] = useState([{}])
+  const [submitError, setSubmitError] = useState(null)
   const [form, setForm] = useState({
     cliente: '',
     fecha: todayDate(),
@@ -249,6 +251,7 @@ function PresupuestosCreatePage() {
   }, [form.descuento, impuestoById, items])
 
   const updateField = (key, value) => {
+    setSubmitError(null)
     setForm((prev) => ({ ...prev, [key]: value }))
 
     if (key === 'cliente') {
@@ -262,6 +265,7 @@ function PresupuestosCreatePage() {
   }
 
   const selectClienteOption = (option) => {
+    setSubmitError(null)
     setForm((prev) => ({ ...prev, cliente: option.value }))
     setClienteSearch(option.label)
     setClienteDropdownOpen(false)
@@ -296,6 +300,7 @@ function PresupuestosCreatePage() {
   }
 
   const clearClienteSearch = () => {
+    setSubmitError(null)
     setClienteSearch('')
     setForm((prev) => ({ ...prev, cliente: '' }))
     setClienteDropdownOpen(true)
@@ -346,6 +351,7 @@ function PresupuestosCreatePage() {
   }
 
   const updateItemField = (index, key, value) => {
+    setSubmitError(null)
     setItems((prev) => {
       const next = [...prev]
       const normalizedValue = key === 'precio_unitario' ? toIntegerString(value) : value
@@ -749,6 +755,7 @@ function PresupuestosCreatePage() {
     }
 
     setStatus('loading')
+    setSubmitError(null)
     setFieldErrors({
       cliente: '',
       fecha: '',
@@ -802,9 +809,11 @@ function PresupuestosCreatePage() {
       const data = error?.response?.data
       const appliedTopErrors = applyBackendFieldErrors(data)
       const appliedItemErrors = applyBackendItemErrors(creatingItemIndex, data)
+      const contractError = extractApiErrorContract(error, { fallback: 'No se pudo crear el presupuesto.' })
+      setSubmitError(contractError)
 
       if (!appliedTopErrors && !appliedItemErrors) {
-        toast.error(normalizeApiError(error, { fallback: 'No se pudo crear el presupuesto.' }))
+        toast.error(contractError.message)
       }
 
       // Evita dejar presupuestos huerfanos sin items cuando falla la carga de detalles.
@@ -838,6 +847,7 @@ function PresupuestosCreatePage() {
       </div>
 
       <form className="rounded-md border border-border bg-card p-4" onSubmit={onSubmit}>
+        <ApiContractError error={submitError} title="No se pudo crear el presupuesto." />
         <div className="grid gap-3 md:grid-cols-2">
           <label className="text-sm md:col-span-2">
             Cliente

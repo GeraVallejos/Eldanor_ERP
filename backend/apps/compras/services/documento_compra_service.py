@@ -17,8 +17,10 @@ from apps.compras.models import (
     TipoDocumentoCompra,
 )
 from apps.core.exceptions import BusinessRuleError, ConflictError, ResourceNotFoundError
-from apps.core.models import EstadoCuenta, TipoDocumento
-from apps.core.services import CarteraService, SecuenciaService
+from apps.core.models import TipoDocumento
+from apps.core.services import SecuenciaService
+from apps.tesoreria.models import EstadoCuenta
+from apps.tesoreria.services import CarteraService
 from apps.core.services.accounting_bridge import AccountingBridge
 from apps.documentos.models import TipoDocumentoReferencia
 from apps.documentos.models import EstadoContable
@@ -390,6 +392,44 @@ class DocumentoCompraService:
             )
 
     @staticmethod
+    def _revertir_movimientos_documento_confirmado(*, documento, empresa, usuario):
+        """Revierte solo las entradas fisicas realmente registradas por el documento."""
+        doc_tipo_referencia = (
+            TipoDocumentoReferencia.GUIA_RECEPCION
+            if documento.tipo_documento == TipoDocumentoCompra.GUIA_RECEPCION
+            else TipoDocumentoReferencia.FACTURA_COMPRA
+        )
+        prefijo = (
+            "GUIA"
+            if documento.tipo_documento == TipoDocumentoCompra.GUIA_RECEPCION
+            else "BOLETA"
+            if documento.tipo_documento == TipoDocumentoCompra.BOLETA_COMPRA
+            else "FACTURA"
+        )
+
+        movimientos_entrada = list(
+            MovimientoInventario.all_objects.filter(
+                empresa=empresa,
+                documento_tipo=doc_tipo_referencia,
+                documento_id=documento.id,
+                tipo=TipoMovimiento.ENTRADA,
+            ).order_by("creado_en", "id")
+        )
+        for movimiento in movimientos_entrada:
+            InventarioService.registrar_movimiento(
+                producto_id=movimiento.producto_id,
+                bodega_id=movimiento.bodega_id,
+                tipo=TipoMovimiento.SALIDA,
+                cantidad=movimiento.cantidad,
+                costo_unitario=movimiento.costo_unitario,
+                referencia=f"ANULACION {prefijo} {documento.folio}",
+                empresa=empresa,
+                usuario=usuario,
+                documento_tipo=doc_tipo_referencia,
+                documento_id=documento.id,
+            )
+
+    @staticmethod
     @transaction.atomic
     def confirmar_guia(*, documento_id, empresa, usuario, bodega_id=None, en_transito=False):
         documento = (
@@ -613,42 +653,11 @@ class DocumentoCompraService:
             documento.estado == EstadoDocumentoCompra.CONFIRMADO
             and documento.tipo_documento in {TipoDocumentoCompra.GUIA_RECEPCION, TipoDocumentoCompra.FACTURA_COMPRA, TipoDocumentoCompra.BOLETA_COMPRA}
         ):
-            items = list(
-                DocumentoCompraProveedorItem.all_objects
-                .select_related("producto")
-                .filter(empresa=empresa, documento=documento)
-            )
-            doc_tipo_referencia = (
-                TipoDocumentoReferencia.GUIA_RECEPCION
-                if documento.tipo_documento == TipoDocumentoCompra.GUIA_RECEPCION
-                else TipoDocumentoReferencia.FACTURA_COMPRA
-            )
-            prefijo = (
-                "GUIA"
-                if documento.tipo_documento == TipoDocumentoCompra.GUIA_RECEPCION
-                else "BOLETA"
-                if documento.tipo_documento == TipoDocumentoCompra.BOLETA_COMPRA
-                else "FACTURA"
-            )
-            tiene_movimientos_previos = MovimientoInventario.all_objects.filter(
+            DocumentoCompraService._revertir_movimientos_documento_confirmado(
+                documento=documento,
                 empresa=empresa,
-                documento_tipo=doc_tipo_referencia,
-                documento_id=documento.id,
-            ).exists()
-            if tiene_movimientos_previos:
-                for item in items:
-                    InventarioService.registrar_movimiento(
-                        producto_id=item.producto_id,
-                        bodega_id=bodega_id,
-                        tipo=TipoMovimiento.SALIDA,
-                        cantidad=item.cantidad,
-                        costo_unitario=item.precio_unitario,
-                        referencia=f"ANULACION {prefijo} {documento.folio}",
-                        empresa=empresa,
-                        usuario=usuario,
-                        documento_tipo=doc_tipo_referencia,
-                        documento_id=documento.id,
-                    )
+                usuario=usuario,
+            )
 
         documento.estado = EstadoDocumentoCompra.ANULADO
         # NULL evita colisionar entre historicos anulados manteniendo la unicidad activa en True.

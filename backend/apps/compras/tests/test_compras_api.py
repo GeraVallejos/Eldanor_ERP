@@ -6,7 +6,16 @@ from django.urls import reverse
 from rest_framework import status
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from apps.compras.models import OrdenCompra
+from apps.compras.models import (
+    DocumentoCompraProveedor,
+    DocumentoCompraProveedorItem,
+    EstadoDocumentoCompra,
+    EstadoRecepcion,
+    EstadoOrdenCompra,
+    OrdenCompra,
+    OrdenCompraItem,
+    RecepcionCompra,
+)
 from apps.contactos.models import Contacto, Proveedor
 from apps.core.models import SecuenciaDocumento, TipoDocumento, UserEmpresa
 from apps.inventario.models import MovimientoInventario
@@ -29,6 +38,21 @@ def owner_usuario(db, empresa):
         empresa_activa=empresa,
     )
     UserEmpresa.objects.create(user=user, empresa=empresa, rol="OWNER", activo=True)
+    return user
+
+
+@pytest.fixture
+def usuario_sin_permisos_compras(db, empresa):
+    from django.contrib.auth import get_user_model
+
+    User = get_user_model()
+    user = User.objects.create_user(
+        username="sin_permiso_compras",
+        email="sin_permiso_compras@test.com",
+        password="pass1234",
+        empresa_activa=empresa,
+    )
+    UserEmpresa.objects.create(user=user, empresa=empresa, rol="BODEGA", activo=True)
     return user
 
 
@@ -58,6 +82,194 @@ class TestComprasApi:
 
         assert resp.status_code == status.HTTP_201_CREATED
         assert resp.data["numero"]
+
+    def test_resumen_operativo_ordenes_retorna_metricas(self, api_client, owner_usuario, proveedor, empresa):
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
+
+        OrdenCompra.all_objects.create(
+            empresa=empresa,
+            creado_por=owner_usuario,
+            proveedor=proveedor,
+            numero="OC-R-001",
+            fecha_emision=date.today(),
+            estado=EstadoOrdenCompra.BORRADOR,
+            total=Decimal("120000.00"),
+        )
+        OrdenCompra.all_objects.create(
+            empresa=empresa,
+            creado_por=owner_usuario,
+            proveedor=proveedor,
+            numero="OC-R-002",
+            fecha_emision=date.today(),
+            estado=EstadoOrdenCompra.ENVIADA,
+            total=Decimal("80000.00"),
+        )
+        OrdenCompra.all_objects.create(
+            empresa=empresa,
+            creado_por=owner_usuario,
+            proveedor=proveedor,
+            numero="OC-R-003",
+            fecha_emision=date.today(),
+            estado=EstadoOrdenCompra.PARCIAL,
+            total=Decimal("40000.00"),
+        )
+
+        response = api_client.get(reverse("orden-compra-resumen-operativo"))
+
+        assert response.status_code == status.HTTP_200_OK, response.data
+        assert response.data["total_ordenes"] == 3
+        assert response.data["borrador"] == 1
+        assert response.data["enviadas"] == 1
+        assert response.data["parciales"] == 1
+        assert response.data["pendientes_recepcion"] == 2
+        assert Decimal(str(response.data["monto_total"])) == Decimal("240000.00")
+        assert Decimal(str(response.data["monto_pendiente"])) == Decimal("120000.00")
+
+    def test_resumen_operativo_ordenes_rechaza_usuario_sin_permiso(self, api_client, usuario_sin_permisos_compras):
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(usuario_sin_permisos_compras)}")
+
+        response = api_client.get(reverse("orden-compra-resumen-operativo"))
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert response.data["error_code"] == "PERMISSION_DENIED"
+
+    def test_analytics_ordenes_retorna_series_y_top_productos(self, api_client, owner_usuario, proveedor, empresa):
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
+
+        producto = Producto.objects.create(
+            empresa=empresa,
+            nombre="Producto Analitica Compras",
+            sku="PAC-001",
+            stock_actual=Decimal("0.00"),
+            maneja_inventario=True,
+            precio_referencia=Decimal("1000"),
+        )
+
+        orden = OrdenCompra.all_objects.create(
+            empresa=empresa,
+            creado_por=owner_usuario,
+            proveedor=proveedor,
+            numero="OC-A-001",
+            fecha_emision=date(2026, 3, 10),
+            estado=EstadoOrdenCompra.ENVIADA,
+            total=Decimal("90000.00"),
+        )
+        OrdenCompraItem.all_objects.create(
+            empresa=empresa,
+            orden_compra=orden,
+            producto=producto,
+            descripcion="Producto Analitica Compras",
+            cantidad=Decimal("3.00"),
+            precio_unitario=Decimal("30000.00"),
+        )
+
+        response = api_client.get(reverse("orden-compra-analytics"), {"agrupacion": "mensual"})
+
+        assert response.status_code == status.HTTP_200_OK, response.data
+        assert response.data["metrics"]["total_ordenes"] == 1
+        assert len(response.data["series"]) == 1
+        assert response.data["top_proveedores"][0]["nombre"] == "PROVEEDOR COMPRAS"
+        assert response.data["top_productos"][0]["nombre"] == "Producto Analitica Compras"
+
+    def test_resumen_operativo_documentos_retorna_metricas(self, api_client, owner_usuario, proveedor, empresa):
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
+
+        DocumentoCompraProveedor.all_objects.create(
+            empresa=empresa,
+            creado_por=owner_usuario,
+            proveedor=proveedor,
+            tipo_documento="GUIA_RECEPCION",
+            folio="DOC-R-001",
+            fecha_emision=date.today(),
+            fecha_recepcion=date.today(),
+            estado=EstadoDocumentoCompra.CONFIRMADO,
+            total=Decimal("100000.00"),
+        )
+        DocumentoCompraProveedor.all_objects.create(
+            empresa=empresa,
+            creado_por=owner_usuario,
+            proveedor=proveedor,
+            tipo_documento="FACTURA_COMPRA",
+            folio="DOC-R-002",
+            fecha_emision=date.today(),
+            fecha_recepcion=date.today(),
+            estado=EstadoDocumentoCompra.BORRADOR,
+            total=Decimal("50000.00"),
+        )
+        DocumentoCompraProveedor.all_objects.create(
+            empresa=empresa,
+            creado_por=owner_usuario,
+            proveedor=proveedor,
+            tipo_documento="BOLETA_COMPRA",
+            folio="DOC-R-003",
+            fecha_emision=date.today(),
+            fecha_recepcion=date.today(),
+            estado=EstadoDocumentoCompra.ANULADO,
+            total=Decimal("20000.00"),
+        )
+
+        response = api_client.get(reverse("documento-compra-resumen-operativo"))
+
+        assert response.status_code == status.HTTP_200_OK, response.data
+        assert response.data["total_documentos"] == 3
+        assert response.data["confirmados"] == 1
+        assert response.data["borradores"] == 1
+        assert response.data["anulados"] == 1
+        assert response.data["guias"] == 1
+        assert response.data["facturas"] == 1
+        assert response.data["boletas"] == 1
+        assert response.data["sin_recepcion"] == 1
+        assert Decimal(str(response.data["monto_total"])) == Decimal("170000.00")
+        assert Decimal(str(response.data["monto_confirmado"])) == Decimal("100000.00")
+
+    def test_resumen_operativo_documentos_rechaza_usuario_sin_permiso(self, api_client, usuario_sin_permisos_compras):
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(usuario_sin_permisos_compras)}")
+
+        response = api_client.get(reverse("documento-compra-resumen-operativo"))
+
+        assert response.status_code == status.HTTP_403_FORBIDDEN
+        assert response.data["error_code"] == "PERMISSION_DENIED"
+
+    def test_analytics_documentos_retorna_series_y_top_productos(self, api_client, owner_usuario, proveedor, empresa):
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
+
+        producto = Producto.objects.create(
+            empresa=empresa,
+            nombre="Producto Analitica Docs",
+            sku="PAD-001",
+            stock_actual=Decimal("0.00"),
+            maneja_inventario=True,
+            precio_referencia=Decimal("1000"),
+        )
+
+        documento = DocumentoCompraProveedor.all_objects.create(
+            empresa=empresa,
+            creado_por=owner_usuario,
+            proveedor=proveedor,
+            tipo_documento="FACTURA_COMPRA",
+            folio="FAC-A-001",
+            fecha_emision=date(2026, 3, 12),
+            fecha_recepcion=date(2026, 3, 12),
+            estado=EstadoDocumentoCompra.CONFIRMADO,
+            total=Decimal("45000.00"),
+        )
+        DocumentoCompraProveedorItem.all_objects.create(
+            empresa=empresa,
+            documento=documento,
+            producto=producto,
+            descripcion="Producto Analitica Docs",
+            cantidad=Decimal("3.00"),
+            precio_unitario=Decimal("15000.00"),
+            subtotal=Decimal("45000.00"),
+        )
+
+        response = api_client.get(reverse("documento-compra-analytics"), {"agrupacion": "mensual"})
+
+        assert response.status_code == status.HTTP_200_OK, response.data
+        assert response.data["metrics"]["total_documentos"] == 1
+        assert len(response.data["series"]) == 1
+        assert response.data["top_proveedores"][0]["nombre"] == "PROVEEDOR COMPRAS"
+        assert response.data["top_productos"][0]["nombre"] == "Producto Analitica Docs"
 
     def test_crear_orden_reintenta_si_numero_ya_existe(self, api_client, owner_usuario, proveedor, empresa):
         api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
@@ -1168,6 +1380,131 @@ class TestComprasApi:
         orden_actualizada = OrdenCompra.all_objects.get(id=orden_id)
         assert orden_actualizada.estado == "RECIBIDA"
 
+    def test_factura_en_transito_luego_recepcion_y_anulacion_preserva_fisico_y_oc(
+        self, api_client, owner_usuario, proveedor, empresa
+    ):
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
+
+        producto = Producto.objects.create(
+            empresa=empresa,
+            nombre="Producto Transito Recepcion",
+            sku="PTR-API-01",
+            stock_actual=Decimal("0.00"),
+            maneja_inventario=True,
+            precio_referencia=Decimal("1500"),
+        )
+
+        orden_resp = api_client.post(
+            reverse("orden-compra-list"),
+            {
+                "proveedor": str(proveedor.id),
+                "fecha_emision": str(date.today()),
+            },
+            format="json",
+        )
+        assert orden_resp.status_code == status.HTTP_201_CREATED, orden_resp.data
+        orden_id = orden_resp.data["id"]
+
+        item_oc = api_client.post(
+            reverse("orden-compra-item-list"),
+            {
+                "orden_compra": orden_id,
+                "producto": str(producto.id),
+                "descripcion": "Item transito",
+                "cantidad": "3.00",
+                "precio_unitario": "1500.00",
+            },
+            format="json",
+        )
+        assert item_oc.status_code == status.HTTP_201_CREATED, item_oc.data
+
+        factura_resp = api_client.post(
+            reverse("documento-compra-list"),
+            {
+                "tipo_documento": "FACTURA_COMPRA",
+                "proveedor": str(proveedor.id),
+                "orden_compra": orden_id,
+                "folio": "FAC-TRANS-RECEP-001",
+                "fecha_emision": str(date.today()),
+                "fecha_recepcion": str(date.today()),
+            },
+            format="json",
+        )
+        assert factura_resp.status_code == status.HTTP_201_CREATED, factura_resp.data
+        factura_id = factura_resp.data["id"]
+
+        factura_item_resp = api_client.post(
+            reverse("documento-compra-item-list"),
+            {
+                "documento": factura_id,
+                "producto": str(producto.id),
+                "cantidad": "3.00",
+                "precio_unitario": "1500.00",
+                "subtotal": "4500.00",
+            },
+            format="json",
+        )
+        assert factura_item_resp.status_code == status.HTTP_201_CREATED, factura_item_resp.data
+
+        confirmar_factura = api_client.post(
+            reverse("documento-compra-confirmar-factura", args=[factura_id]),
+            {"en_transito": True},
+            format="json",
+        )
+        assert confirmar_factura.status_code == status.HTTP_200_OK, confirmar_factura.data
+
+        producto.refresh_from_db()
+        orden = OrdenCompra.all_objects.get(id=orden_id)
+        assert producto.stock_actual == Decimal("0.00")
+        assert orden.estado == "ENVIADA"
+
+        recepcion = api_client.post(
+            reverse("recepcion-compra-list"),
+            {
+                "orden_compra": orden_id,
+                "fecha": str(date.today()),
+            },
+            format="json",
+        )
+        assert recepcion.status_code == status.HTTP_201_CREATED, recepcion.data
+
+        recepcion_item = api_client.post(
+            reverse("recepcion-compra-item-list"),
+            {
+                "recepcion": recepcion.data["id"],
+                "orden_item": item_oc.data["id"],
+                "producto": str(producto.id),
+                "cantidad": "3.00",
+                "precio_unitario": "1500.00",
+            },
+            format="json",
+        )
+        assert recepcion_item.status_code == status.HTTP_201_CREATED, recepcion_item.data
+
+        confirmar_recepcion = api_client.post(
+            reverse("recepcion-compra-confirmar", args=[recepcion.data["id"]]),
+            {},
+            format="json",
+        )
+        assert confirmar_recepcion.status_code == status.HTTP_200_OK, confirmar_recepcion.data
+
+        producto.refresh_from_db()
+        orden.refresh_from_db()
+        assert producto.stock_actual == Decimal("3.00")
+        assert orden.estado == "RECIBIDA"
+
+        anular_factura = api_client.post(
+            reverse("documento-compra-anular", args=[factura_id]),
+            {},
+            format="json",
+        )
+        assert anular_factura.status_code == status.HTTP_200_OK, anular_factura.data
+
+        producto.refresh_from_db()
+        orden.refresh_from_db()
+        assert producto.stock_actual == Decimal("3.00")
+        assert orden.estado == "RECIBIDA"
+
     def test_no_permite_documento_duplicado_por_proveedor_tipo_folio_serie(self, api_client, owner_usuario, proveedor):
         api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
 
@@ -1187,5 +1524,235 @@ class TestComprasApi:
         assert second.status_code == status.HTTP_400_BAD_REQUEST
         assert "folio" in second.data["detail"]
         assert second.data["error_code"] == "VALIDATION_ERROR"
+
+    def test_acciones_custom_compras_rechazan_usuario_sin_permiso(
+        self, api_client, owner_usuario, usuario_sin_permisos_compras, proveedor, empresa
+    ):
+        producto = Producto.objects.create(
+            empresa=empresa,
+            nombre="Producto Permisos Compras",
+            sku="PC-PERM-001",
+            stock_actual=Decimal("0.00"),
+            maneja_inventario=True,
+            precio_referencia=Decimal("1000"),
+        )
+
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
+
+        orden_resp = api_client.post(
+            reverse("orden-compra-list"),
+            {
+                "proveedor": str(proveedor.id),
+                "fecha_emision": str(date.today()),
+                "estado": "BORRADOR",
+            },
+            format="json",
+        )
+        assert orden_resp.status_code == status.HTTP_201_CREATED, orden_resp.data
+        orden_id = orden_resp.data["id"]
+
+        item_oc = api_client.post(
+            reverse("orden-compra-item-list"),
+            {
+                "orden_compra": orden_id,
+                "producto": str(producto.id),
+                "descripcion": "Item permisos",
+                "cantidad": "2.00",
+                "precio_unitario": "1000.00",
+            },
+            format="json",
+        )
+        assert item_oc.status_code == status.HTTP_201_CREATED, item_oc.data
+
+        documento_resp = api_client.post(
+            reverse("documento-compra-list"),
+            {
+                "tipo_documento": "FACTURA_COMPRA",
+                "proveedor": str(proveedor.id),
+                "orden_compra": orden_id,
+                "folio": "FAC-PERM-001",
+                "fecha_emision": str(date.today()),
+                "fecha_recepcion": str(date.today()),
+                "estado": "BORRADOR",
+            },
+            format="json",
+        )
+        assert documento_resp.status_code == status.HTTP_201_CREATED, documento_resp.data
+        documento_id = documento_resp.data["id"]
+
+        documento_item = api_client.post(
+            reverse("documento-compra-item-list"),
+            {
+                "documento": documento_id,
+                "producto": str(producto.id),
+                "cantidad": "2.00",
+                "precio_unitario": "1000.00",
+                "subtotal": "2000.00",
+            },
+            format="json",
+        )
+        assert documento_item.status_code == status.HTTP_201_CREATED, documento_item.data
+
+        recepcion_resp = api_client.post(
+            reverse("recepcion-compra-list"),
+            {
+                "orden_compra": orden_id,
+                "fecha": str(date.today()),
+            },
+            format="json",
+        )
+        assert recepcion_resp.status_code == status.HTTP_201_CREATED, recepcion_resp.data
+        recepcion_id = recepcion_resp.data["id"]
+
+        recepcion_item = api_client.post(
+            reverse("recepcion-compra-item-list"),
+            {
+                "recepcion": recepcion_id,
+                "orden_item": item_oc.data["id"],
+                "producto": str(producto.id),
+                "cantidad": "1.00",
+                "precio_unitario": "1000.00",
+            },
+            format="json",
+        )
+        assert recepcion_item.status_code == status.HTTP_201_CREATED, recepcion_item.data
+
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(usuario_sin_permisos_compras)}")
+
+        enviar_orden = api_client.post(reverse("orden-compra-enviar", args=[orden_id]), {}, format="json")
+        assert enviar_orden.status_code == status.HTTP_403_FORBIDDEN, enviar_orden.data
+        assert enviar_orden.data["error_code"] == "PERMISSION_DENIED"
+
+        confirmar_factura = api_client.post(
+            reverse("documento-compra-confirmar-factura", args=[documento_id]),
+            {},
+            format="json",
+        )
+        assert confirmar_factura.status_code == status.HTTP_403_FORBIDDEN, confirmar_factura.data
+        assert confirmar_factura.data["error_code"] == "PERMISSION_DENIED"
+
+        confirmar_recepcion = api_client.post(
+            reverse("recepcion-compra-confirmar", args=[recepcion_id]),
+            {},
+            format="json",
+        )
+        assert confirmar_recepcion.status_code == status.HTTP_403_FORBIDDEN, confirmar_recepcion.data
+        assert confirmar_recepcion.data["error_code"] == "PERMISSION_DENIED"
+
+        trazabilidad = api_client.get(reverse("orden-compra-trazabilidad", args=[orden_id]))
+        assert trazabilidad.status_code == status.HTTP_403_FORBIDDEN, trazabilidad.data
+        assert trazabilidad.data["error_code"] == "PERMISSION_DENIED"
+
+    def test_patch_orden_enviada_retorna_conflict(self, api_client, owner_usuario, proveedor):
+        orden = OrdenCompra.all_objects.create(
+            empresa=owner_usuario.empresa_activa,
+            creado_por=owner_usuario,
+            proveedor=proveedor,
+            numero="ORD-LOCK-001",
+            fecha_emision=date.today(),
+            estado=EstadoOrdenCompra.ENVIADA,
+        )
+
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
+        response = api_client.patch(
+            reverse("orden-compra-detail", args=[orden.id]),
+            {"observaciones": "Intento editar enviada"},
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_409_CONFLICT, response.data
+        assert response.data["error_code"] == "CONFLICT"
+
+    def test_patch_documento_confirmado_retorna_conflict(self, api_client, owner_usuario, proveedor):
+        documento = DocumentoCompraProveedor.all_objects.create(
+            empresa=owner_usuario.empresa_activa,
+            creado_por=owner_usuario,
+            proveedor=proveedor,
+            tipo_documento="FACTURA_COMPRA",
+            folio="FAC-LOCK-001",
+            fecha_emision=date.today(),
+            fecha_recepcion=date.today(),
+            estado=EstadoDocumentoCompra.CONFIRMADO,
+        )
+
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
+        response = api_client.patch(
+            reverse("documento-compra-detail", args=[documento.id]),
+            {"observaciones": "Intento editar confirmado"},
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_409_CONFLICT, response.data
+        assert response.data["error_code"] == "CONFLICT"
+
+    def test_patch_recepcion_confirmada_retorna_conflict(self, api_client, owner_usuario):
+        recepcion = RecepcionCompra.all_objects.create(
+            empresa=owner_usuario.empresa_activa,
+            creado_por=owner_usuario,
+            fecha=date.today(),
+            estado=EstadoRecepcion.CONFIRMADA,
+        )
+
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
+        response = api_client.patch(
+            reverse("recepcion-compra-detail", args=[recepcion.id]),
+            {"observaciones": "Intento editar confirmada"},
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_409_CONFLICT, response.data
+        assert response.data["error_code"] == "CONFLICT"
+
+    def test_delete_orden_enviada_retorna_conflict(self, api_client, owner_usuario, proveedor):
+        orden = OrdenCompra.all_objects.create(
+            empresa=owner_usuario.empresa_activa,
+            creado_por=owner_usuario,
+            proveedor=proveedor,
+            numero="ORD-DEL-001",
+            fecha_emision=date.today(),
+            estado=EstadoOrdenCompra.ENVIADA,
+        )
+
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
+        response = api_client.delete(reverse("orden-compra-detail", args=[orden.id]))
+
+        assert response.status_code == status.HTTP_409_CONFLICT, response.data
+        assert response.data["error_code"] == "CONFLICT"
+
+    def test_delete_recepcion_confirmada_retorna_conflict(self, api_client, owner_usuario):
+        recepcion = RecepcionCompra.all_objects.create(
+            empresa=owner_usuario.empresa_activa,
+            creado_por=owner_usuario,
+            fecha=date.today(),
+            estado=EstadoRecepcion.CONFIRMADA,
+        )
+
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
+        response = api_client.delete(reverse("recepcion-compra-detail", args=[recepcion.id]))
+
+        assert response.status_code == status.HTTP_409_CONFLICT, response.data
+        assert response.data["error_code"] == "CONFLICT"
+
+    def test_corregir_documento_borrador_retorna_conflict(self, api_client, owner_usuario, proveedor):
+        documento = DocumentoCompraProveedor.all_objects.create(
+            empresa=owner_usuario.empresa_activa,
+            creado_por=owner_usuario,
+            proveedor=proveedor,
+            tipo_documento="FACTURA_COMPRA",
+            folio="FAC-CORR-001",
+            fecha_emision=date.today(),
+            fecha_recepcion=date.today(),
+            estado=EstadoDocumentoCompra.BORRADOR,
+        )
+
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
+        response = api_client.post(
+            reverse("documento-compra-corregir", args=[documento.id]),
+            {"motivo": "No deberia corregir borrador"},
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_409_CONFLICT, response.data
+        assert response.data["error_code"] == "CONFLICT"
 
 

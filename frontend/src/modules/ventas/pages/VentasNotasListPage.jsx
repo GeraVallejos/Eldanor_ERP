@@ -12,6 +12,18 @@ import { VENTAS_PERMISSIONS } from '@/modules/ventas/constants'
 import { formatMoney } from '@/modules/ventas/utils'
 import { usePermissions } from '@/modules/shared/auth/usePermission'
 
+function canEditNota(row, permissions) {
+  return permissions[VENTAS_PERMISSIONS.editar] && row?.estado === 'BORRADOR'
+}
+
+function canEmitirNota(row, permissions) {
+  return permissions[VENTAS_PERMISSIONS.aprobar] && row?.estado === 'BORRADOR'
+}
+
+function canAnularNota(row, permissions) {
+  return permissions[VENTAS_PERMISSIONS.anular] && row?.estado === 'EMITIDA'
+}
+
 function VentasNotasListPage() {
   const [search, setSearch] = useState('')
   const [updatingId, setUpdatingId] = useState(null)
@@ -23,9 +35,6 @@ function VentasNotasListPage() {
     VENTAS_PERMISSIONS.anular,
   ])
   const canCreate = permissions[VENTAS_PERMISSIONS.crear]
-  const canEdit = permissions[VENTAS_PERMISSIONS.editar]
-  const canApprove = permissions[VENTAS_PERMISSIONS.aprobar]
-  const canAnular = permissions[VENTAS_PERMISSIONS.anular]
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
@@ -96,11 +105,11 @@ function VentasNotasListPage() {
                 <td className="px-3 py-2 text-right">{formatMoney(row.total)}</td>
                 <td className="px-3 py-2">
                   <div className="flex justify-end gap-2">
-                    {canEdit ? <Link to={`/ventas/notas/${row.id}/editar`} className={cn(buttonVariants({ variant: 'outline', size: 'sm' }))}>Editar</Link> : null}
-                    {canApprove && row.estado === 'BORRADOR' ? (
+                    {canEditNota(row, permissions) ? <Link to={`/ventas/notas/${row.id}/editar`} className={cn(buttonVariants({ variant: 'outline', size: 'sm' }))}>Editar</Link> : null}
+                    {canEmitirNota(row, permissions) ? (
                       <Button size="sm" disabled={updatingId === row.id} onClick={() => execute(row, 'emitir')}>Emitir</Button>
                     ) : null}
-                    {canAnular && row.estado === 'EMITIDA' ? (
+                    {canAnularNota(row, permissions) ? (
                       <Button variant="destructive" size="sm" disabled={updatingId === row.id} onClick={() => execute(row, 'anular')}>Anular</Button>
                     ) : null}
                   </div>

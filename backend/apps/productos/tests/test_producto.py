@@ -2,7 +2,7 @@ import pytest
 from decimal import Decimal
 from django.core.exceptions import ValidationError
 from apps.productos.models import Producto, Categoria, TipoProducto
-from apps.core.models import Moneda
+from apps.tesoreria.models import Moneda
 from apps.core.tenant import set_current_empresa
 
 @pytest.mark.django_db

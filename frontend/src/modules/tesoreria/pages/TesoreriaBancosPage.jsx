@@ -21,17 +21,6 @@ function formatCuentaLabel(cuenta) {
   return `${cuenta.alias || 'Sin alias'}${cuenta.numero_cuenta ? ` · ${cuenta.numero_cuenta}` : ''}`
 }
 
-function formatEstadoContable(value) {
-  const mapping = {
-    NO_APLICA: 'No aplica',
-    PENDIENTE: 'Pendiente',
-    CONTABILIZADO: 'Contabilizado',
-    ERROR: 'Error',
-    REVERSADO: 'Reversado',
-  }
-  return mapping[value] || value || '-'
-}
-
 function TesoreriaBancosPage() {
   const canView = usePermission('TESORERIA.VER')
   const canConciliar = usePermission('TESORERIA.CONCILIAR')
@@ -425,15 +414,14 @@ function TesoreriaBancosPage() {
                   <th className="px-3 py-2 text-left font-medium">Referencia</th>
                   <th className="px-3 py-2 text-left font-medium">Monto</th>
                   <th className="px-3 py-2 text-left font-medium">Estado</th>
-                  <th className="px-3 py-2 text-left font-medium">Estado contable</th>
                   <th className="px-3 py-2 text-left font-medium">Accion</th>
                 </tr>
               </thead>
               <tbody>
                 {loading ? (
-                  <tr><td className="px-3 py-3 text-muted-foreground" colSpan={8}>Cargando movimientos...</td></tr>
+                  <tr><td className="px-3 py-3 text-muted-foreground" colSpan={7}>Cargando movimientos...</td></tr>
                 ) : movimientosFiltrados.length === 0 ? (
-                  <tr><td className="px-3 py-3 text-muted-foreground" colSpan={8}>No hay movimientos para los filtros seleccionados.</td></tr>
+                  <tr><td className="px-3 py-3 text-muted-foreground" colSpan={7}>No hay movimientos para los filtros seleccionados.</td></tr>
                 ) : (
                   movimientosFiltrados.map((movimiento) => {
                     const cuenta = cuentaById.get(String(movimiento.cuenta_bancaria))
@@ -445,7 +433,6 @@ function TesoreriaBancosPage() {
                         <td className="px-3 py-2">{movimiento.referencia || '-'}</td>
                         <td className="px-3 py-2">{formatCurrencyCLP(movimiento.monto)}</td>
                         <td className="px-3 py-2">{movimiento.conciliado ? 'Conciliado' : 'Pendiente'}</td>
-                        <td className="px-3 py-2 text-xs text-muted-foreground">{formatEstadoContable(movimiento.estado_contable)}</td>
                         <td className="px-3 py-2">
                           {movimiento.conciliado || !canConciliar ? (
                             <span className="text-xs text-muted-foreground">{movimiento.conciliado ? 'Listo' : 'Sin permiso'}</span>

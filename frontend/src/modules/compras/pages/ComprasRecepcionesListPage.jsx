@@ -7,7 +7,9 @@ import Button from '@/components/ui/Button'
 import { buttonVariants } from '@/components/ui/buttonVariants'
 import TablePagination from '@/components/ui/TablePagination'
 import { useTableSorting } from '@/lib/tableSorting'
+import { useResponsiveTablePageSize } from '@/lib/useResponsiveTablePageSize'
 import { cn } from '@/lib/utils'
+import { usePermissions } from '@/modules/shared/auth/usePermission'
 
 function normalizeListResponse(data) {
   if (Array.isArray(data)) return data
@@ -25,7 +27,25 @@ const ESTADO_BADGE = {
   CONFIRMADA: 'bg-green-100 text-green-800',
 }
 
+function canCrearRecepcion(permissions) {
+  return permissions['COMPRAS.CREAR']
+}
+
+function canEditarRecepcion(rec, permissions) {
+  return permissions['COMPRAS.EDITAR'] && rec?.estado === 'BORRADOR'
+}
+
+function canConfirmarRecepcion(rec, permissions) {
+  return permissions['COMPRAS.APROBAR'] && rec?.estado === 'BORRADOR'
+}
+
+function canVerRecepcion(rec) {
+  return rec?.estado === 'CONFIRMADA'
+}
+
 function ComprasRecepcionesListPage() {
+  const pageSize = useResponsiveTablePageSize({ reservedHeight: 440 })
+  const permissions = usePermissions(['COMPRAS.CREAR', 'COMPRAS.EDITAR', 'COMPRAS.APROBAR'])
   const [status, setStatus] = useState('idle')
   const [recepciones, setRecepciones] = useState([])
   const [ordenes, setOrdenes] = useState([])
@@ -105,13 +125,13 @@ function ComprasRecepcionesListPage() {
     })
   }, [recepciones, search, estadoFilter, ordenById, proveedorById, contactoById])
 
-  const { paginatedRows, toggleSort, getSortIndicator, currentPage, totalPages, totalRows, pageSize, nextPage, prevPage } =
+  const { paginatedRows, toggleSort, getSortIndicator, currentPage, totalPages, totalRows, nextPage, prevPage } =
     useTableSorting(filteredRecepciones, {
       accessors: {
         fecha: (r) => r.fecha,
         estado: (r) => r.estado,
       },
-      pageSize: 10,
+      pageSize,
       initialKey: 'fecha',
       initialDirection: 'desc',
     })
@@ -150,12 +170,14 @@ function ComprasRecepcionesListPage() {
     <section className="space-y-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h2 className="text-2xl font-semibold">Recepciones de compra</h2>
-        <Link
-          to="/compras/recepciones/nuevo"
-          className={cn(buttonVariants({ variant: 'default', size: 'md', fullWidth: true }), 'sm:w-auto')}
-        >
-          Nueva recepcion
-        </Link>
+        {canCrearRecepcion(permissions) ? (
+          <Link
+            to="/compras/recepciones/nuevo"
+            className={cn(buttonVariants({ variant: 'default', size: 'md', fullWidth: true }), 'sm:w-auto')}
+          >
+            Nueva recepcion
+          </Link>
+        ) : null}
       </div>
 
       <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-end">
@@ -241,29 +263,33 @@ function ComprasRecepcionesListPage() {
                         <div className="flex justify-end gap-2">
                           {rec.estado === 'BORRADOR' ? (
                             <>
-                              <Link
-                                to={`/compras/recepciones/${rec.id}/editar`}
-                                className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'h-8 px-3 text-xs')}
-                              >
-                                Editar
-                              </Link>
-                              <Button
-                                size="sm"
-                                variant="default"
-                                className="h-8 px-3 text-xs"
-                                onClick={() => openConfirmDialog(rec)}
-                              >
-                                Confirmar
-                              </Button>
+                              {canEditarRecepcion(rec, permissions) ? (
+                                <Link
+                                  to={`/compras/recepciones/${rec.id}/editar`}
+                                  className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'h-8 px-3 text-xs')}
+                                >
+                                  Editar
+                                </Link>
+                              ) : null}
+                              {canConfirmarRecepcion(rec, permissions) ? (
+                                <Button
+                                  size="sm"
+                                  variant="default"
+                                  className="h-8 px-3 text-xs"
+                                  onClick={() => openConfirmDialog(rec)}
+                                >
+                                  Confirmar
+                                </Button>
+                              ) : null}
                             </>
-                          ) : (
+                          ) : canVerRecepcion(rec) ? (
                             <Link
                               to={`/compras/recepciones/${rec.id}/editar`}
                               className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'h-8 px-3 text-xs')}
                             >
                               Ver
                             </Link>
-                          )}
+                          ) : null}
                         </div>
                       </td>
                     </tr>

@@ -12,6 +12,7 @@ import { cn } from '@/lib/utils'
 import { getProductosCatalog } from '@/modules/productos/services/productosCatalogCache'
 import { downloadExcelFile } from '@/modules/shared/exports/downloadExcelFile'
 import { downloadSimpleTablePdf } from '@/modules/shared/exports/downloadSimpleTablePdf'
+import { usePermissions } from '@/modules/shared/auth/usePermission'
 
 function normalizeListResponse(data) {
   if (Array.isArray(data)) {
@@ -29,8 +30,21 @@ function formatMoney(value) {
   return formatCurrencyCLP(value)
 }
 
+function canCrearDocumento(orden, permissions) {
+  return permissions['COMPRAS.CREAR'] && ['BORRADOR', 'ENVIADA', 'PARCIAL'].includes(String(orden?.estado))
+}
+
+function canEditarOrden(orden, permissions) {
+  return permissions['COMPRAS.EDITAR'] && orden?.estado === 'BORRADOR'
+}
+
+function canEnviarOrden(orden, permissions) {
+  return permissions['COMPRAS.APROBAR'] && orden?.estado === 'BORRADOR'
+}
+
 function ComprasOrdenesDetailPage() {
   const { id: ordenId } = useParams()
+  const permissions = usePermissions(['COMPRAS.CREAR', 'COMPRAS.EDITAR', 'COMPRAS.APROBAR'])
   const [status, setStatus] = useState('idle')
   const [orden, setOrden] = useState(null)
   const [items, setItems] = useState([])
@@ -249,7 +263,7 @@ function ComprasOrdenesDetailPage() {
             onExportExcel={handleExportExcel}
             onExportPdf={handleExportPdf}
           />
-          {orden.estado === 'BORRADOR' ? (
+          {canEnviarOrden(orden, permissions) ? (
             <Button
               variant="default"
               size="md"
@@ -270,7 +284,7 @@ function ComprasOrdenesDetailPage() {
               {updatingEstado ? 'Enviando...' : 'Enviar orden'}
             </Button>
           ) : null}
-          {orden.estado === 'BORRADOR' ? (
+          {canCrearDocumento(orden, permissions) ? (
             <Link
               to={`/compras/documentos/nuevo?orden_compra=${orden.id}`}
               className={cn(buttonVariants({ variant: 'outline', size: 'md' }))}
@@ -278,15 +292,7 @@ function ComprasOrdenesDetailPage() {
               Crear documento
             </Link>
           ) : null}
-          {orden.estado === 'ENVIADA' || orden.estado === 'PARCIAL' ? (
-            <Link
-              to={`/compras/documentos/nuevo?orden_compra=${orden.id}`}
-              className={cn(buttonVariants({ variant: 'outline', size: 'md' }))}
-            >
-              Crear documento
-            </Link>
-          ) : null}
-          {orden.estado === 'BORRADOR' ? (
+          {canEditarOrden(orden, permissions) ? (
             <Link
               to={`/compras/ordenes/${orden.id}/editar`}
               className={cn(buttonVariants({ variant: 'default', size: 'md' }))}

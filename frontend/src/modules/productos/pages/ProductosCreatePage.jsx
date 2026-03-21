@@ -5,6 +5,7 @@ import { useDispatch, useSelector } from 'react-redux'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
 import { z } from 'zod'
+import ApiContractError from '@/components/ui/ApiContractError'
 import Button from '@/components/ui/Button'
 import { buttonVariants } from '@/components/ui/buttonVariants'
 import { cn } from '@/lib/utils'
@@ -17,11 +18,48 @@ import {
   selectCatalogError,
   selectCatalogStatus,
   selectCategorias,
+  selectCreateProductoError,
   selectCreateProductoStatus,
   selectImpuestos,
 } from '@/modules/productos/productosSlice'
 
 const tipoProductoValues = ['PRODUCTO', 'SERVICIO']
+const unidadMedidaOptions = [
+  { value: 'UN', label: 'Unidad' },
+  { value: 'KG', label: 'Kilogramo' },
+  { value: 'GR', label: 'Gramo' },
+  { value: 'LT', label: 'Litro' },
+  { value: 'MT', label: 'Metro' },
+  { value: 'M2', label: 'Metro cuadrado' },
+  { value: 'M3', label: 'Metro cubico' },
+  { value: 'CJ', label: 'Caja' },
+]
+
+function applyOperationalRules(values) {
+  const nextValues = { ...values }
+
+  if (nextValues.tipo === 'SERVICIO') {
+    nextValues.maneja_inventario = false
+    nextValues.stock_minimo = 0
+    nextValues.usa_lotes = false
+    nextValues.usa_series = false
+    nextValues.usa_vencimiento = false
+  }
+
+  if (!nextValues.maneja_inventario) {
+    nextValues.stock_minimo = 0
+    nextValues.usa_lotes = false
+    nextValues.usa_series = false
+    nextValues.usa_vencimiento = false
+  }
+
+  if (nextValues.usa_series) {
+    nextValues.usa_lotes = true
+    nextValues.permite_decimales = false
+  }
+
+  return nextValues
+}
 
 const productoSchema = z
   .object({
@@ -33,8 +71,13 @@ const productoSchema = z
     impuesto: z.string().optional(),
     precio_referencia: z.number({ error: 'Precio de referencia invalido.' }).min(0, 'No puede ser negativo.'),
     precio_costo: z.number({ error: 'Precio de costo invalido.' }).min(0, 'No puede ser negativo.'),
+    unidad_medida: z.string().min(1, 'Unidad requerida.'),
+    permite_decimales: z.boolean(),
     maneja_inventario: z.boolean(),
-    stock_actual: z.number({ error: 'Stock invalido.' }).min(0, 'No puede ser negativo.'),
+    stock_minimo: z.number({ error: 'Stock minimo invalido.' }).min(0, 'No puede ser negativo.'),
+    usa_lotes: z.boolean(),
+    usa_series: z.boolean(),
+    usa_vencimiento: z.boolean(),
     activo: z.boolean(),
   })
   .superRefine((values, ctx) => {
@@ -46,14 +89,14 @@ const productoSchema = z
           message: 'Un servicio no maneja inventario.',
         })
       }
+    }
 
-      if (values.stock_actual !== 0) {
-        ctx.addIssue({
-          code: 'custom',
-          path: ['stock_actual'],
-          message: 'El stock de un servicio debe ser 0.',
-        })
-      }
+    if (values.usa_series && values.permite_decimales) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['permite_decimales'],
+        message: 'Un producto con series no debe permitir decimales.',
+      })
     }
   })
 
@@ -64,6 +107,7 @@ function ProductosCreatePage() {
   const catalogStatus = useSelector(selectCatalogStatus)
   const catalogError = useSelector(selectCatalogError)
   const createStatus = useSelector(selectCreateProductoStatus)
+  const createError = useSelector(selectCreateProductoError)
 
   const {
     register,
@@ -83,13 +127,20 @@ function ProductosCreatePage() {
       impuesto: '',
       precio_referencia: 0,
       precio_costo: 0,
+      unidad_medida: 'UN',
+      permite_decimales: true,
       maneja_inventario: true,
-      stock_actual: 0,
+      stock_minimo: 0,
+      usa_lotes: false,
+      usa_series: false,
+      usa_vencimiento: false,
       activo: true,
     },
   })
 
   const tipoSeleccionado = useWatch({ control, name: 'tipo' })
+  const manejaInventarioSeleccionado = useWatch({ control, name: 'maneja_inventario' })
+  const usaSeriesSeleccionado = useWatch({ control, name: 'usa_series' })
 
   useEffect(() => {
     if (catalogStatus === 'idle') {
@@ -100,7 +151,10 @@ function ProductosCreatePage() {
   useEffect(() => {
     if (tipoSeleccionado === 'SERVICIO') {
       setValue('maneja_inventario', false, { shouldValidate: true })
-      setValue('stock_actual', 0, { shouldValidate: true })
+      setValue('stock_minimo', 0, { shouldValidate: true })
+      setValue('usa_lotes', false, { shouldValidate: true })
+      setValue('usa_series', false, { shouldValidate: true })
+      setValue('usa_vencimiento', false, { shouldValidate: true })
       return
     }
 
@@ -108,6 +162,22 @@ function ProductosCreatePage() {
       setValue('maneja_inventario', true, { shouldValidate: true })
     }
   }, [setValue, tipoSeleccionado])
+
+  useEffect(() => {
+    if (!manejaInventarioSeleccionado) {
+      setValue('stock_minimo', 0, { shouldValidate: true })
+      setValue('usa_lotes', false, { shouldValidate: true })
+      setValue('usa_series', false, { shouldValidate: true })
+      setValue('usa_vencimiento', false, { shouldValidate: true })
+    }
+  }, [manejaInventarioSeleccionado, setValue])
+
+  useEffect(() => {
+    if (usaSeriesSeleccionado) {
+      setValue('usa_lotes', true, { shouldValidate: true })
+      setValue('permite_decimales', false, { shouldValidate: true })
+    }
+  }, [setValue, usaSeriesSeleccionado])
 
   useEffect(() => {
     if (catalogStatus === 'failed' && catalogError) {
@@ -124,14 +194,13 @@ function ProductosCreatePage() {
   const onSubmit = async (values) => {
     dispatch(resetCreateProductoState())
 
-    const payload = {
+    const payload = applyOperationalRules({
       ...values,
       categoria: values.categoria || null,
       impuesto: values.impuesto || null,
       descripcion: values.descripcion?.trim() || '',
       maneja_inventario: values.tipo === 'SERVICIO' ? false : values.maneja_inventario,
-      stock_actual: values.tipo === 'SERVICIO' ? 0 : values.stock_actual,
-    }
+    })
 
     try {
       await dispatch(createProducto(payload)).unwrap()
@@ -146,15 +215,19 @@ function ProductosCreatePage() {
         impuesto: '',
         precio_referencia: 0,
         precio_costo: 0,
+        unidad_medida: 'UN',
+        permite_decimales: true,
         maneja_inventario: true,
-        stock_actual: 0,
+        stock_minimo: 0,
+        usa_lotes: false,
+        usa_series: false,
+        usa_vencimiento: false,
         activo: true,
       })
       dispatch(fetchProductos())
       dispatch(resetCreateProductoState())
     } catch (error) {
-      toast.error(typeof error === 'string' ? error : 'No se pudo crear el producto.')
-      dispatch(resetCreateProductoState())
+      toast.error(typeof error === 'string' ? error : (error?.message || 'No se pudo crear el producto.'))
     }
   }
 
@@ -174,6 +247,10 @@ function ProductosCreatePage() {
       </div>
 
       <form className="rounded-md border border-border bg-card p-4" onSubmit={handleSubmit(onSubmit)}>
+        <ApiContractError
+          error={typeof createError === 'object' ? createError : null}
+          title="No se pudo crear el producto."
+        />
         <div className="grid gap-3 md:grid-cols-2">
           <label className="text-sm">
             Nombre
@@ -234,9 +311,31 @@ function ProductosCreatePage() {
           </label>
 
           <label className="text-sm">
-            Stock actual
-            <input type="number" step="0.01" min="0" disabled={tipoSeleccionado === 'SERVICIO'} className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 disabled:opacity-60" {...register('stock_actual', { valueAsNumber: true })} />
-            {errors.stock_actual && <span className="mt-1 block text-xs text-destructive">{errors.stock_actual.message}</span>}
+            Unidad
+            <select className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2" {...register('unidad_medida')}>
+              {unidadMedidaOptions.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+            {errors.unidad_medida && <span className="mt-1 block text-xs text-destructive">{errors.unidad_medida.message}</span>}
+          </label>
+
+          <label className="text-sm">
+            Stock minimo
+            <input
+              type="number"
+              step="1"
+              min="0"
+              disabled={!manejaInventarioSeleccionado || tipoSeleccionado === 'SERVICIO'}
+              className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
+              {...register('stock_minimo', { valueAsNumber: true })}
+            />
+            {errors.stock_minimo && <span className="mt-1 block text-xs text-destructive">{errors.stock_minimo.message}</span>}
+          </label>
+
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" {...register('permite_decimales')} disabled={usaSeriesSeleccionado} />
+            Permite decimales
           </label>
 
           <label className="flex items-center gap-2 text-sm">
@@ -245,9 +344,28 @@ function ProductosCreatePage() {
           </label>
 
           <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" disabled={!manejaInventarioSeleccionado || tipoSeleccionado === 'SERVICIO'} {...register('usa_lotes')} />
+            Usa lotes
+          </label>
+
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" disabled={!manejaInventarioSeleccionado || tipoSeleccionado === 'SERVICIO'} {...register('usa_series')} />
+            Usa series
+          </label>
+
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" disabled={!manejaInventarioSeleccionado || tipoSeleccionado === 'SERVICIO'} {...register('usa_vencimiento')} />
+            Usa vencimiento
+          </label>
+
+          <label className="flex items-center gap-2 text-sm">
             <input type="checkbox" {...register('activo')} />
             Activo
           </label>
+
+          <p className="text-xs text-muted-foreground md:col-span-2">
+            El stock actual se gestiona desde inventario. La ficha de producto solo mantiene datos maestros del catalogo.
+          </p>
         </div>
 
         <div className="mt-4">

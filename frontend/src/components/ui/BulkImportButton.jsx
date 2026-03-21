@@ -3,6 +3,7 @@ import { toast } from 'sonner'
 import { api } from '@/api/client'
 import { normalizeApiError } from '@/api/errors'
 import Button from '@/components/ui/Button'
+import { downloadBulkImportErrorsFile } from '@/modules/shared/exports/downloadBulkImportErrorsFile'
 
 function BulkImportButton({ endpoint, templateEndpoint, onCompleted, disabled = false }) {
   const inputRef = useRef(null)
@@ -104,6 +105,10 @@ function BulkImportButton({ endpoint, templateEndpoint, onCompleted, disabled = 
       if (errorCount > 0) {
         const firstError = data.errors[0]
         toast.warning(`Primera fila con error (linea ${firstError?.line || '-'}): ${firstError?.detail || 'Error desconocido'}`)
+        await downloadBulkImportErrorsFile({
+          errors: data.errors,
+          endpoint,
+        })
       }
 
       if (typeof onCompleted === 'function') {

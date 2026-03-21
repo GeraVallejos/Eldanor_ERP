@@ -4,12 +4,11 @@ import re
 from apps.auditoria.models import AuditSeverity
 from apps.auditoria.services import AuditoriaService
 from apps.core.exceptions import AuthorizationError, BusinessRuleError
-from apps.core.models import Moneda
+from apps.tesoreria.models import Moneda
 from apps.core.roles import RolUsuario
 from apps.core.services import DomainEventService, OutboxService
 from apps.core.services.csv_import import parse_csv_upload
 from apps.core.services.xlsx_template import build_xlsx_template
-from apps.inventario.models import Bodega, StockProducto
 from apps.productos.models import Categoria, Impuesto, Producto, TipoProducto, UnidadMedida
 from apps.productos.validators import normalize_sku
 
@@ -133,36 +132,6 @@ def _resolve_moneda(*, raw_value, monedas, empresa):
         return moneda
 
     raise BusinessRuleError(f"La moneda '{raw_value}' no existe para la empresa activa.")
-
-
-def _sync_stock_producto(*, producto, empresa, user, precio_costo):
-    if not producto.maneja_inventario:
-        return
-
-    bodega_default, _ = Bodega.all_objects.get_or_create(
-        empresa=empresa,
-        nombre="Principal",
-        defaults={"activa": True, "creado_por": user},
-    )
-
-    stock = Decimal(producto.stock_actual or 0).quantize(Decimal("0.01"))
-    costo_base = Decimal(precio_costo or 0)
-    valor_stock = (stock * costo_base).quantize(Decimal("0.01"))
-
-    stock_obj, _ = StockProducto.all_objects.get_or_create(
-        empresa=empresa,
-        producto=producto,
-        bodega=bodega_default,
-        defaults={
-            "creado_por": user,
-            "stock": stock,
-            "valor_stock": valor_stock,
-        },
-    )
-    if stock_obj.stock != stock or stock_obj.valor_stock != valor_stock:
-        stock_obj.stock = stock
-        stock_obj.valor_stock = valor_stock
-        stock_obj.save(update_fields=["stock", "valor_stock"])
 
 
 def _ensure_admin_user(user, empresa):
@@ -331,7 +300,6 @@ def bulk_import_productos(*, uploaded_file, user, empresa):
 
             precio_referencia = _to_decimal(row.get("precio_referencia"), default=Decimal("0"))
             precio_costo = _to_decimal(row.get("precio_costo"), default=Decimal("0"))
-            stock_actual = _to_decimal(row.get("stock_actual"), default=Decimal("0"))
             stock_minimo = _to_decimal(row.get("stock_minimo"), default=Decimal("0"))
             maneja_inventario = _to_bool(row.get("maneja_inventario"), default=True)
             permite_decimales = _to_bool(
@@ -352,7 +320,6 @@ def bulk_import_productos(*, uploaded_file, user, empresa):
 
             if tipo == TipoProducto.SERVICIO:
                 maneja_inventario = False
-                stock_actual = Decimal("0")
                 stock_minimo = Decimal("0")
                 usa_lotes = False
                 usa_series = False
@@ -377,7 +344,6 @@ def bulk_import_productos(*, uploaded_file, user, empresa):
                 "unidad_medida": unidad_medida,
                 "permite_decimales": permite_decimales,
                 "maneja_inventario": maneja_inventario,
-                "stock_actual": stock_actual,
                 "stock_minimo": stock_minimo,
                 "usa_lotes": usa_lotes,
                 "usa_series": usa_series,
@@ -389,22 +355,10 @@ def bulk_import_productos(*, uploaded_file, user, empresa):
                 for key, value in payload.items():
                     setattr(existing, key, value)
                 existing.save()
-                _sync_stock_producto(
-                    producto=existing,
-                    empresa=empresa,
-                    user=user,
-                    precio_costo=precio_costo,
-                )
                 updated += 1
             else:
                 producto = Producto(**payload)
                 producto.save()
-                _sync_stock_producto(
-                    producto=producto,
-                    empresa=empresa,
-                    user=user,
-                    precio_costo=precio_costo,
-                )
                 existing_products[sku] = producto
                 created += 1
         except Exception as exc:  # pragma: no cover - defensive guard for row-level resilience
@@ -454,7 +408,6 @@ def build_productos_bulk_template(*, user, empresa):
         "unidad_medida",
         "permite_decimales",
         "maneja_inventario",
-        "stock_actual",
         "stock_minimo",
         "usa_lotes",
         "usa_series",
@@ -475,7 +428,6 @@ def build_productos_bulk_template(*, user, empresa):
         "UN",
         "false",
         "true",
-        "12",
         "4",
         "false",
         "false",
@@ -491,7 +443,8 @@ def build_productos_bulk_template(*, user, empresa):
         "moneda debe existir previamente en la empresa activa (ej: CLP, USD).",
         "unidad_medida permitida: UN, KG, GR, LT, MT, M2, M3, CJ.",
         "permite_decimales, maneja_inventario, usa_lotes, usa_series, usa_vencimiento y activo: true/false.",
-        "Si tipo=SERVICIO, stock_actual se fuerza a 0 y maneja_inventario=false.",
+        "stock_actual no se importa desde esta plantilla; el stock operativo se gestiona solo desde inventario.",
+        "Si tipo=SERVICIO, maneja_inventario=false y los campos operativos de stock quedan sin efecto.",
         "categoria e impuesto se resolveran por nombre dentro de la empresa activa.",
         "sku identifica un producto existente para actualizarlo; si no existe, se crea.",
     ]

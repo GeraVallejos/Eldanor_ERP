@@ -16,20 +16,33 @@ function normalizeListResponse(data) {
   return []
 }
 
+function canApplyPayment(row, type, permissions) {
+  const hasPermission = type === 'cxc' ? permissions['TESORERIA.COBRAR'] : permissions['TESORERIA.PAGAR']
+  const saldo = Number(row?.saldo || 0)
+  const estado = String(row?.estado || '').toUpperCase()
+  return hasPermission && saldo > 0 && estado !== 'PAGADA' && estado !== 'ANULADA'
+}
+
 function TesoreriaCuentasPage() {
   const permissions = usePermissions(['TESORERIA.VER', 'TESORERIA.COBRAR', 'TESORERIA.PAGAR'])
   const [cxc, setCxc] = useState([])
   const [cxp, setCxp] = useState([])
+  const [agingCxc, setAgingCxc] = useState(null)
+  const [agingCxp, setAgingCxp] = useState(null)
   const [paymentState, setPaymentState] = useState({ id: '', type: '', monto: '', fecha_pago: '' })
 
   const loadData = async () => {
     try {
-      const [{ data: cxcData }, { data: cxpData }] = await Promise.all([
+      const [{ data: cxcData }, { data: cxpData }, { data: agingCxcData }, { data: agingCxpData }] = await Promise.all([
         api.get('/cuentas-por-cobrar/', { suppressGlobalErrorToast: true }),
         api.get('/cuentas-por-pagar/', { suppressGlobalErrorToast: true }),
+        api.get('/cuentas-por-cobrar/aging/', { suppressGlobalErrorToast: true }),
+        api.get('/cuentas-por-pagar/aging/', { suppressGlobalErrorToast: true }),
       ])
       setCxc(normalizeListResponse(cxcData))
       setCxp(normalizeListResponse(cxpData))
+      setAgingCxc(agingCxcData)
+      setAgingCxp(agingCxpData)
     } catch (error) {
       toast.error(normalizeApiError(error, { fallback: 'No se pudieron cargar las cuentas de tesorería.' }))
     }
@@ -84,7 +97,7 @@ function TesoreriaCuentasPage() {
                 <td className="px-3 py-2">{formatCurrencyCLP(row.saldo)}</td>
                 <td className="px-3 py-2">{row.estado}</td>
                 <td className="px-3 py-2">
-                  {(type === 'cxc' ? permissions['TESORERIA.COBRAR'] : permissions['TESORERIA.PAGAR']) ? (
+                  {canApplyPayment(row, type, permissions) ? (
                     <Button
                       size="sm"
                       variant="outline"
@@ -92,7 +105,11 @@ function TesoreriaCuentasPage() {
                     >
                       Aplicar pago
                     </Button>
-                  ) : 'Sin permiso'}
+                  ) : (
+                    <span className="text-xs text-muted-foreground">
+                      {(type === 'cxc' ? permissions['TESORERIA.COBRAR'] : permissions['TESORERIA.PAGAR']) ? 'No aplica' : 'Sin permiso'}
+                    </span>
+                  )}
                 </td>
               </tr>
             ))
@@ -101,6 +118,32 @@ function TesoreriaCuentasPage() {
       </table>
     </div>
   )
+
+  const renderAgingCard = (title, aging) => {
+    const totales = aging?.totales || {}
+    const rows = [
+      ['Al dia', totales.al_dia],
+      ['1 a 30', totales['1_30']],
+      ['31 a 60', totales['31_60']],
+      ['61 a 90', totales['61_90']],
+      ['91+', totales['91_plus']],
+    ]
+
+    return (
+      <article className="rounded-md border border-border bg-card p-4">
+        <p className="text-sm text-muted-foreground">{title}</p>
+        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+          {rows.map(([label, value]) => (
+            <div key={label} className="rounded-md border border-border/60 bg-background px-3 py-2">
+              <p className="text-xs uppercase tracking-wide text-muted-foreground">{label}</p>
+              <p className="mt-1 font-medium">{formatCurrencyCLP(value || 0)}</p>
+            </div>
+          ))}
+        </div>
+        <p className="mt-3 text-sm font-semibold">Total: {formatCurrencyCLP(totales.total || 0)}</p>
+      </article>
+    )
+  }
 
   if (!permissions['TESORERIA.VER']) {
     return <p className="text-sm text-destructive">No tiene permiso para ver tesorería.</p>
@@ -111,6 +154,11 @@ function TesoreriaCuentasPage() {
       <div>
         <h2 className="text-2xl font-semibold">Cartera</h2>
         <p className="text-sm text-muted-foreground">Seguimiento operativo de cuentas por cobrar y pagar.</p>
+      </div>
+
+      <div className="grid gap-3 lg:grid-cols-2">
+        {renderAgingCard('Antiguedad de saldos CxC', agingCxc)}
+        {renderAgingCard('Antiguedad de saldos CxP', agingCxp)}
       </div>
 
       {paymentState.id ? (

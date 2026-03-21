@@ -1,11 +1,9 @@
-from decimal import Decimal
 from datetime import date
 
-from django.db.models.deletion import ProtectedError
+from rest_framework import status
+from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet
 
-from apps.core.exceptions import ConflictError
-from apps.inventario.models import Bodega, StockProducto
 from apps.core.roles import RolUsuario
 from apps.productos.models import Categoria, Impuesto, ListaPrecio, ListaPrecioItem, Producto
 from apps.productos.api.serializer import (
@@ -21,12 +19,13 @@ from apps.core.permisos.constantes_permisos import Modulos, Acciones
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.decorators import action
 from rest_framework.parsers import MultiPartParser, FormParser
-from rest_framework.response import Response
 from django.http import HttpResponse
 from django.utils.dateparse import parse_date
 
 from apps.productos.services.bulk_import_service import bulk_import_productos, build_productos_bulk_template
 from apps.productos.services.precio_service import PrecioComercialService
+from apps.productos.services.producto_service import ProductoService
+from apps.productos.services.producto_trazabilidad_service import ProductoTrazabilidadService
 
 
 
@@ -45,6 +44,7 @@ class ProductoViewSet(TenantViewSetMixin, ModelViewSet ):
         "bulk_import": Acciones.CREAR,
         "bulk_template": Acciones.VER,
         "precio": Acciones.VER,
+        "trazabilidad": Acciones.VER,
     }
 
     @staticmethod
@@ -67,7 +67,7 @@ class ProductoViewSet(TenantViewSetMixin, ModelViewSet ):
         queryset = super().get_queryset()
         # En acciones de detalle permitimos acceder a inactivos para roles avanzados,
         # evitando 404 al reactivar productos previamente anulados.
-        if self.action in {"retrieve", "update", "partial_update", "destroy", "precio"}:
+        if self.action in {"retrieve", "update", "partial_update", "destroy", "precio", "trazabilidad"}:
             if self._user_can_access_inactive():
                 return queryset
             return queryset.filter(activo=True)
@@ -82,63 +82,47 @@ class ProductoViewSet(TenantViewSetMixin, ModelViewSet ):
 
         return queryset.filter(activo=True)
 
-    def perform_destroy(self, instance):
+    def create(self, request, *args, **kwargs):
         self._set_tenant_context()
-        try:
-            instance.delete()
-        except ProtectedError:
-            if not instance.activo:
-                raise ConflictError(
-                    "El producto ya esta anulado y mantiene referencias historicas."
-                )
-            # Conserva integridad historica cuando el producto ya fue usado.
-            instance.activo = False
-            instance.save(skip_clean=True, update_fields=["activo"])
-
-    def _sync_stock_producto(self, producto):
-        empresa = self.get_empresa() or getattr(producto, "empresa", None)
-        if not empresa or not producto:
-            return
-
-        if not producto.maneja_inventario:
-            StockProducto.all_objects.filter(empresa=empresa, producto=producto).update(
-                stock=Decimal("0"),
-                valor_stock=Decimal("0"),
-            )
-            return
-
-        bodega_default, _ = Bodega.all_objects.get_or_create(
-            empresa=empresa,
-            nombre="Principal",
-            defaults={"activa": True, "creado_por": self.request.user},
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        producto = ProductoService.crear_producto(
+            empresa=self.get_empresa(),
+            usuario=request.user,
+            data=serializer.validated_data,
         )
+        response_serializer = self.get_serializer(producto)
+        headers = self.get_success_headers(response_serializer.data)
+        return Response(response_serializer.data, status=status.HTTP_201_CREATED, headers=headers)
 
-        stock = Decimal(producto.stock_actual or 0).quantize(Decimal("0.01"))
-        valor_stock = (stock * Decimal(producto.precio_costo or 0)).quantize(Decimal("0.01"))
-
-        stock_obj, _ = StockProducto.all_objects.get_or_create(
-            empresa=empresa,
-            producto=producto,
-            bodega=bodega_default,
-            defaults={
-                "creado_por": self.request.user,
-                "stock": stock,
-                "valor_stock": valor_stock,
-            },
+    def update(self, request, *args, **kwargs):
+        partial = kwargs.pop("partial", False)
+        self._set_tenant_context()
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        producto = ProductoService.actualizar_producto(
+            producto_id=instance.id,
+            empresa=self.get_empresa(),
+            usuario=request.user,
+            data=serializer.validated_data,
         )
+        response_serializer = self.get_serializer(producto)
+        return Response(response_serializer.data)
 
-        if stock_obj.stock != stock or stock_obj.valor_stock != valor_stock:
-            stock_obj.stock = stock
-            stock_obj.valor_stock = valor_stock
-            stock_obj.save(update_fields=["stock", "valor_stock"])
+    def partial_update(self, request, *args, **kwargs):
+        kwargs["partial"] = True
+        return self.update(request, *args, **kwargs)
 
-    def perform_create(self, serializer):
-        super().perform_create(serializer)
-        self._sync_stock_producto(serializer.instance)
-
-    def perform_update(self, serializer):
-        super().perform_update(serializer)
-        self._sync_stock_producto(serializer.instance)
+    def destroy(self, request, *args, **kwargs):
+        self._set_tenant_context()
+        instance = self.get_object()
+        ProductoService.eliminar_producto(
+            producto_id=instance.id,
+            empresa=self.get_empresa(),
+            usuario=request.user,
+        )
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(detail=False, methods=["post"], url_path="bulk_import", parser_classes=[MultiPartParser, FormParser])
     def bulk_import(self, request):
@@ -176,7 +160,7 @@ class ProductoViewSet(TenantViewSetMixin, ModelViewSet ):
         moneda_destino = None
         moneda_codigo = request.query_params.get("moneda")
         if moneda_codigo:
-            from apps.core.models import Moneda
+            from apps.tesoreria.models import Moneda
 
             moneda_destino = Moneda.all_objects.filter(
                 empresa=self.get_empresa(),
@@ -201,6 +185,18 @@ class ProductoViewSet(TenantViewSetMixin, ModelViewSet ):
                 "lista_id": str(resultado["lista"].id) if resultado["lista"] else None,
             }
         )
+
+    @action(detail=True, methods=["get"], url_path="trazabilidad")
+    def trazabilidad(self, request, pk=None):
+        self._set_tenant_context()
+        producto = self.get_object()
+        fecha = parse_date(request.query_params.get("fecha") or "") or date.today()
+        payload = ProductoTrazabilidadService.obtener_resumen(
+            empresa=self.get_empresa(),
+            producto=producto,
+            fecha=fecha,
+        )
+        return Response(payload)
 
 
 class CategoriaViewSet(TenantViewSetMixin, ModelViewSet):

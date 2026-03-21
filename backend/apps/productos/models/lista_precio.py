@@ -11,7 +11,7 @@ class ListaPrecio(BaseModel):
 
     nombre = models.CharField(max_length=120)
     moneda = models.ForeignKey(
-        "core.Moneda",
+        "tesoreria.Moneda",
         on_delete=models.PROTECT,
         related_name="listas_precio",
     )

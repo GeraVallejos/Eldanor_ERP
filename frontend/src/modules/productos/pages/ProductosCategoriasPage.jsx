@@ -3,6 +3,7 @@ import { toast } from 'sonner'
 import { api } from '@/api/client'
 import { normalizeApiError } from '@/api/errors'
 import Button from '@/components/ui/Button'
+import { usePermissions } from '@/modules/shared/auth/usePermission'
 
 function normalizeListResponse(data) {
   if (Array.isArray(data)) return data
@@ -11,6 +12,7 @@ function normalizeListResponse(data) {
 }
 
 function ProductosCategoriasPage() {
+  const permissions = usePermissions(['PRODUCTOS.CREAR', 'PRODUCTOS.EDITAR', 'PRODUCTOS.BORRAR'])
   const [rows, setRows] = useState([])
   const [status, setStatus] = useState('idle')
   const [saving, setSaving] = useState(false)
@@ -53,6 +55,10 @@ function ProductosCategoriasPage() {
 
   const submitForm = async (event) => {
     event.preventDefault()
+    if (!(form.id ? permissions['PRODUCTOS.EDITAR'] : permissions['PRODUCTOS.CREAR'])) {
+      toast.error('No tiene permiso para guardar categorias.')
+      return
+    }
 
     const payload = {
       nombre: String(form.nombre || '').trim(),
@@ -85,6 +91,10 @@ function ProductosCategoriasPage() {
   }
 
   const removeRow = async (id) => {
+    if (!permissions['PRODUCTOS.BORRAR']) {
+      toast.error('No tiene permiso para eliminar categorias.')
+      return
+    }
     setDeletingId(id)
     try {
       await api.delete(`/categorias/${id}/`, { suppressGlobalErrorToast: true })
@@ -166,19 +176,23 @@ function ProductosCategoriasPage() {
                   <td className="px-3 py-2">{row.activa ? 'Activa' : 'Inactiva'}</td>
                   <td className="px-3 py-2">
                     <div className="flex justify-end gap-2">
-                      <Button type="button" size="sm" variant="outline" onClick={() => startEdit(row)}>
-                        Editar
-                      </Button>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        className="border-destructive/40 text-destructive hover:bg-destructive/10"
-                        disabled={deletingId === row.id}
-                        onClick={() => removeRow(row.id)}
-                      >
-                        {deletingId === row.id ? 'Eliminando...' : 'Eliminar'}
-                      </Button>
+                      {permissions['PRODUCTOS.EDITAR'] ? (
+                        <Button type="button" size="sm" variant="outline" onClick={() => startEdit(row)}>
+                          Editar
+                        </Button>
+                      ) : null}
+                      {permissions['PRODUCTOS.BORRAR'] ? (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="border-destructive/40 text-destructive hover:bg-destructive/10"
+                          disabled={deletingId === row.id}
+                          onClick={() => removeRow(row.id)}
+                        >
+                          {deletingId === row.id ? 'Eliminando...' : 'Eliminar'}
+                        </Button>
+                      ) : null}
                     </div>
                   </td>
                 </tr>

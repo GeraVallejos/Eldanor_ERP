@@ -5,7 +5,7 @@ from django.db import migrations, models
 
 
 def assign_base_currency_to_products(apps, schema_editor):
-    Moneda = apps.get_model('core', 'Moneda')
+    Moneda = apps.get_model('tesoreria', 'Moneda')
     Producto = apps.get_model('productos', 'Producto')
     moneda_manager = Moneda._base_manager
     producto_manager = Producto._base_manager
@@ -29,15 +29,15 @@ def noop_reverse(apps, schema_editor):
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('core', '0014_seed_default_monedas'),
         ('productos', '0003_producto_costo_promedio_delete_movimientoinventario'),
+        ('tesoreria', '0001_initial'),
     ]
 
     operations = [
         migrations.AddField(
             model_name='producto',
             name='moneda',
-            field=models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.PROTECT, related_name='productos', to='core.moneda'),
+            field=models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.PROTECT, related_name='productos', to='tesoreria.moneda'),
         ),
         migrations.AddField(
             model_name='producto',

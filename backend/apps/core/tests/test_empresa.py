@@ -1,6 +1,7 @@
 import pytest
-from apps.core.models import Empresa, ModelPrueba, Moneda
+from apps.core.models import Empresa, ModelPrueba
 from apps.core.tenant import set_current_empresa, get_current_empresa
+from apps.tesoreria.models import Moneda
 
 # Fixture para crear una empresa y dejarla activa
 @pytest.fixture
@@ -66,3 +67,18 @@ def test_empresa_nueva_crea_catalogo_base_monedas(db):
 
     assert monedas.filter(codigo="CLP", es_base=True, activa=True).exists()
     assert monedas.filter(codigo="USD", activa=True).exists()
+
+
+@pytest.mark.django_db
+def test_logo_path_usa_nombre_empresa_slug(db):
+    empresa = Empresa.objects.create(nombre="Mi Empresa SPA", rut="44444444-4", email="logo@test.com")
+
+    assert empresa._build_logo_path() == "empresas/mi-empresa-spa/logo.webp"
+
+
+@pytest.mark.django_db
+def test_logo_path_fallback_id_si_no_hay_nombre(db):
+    empresa = Empresa.objects.create(nombre="EMPRESA BASE", rut="55555555-5", email="logo2@test.com")
+    empresa.nombre = ""
+
+    assert empresa._build_logo_path() == f"empresas/empresa-{empresa.id}/logo.webp"

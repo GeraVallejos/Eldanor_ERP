@@ -3,6 +3,7 @@ import { toast } from 'sonner'
 import { api } from '@/api/client'
 import { normalizeApiError } from '@/api/errors'
 import Button from '@/components/ui/Button'
+import { usePermissions } from '@/modules/shared/auth/usePermission'
 
 function normalizeListResponse(data) {
   if (Array.isArray(data)) {
@@ -15,6 +16,7 @@ function normalizeListResponse(data) {
 }
 
 function ProductosListasPrecioPage() {
+  const permissions = usePermissions(['PRODUCTOS.CREAR', 'PRODUCTOS.EDITAR'])
   const [listas, setListas] = useState([])
   const [items, setItems] = useState([])
   const [productos, setProductos] = useState([])
@@ -65,6 +67,10 @@ function ProductosListasPrecioPage() {
 
   const createLista = async (event) => {
     event.preventDefault()
+    if (!permissions['PRODUCTOS.CREAR']) {
+      toast.error('No tiene permiso para crear listas de precio.')
+      return
+    }
     try {
       await api.post('/listas-precio/', formLista, { suppressGlobalErrorToast: true })
       toast.success('Lista de precio creada.')
@@ -77,6 +83,10 @@ function ProductosListasPrecioPage() {
 
   const createItem = async (event) => {
     event.preventDefault()
+    if (!permissions['PRODUCTOS.EDITAR']) {
+      toast.error('No tiene permiso para editar listas de precio.')
+      return
+    }
     try {
       await api.post('/listas-precio-items/', {
         lista: selectedLista,
@@ -96,7 +106,7 @@ function ProductosListasPrecioPage() {
     <section className="space-y-4">
       <div>
         <h2 className="text-2xl font-semibold">Listas de precio</h2>
-        <p className="text-sm text-muted-foreground">Gestione listas comerciales y valores especÃ­ficos por producto.</p>
+        <p className="text-sm text-muted-foreground">Gestione listas comerciales y valores especificos por producto.</p>
       </div>
 
       <form className="flex flex-col gap-3 rounded-md border border-border bg-card p-4 md:flex-row md:items-end" onSubmit={createLista}>
@@ -163,7 +173,7 @@ function ProductosListasPrecioPage() {
                   </thead>
                   <tbody>
                     {itemsListaSeleccionada.length === 0 ? (
-                      <tr><td className="px-3 py-3 text-muted-foreground" colSpan={2}>La lista seleccionada no tiene Ã­tems.</td></tr>
+                      <tr><td className="px-3 py-3 text-muted-foreground" colSpan={2}>La lista seleccionada no tiene items.</td></tr>
                     ) : (
                       itemsListaSeleccionada.map((item) => (
                         <tr key={item.id} className="border-t border-border">

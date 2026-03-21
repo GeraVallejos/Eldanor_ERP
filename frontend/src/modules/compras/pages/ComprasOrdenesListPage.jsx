@@ -6,24 +6,29 @@ import { normalizeApiError } from '@/api/errors'
 import Button from '@/components/ui/Button'
 import DocumentActionsDialog from '@/components/ui/DocumentActionsDialog'
 import MenuButton from '@/components/ui/MenuButton'
+import TablePagination from '@/components/ui/TablePagination'
 import { buttonVariants } from '@/components/ui/buttonVariants'
 import { formatDateChile, getChileDateSuffix } from '@/lib/dateTimeFormat'
 import { formatCurrencyCLP, normalizeObjectNumericFields } from '@/lib/numberFormat'
-import TablePagination from '@/components/ui/TablePagination'
 import { useTableSorting } from '@/lib/tableSorting'
+import { useResponsiveTablePageSize } from '@/lib/useResponsiveTablePageSize'
 import { cn } from '@/lib/utils'
 import { downloadExcelFile } from '@/modules/shared/exports/downloadExcelFile'
 import { downloadSimpleTablePdf } from '@/modules/shared/exports/downloadSimpleTablePdf'
+import { usePermissions } from '@/modules/shared/auth/usePermission'
+
+const canCrearDocumento = (orden) => ['BORRADOR', 'ENVIADA', 'PARCIAL'].includes(String(orden?.estado))
+const canCrearRecepcion = (orden) => ['ENVIADA', 'PARCIAL'].includes(String(orden?.estado))
+const canEnviarOrden = (orden, p) => p['COMPRAS.APROBAR'] && orden?.estado === 'BORRADOR'
+const canEditarOrden = (orden, p) => p['COMPRAS.EDITAR'] && orden?.estado === 'BORRADOR'
+const canAnularOrden = (orden, p) => p['COMPRAS.ANULAR'] && !['CANCELADA', 'RECIBIDA'].includes(String(orden?.estado))
+const canCorregirOrden = (orden, p) => p['COMPRAS.EDITAR'] && !['BORRADOR', 'CANCELADA'].includes(String(orden?.estado)) && !orden?.tiene_documentos_activos
+const canDuplicarOrden = (p) => p['COMPRAS.CREAR']
+const canEliminarOrden = (orden, p) => p['COMPRAS.BORRAR'] && !orden?.tiene_documentos
 
 function normalizeListResponse(data) {
-  if (Array.isArray(data)) {
-    return data
-  }
-
-  if (Array.isArray(data?.results)) {
-    return data.results
-  }
-
+  if (Array.isArray(data)) return data
+  if (Array.isArray(data?.results)) return data.results
   return []
 }
 
@@ -32,7 +37,9 @@ function formatMoney(value) {
 }
 
 function ComprasOrdenesListPage() {
+  const pageSize = useResponsiveTablePageSize({ reservedHeight: 450 })
   const navigate = useNavigate()
+  const permissions = usePermissions(['COMPRAS.CREAR', 'COMPRAS.EDITAR', 'COMPRAS.APROBAR', 'COMPRAS.ANULAR', 'COMPRAS.BORRAR'])
   const [status, setStatus] = useState('idle')
   const [ordenes, setOrdenes] = useState([])
   const [documentos, setDocumentos] = useState([])
@@ -46,91 +53,65 @@ function ComprasOrdenesListPage() {
   const [actionItem, setActionItem] = useState(null)
   const [actionReason, setActionReason] = useState('')
 
-  const loadData = async () => {
-    setStatus('loading')
-    try {
-      const [{ data: ordenesData }, { data: documentosData }, { data: proveedoresData }, { data: contactosData }] = await Promise.all([
-        api.get('/ordenes-compra/', { suppressGlobalErrorToast: true }),
-        api.get('/documentos-compra/', { suppressGlobalErrorToast: true }),
-        api.get('/proveedores/', { suppressGlobalErrorToast: true }),
-        api.get('/contactos/', { suppressGlobalErrorToast: true }),
-      ])
-
-      setOrdenes(normalizeListResponse(ordenesData))
-      setDocumentos(normalizeListResponse(documentosData))
-      setProveedores(normalizeListResponse(proveedoresData))
-      setContactos(normalizeListResponse(contactosData))
-      setStatus('succeeded')
-    } catch (error) {
-      setStatus('failed')
-      toast.error(normalizeApiError(error, { fallback: 'No se pudieron cargar las ordenes de compra.' }))
-    }
-  }
-
   useEffect(() => {
-    const timeoutId = setTimeout(() => {
-      void loadData()
+    const timeoutId = setTimeout(async () => {
+      setStatus('loading')
+      try {
+        const [{ data: ordenesData }, { data: documentosData }, { data: proveedoresData }, { data: contactosData }] =
+          await Promise.all([
+            api.get('/ordenes-compra/', { suppressGlobalErrorToast: true }),
+            api.get('/documentos-compra/', { suppressGlobalErrorToast: true }),
+            api.get('/proveedores/', { suppressGlobalErrorToast: true }),
+            api.get('/contactos/', { suppressGlobalErrorToast: true }),
+          ])
+        setOrdenes(normalizeListResponse(ordenesData))
+        setDocumentos(normalizeListResponse(documentosData))
+        setProveedores(normalizeListResponse(proveedoresData))
+        setContactos(normalizeListResponse(contactosData))
+        setStatus('succeeded')
+      } catch (error) {
+        setStatus('failed')
+        toast.error(normalizeApiError(error, { fallback: 'No se pudieron cargar las ordenes de compra.' }))
+      }
     }, 0)
-
     return () => clearTimeout(timeoutId)
   }, [])
 
   const proveedorById = useMemo(() => {
     const map = new Map()
-    proveedores.forEach((proveedor) => {
-      map.set(String(proveedor.id), proveedor)
-    })
+    proveedores.forEach((item) => map.set(String(item.id), item))
     return map
   }, [proveedores])
 
   const contactoById = useMemo(() => {
     const map = new Map()
-    contactos.forEach((contacto) => {
-      map.set(String(contacto.id), contacto)
-    })
+    contactos.forEach((item) => map.set(String(item.id), item))
     return map
   }, [contactos])
 
   const ultimoDocumentoByOrdenId = useMemo(() => {
     const map = new Map()
     documentos.forEach((doc) => {
-      if (!doc?.orden_compra) {
-        return
-      }
-
+      if (!doc?.orden_compra) return
       const key = String(doc.orden_compra)
       const prev = map.get(key)
       if (!prev) {
         map.set(key, doc)
         return
       }
-
       const prevTs = Date.parse(prev?.creado_en || '') || 0
       const docTs = Date.parse(doc?.creado_en || '') || 0
-      if (docTs >= prevTs) {
-        map.set(key, doc)
-      }
+      if (docTs >= prevTs) map.set(key, doc)
     })
-
     return map
   }, [documentos])
 
   const filteredOrdenes = useMemo(() => {
     const query = search.trim().toLowerCase()
-
     return ordenes.filter((orden) => {
-      if (estadoFilter === 'ACTIVAS' && orden.estado === 'CANCELADA') {
-        return false
-      }
-
-      if (estadoFilter !== 'ACTIVAS' && estadoFilter !== 'ALL' && orden.estado !== estadoFilter) {
-        return false
-      }
-
-      if (!query) {
-        return true
-      }
-
+      if (estadoFilter === 'ACTIVAS' && orden.estado === 'CANCELADA') return false
+      if (estadoFilter !== 'ACTIVAS' && estadoFilter !== 'ALL' && orden.estado !== estadoFilter) return false
+      if (!query) return true
       const proveedor = proveedorById.get(String(orden.proveedor))
       const contacto = contactoById.get(String(proveedor?.contacto))
       const numero = String(orden.numero || '').toLowerCase()
@@ -140,41 +121,42 @@ function ComprasOrdenesListPage() {
     })
   }, [ordenes, search, proveedorById, contactoById, estadoFilter])
 
-  const { paginatedRows: paginatedOrdenes, toggleSort, getSortIndicator, currentPage, totalPages, totalRows, pageSize, nextPage, prevPage } = useTableSorting(filteredOrdenes, {
-    accessors: {
-      creado_en: (orden) => orden.creado_en,
-      numero: (orden) => orden.numero,
-      proveedor: (orden) => {
-        const proveedor = proveedorById.get(String(orden.proveedor))
-        const contacto = contactoById.get(String(proveedor?.contacto))
-        return contacto?.nombre || ''
+  const { paginatedRows: paginatedOrdenes, toggleSort, getSortIndicator, currentPage, totalPages, totalRows, nextPage, prevPage } =
+    useTableSorting(filteredOrdenes, {
+      accessors: {
+        creado_en: (orden) => orden.creado_en,
+        numero: (orden) => orden.numero,
+        proveedor: (orden) => {
+          const proveedor = proveedorById.get(String(orden.proveedor))
+          const contacto = contactoById.get(String(proveedor?.contacto))
+          return contacto?.nombre || ''
+        },
+        fecha_emision: (orden) => orden.fecha_emision,
+        estado: (orden) => orden.estado,
+        total: (orden) => Number(orden.total || 0),
       },
-      fecha_emision: (orden) => orden.fecha_emision,
-      estado: (orden) => orden.estado,
-      total: (orden) => Number(orden.total || 0),
-    },
-    pageSize: 10,
-    initialKey: 'creado_en',
-    initialDirection: 'desc',
-  })
+      pageSize,
+      initialKey: 'creado_en',
+      initialDirection: 'desc',
+    })
+
+  const closeActionDialog = () => {
+    setActionDialogOpen(false)
+    setActionItem(null)
+    setActionType(null)
+    setActionReason('')
+  }
 
   const updateEstado = async (orden, action) => {
     setUpdatingId(orden.id)
     try {
       const { data } = await api.post(`/ordenes-compra/${orden.id}/${action}/`, {}, { suppressGlobalErrorToast: true })
       setOrdenes((prev) => prev.map((row) => (String(row.id) === String(orden.id) ? { ...row, ...data } : row)))
-      const msgMap = {
-        anular: 'Orden anulada correctamente.',
-        enviar: 'Orden enviada correctamente.',
-      }
-      toast.success(msgMap[action] || 'Orden actualizada correctamente.')
+      toast.success(action === 'anular' ? 'Orden anulada correctamente.' : 'Orden enviada correctamente.')
     } catch (error) {
-      const fallback =
-        action === 'anular'
-          ? 'No se puede anular la orden. Verifique si tiene documentos de compra activos asociados.'
-          : action === 'enviar'
-          ? 'No se puede enviar la orden. Asegurese de tener al menos un item.'
-          : 'No se pudo actualizar la orden.'
+      const fallback = action === 'anular'
+        ? 'No se puede anular la orden. Verifique si tiene documentos de compra activos asociados.'
+        : 'No se puede enviar la orden. Asegurese de tener al menos un item.'
       toast.error(normalizeApiError(error, { fallback }))
     } finally {
       setUpdatingId(null)
@@ -183,7 +165,6 @@ function ComprasOrdenesListPage() {
 
   const handleDeleteConfirm = async () => {
     if (!actionItem || actionType !== 'eliminar') return
-
     setUpdatingId(actionItem.id)
     try {
       await api.post(`/ordenes-compra/${actionItem.id}/eliminar_sin_documentos/`, {}, { suppressGlobalErrorToast: true })
@@ -197,23 +178,8 @@ function ComprasOrdenesListPage() {
     }
   }
 
-  const openActionDialog = (orden, action) => {
-    setActionItem(orden)
-    setActionType(action)
-    setActionReason('')
-    setActionDialogOpen(true)
-  }
-
-  const closeActionDialog = () => {
-    setActionDialogOpen(false)
-    setActionItem(null)
-    setActionType(null)
-    setActionReason('')
-  }
-
   const handleActionConfirm = async () => {
     if (!actionItem || !actionType) return
-
     if (actionType === 'eliminar') {
       await handleDeleteConfirm()
       return
@@ -222,24 +188,16 @@ function ComprasOrdenesListPage() {
     setUpdatingId(actionItem.id)
     try {
       if (actionType === 'corregir') {
-        const response = await api.post(
-          `/ordenes-compra/${actionItem.id}/corregir/`,
-          { motivo: actionReason.trim() },
-          { suppressGlobalErrorToast: true },
-        )
+        const response = await api.post(`/ordenes-compra/${actionItem.id}/corregir/`, { motivo: actionReason.trim() }, { suppressGlobalErrorToast: true })
         setOrdenes((prev) => [...prev, response.data])
-        toast.success('Orden corregida. Se creó un nuevo borrador.')
+        toast.success('Orden corregida. Se creo un nuevo borrador.')
         closeActionDialog()
       } else if (actionType === 'duplicar') {
         const [{ data: ordenData }, { data: itemsData }] = await Promise.all([
           api.get(`/ordenes-compra/${actionItem.id}/`, { suppressGlobalErrorToast: true }),
           api.get('/ordenes-compra-items/', { suppressGlobalErrorToast: true }),
         ])
-
-        const scopedItems = normalizeListResponse(itemsData).filter(
-          (row) => String(row.orden_compra) === String(actionItem.id),
-        )
-
+        const scopedItems = normalizeListResponse(itemsData).filter((row) => String(row.orden_compra) === String(actionItem.id))
         closeActionDialog()
         navigate('/compras/ordenes/nuevo', {
           state: {
@@ -262,7 +220,7 @@ function ComprasOrdenesListPage() {
         })
       }
     } catch (error) {
-      toast.error(normalizeApiError(error, { fallback: 'No se pudo completar la acción.' }))
+      toast.error(normalizeApiError(error, { fallback: 'No se pudo completar la accion.' }))
     } finally {
       setUpdatingId(null)
     }
@@ -271,10 +229,7 @@ function ComprasOrdenesListPage() {
   const getTodaySuffix = () => getChileDateSuffix()
 
   const handleExportExcel = async () => {
-    if (filteredOrdenes.length === 0) {
-      return
-    }
-
+    if (filteredOrdenes.length === 0) return
     await downloadExcelFile({
       sheetName: 'OrdenesCompra',
       fileName: `ordenes_compra_${getTodaySuffix()}.xlsx`,
@@ -300,10 +255,7 @@ function ComprasOrdenesListPage() {
   }
 
   const handleExportPdf = async () => {
-    if (filteredOrdenes.length === 0) {
-      return
-    }
-
+    if (filteredOrdenes.length === 0) return
     await downloadSimpleTablePdf({
       title: 'Ordenes de compra',
       fileName: `ordenes_compra_${getTodaySuffix()}.pdf`,
@@ -311,13 +263,7 @@ function ComprasOrdenesListPage() {
       rows: filteredOrdenes.map((orden) => {
         const proveedor = proveedorById.get(String(orden.proveedor))
         const contacto = contactoById.get(String(proveedor?.contacto))
-        return [
-          orden.numero || '-',
-          contacto?.nombre || '-',
-          formatDateChile(orden.fecha_emision),
-          orden.estado || '-',
-          formatMoney(orden.total),
-        ]
+        return [orden.numero || '-', contacto?.nombre || '-', formatDateChile(orden.fecha_emision), orden.estado || '-', formatMoney(orden.total)]
       }),
     })
   }
@@ -326,7 +272,6 @@ function ComprasOrdenesListPage() {
     <section className="space-y-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h2 className="text-2xl font-semibold">Ordenes de compra</h2>
-
         <div className="grid grid-cols-1 gap-2 sm:flex sm:items-center sm:justify-end sm:gap-2">
           <MenuButton
             variant="outline"
@@ -337,12 +282,17 @@ function ComprasOrdenesListPage() {
             onExportPdf={handleExportPdf}
             disabled={filteredOrdenes.length === 0}
           />
-          <Link
-            to="/compras/ordenes/nuevo"
-            className={cn(buttonVariants({ variant: 'default', size: 'md', fullWidth: true }), 'sm:w-auto')}
-          >
-            Nueva orden
+          <Link to="/compras/reportes" className={cn(buttonVariants({ variant: 'outline', size: 'md', fullWidth: true }), 'sm:w-auto')}>
+            Ver reportes
           </Link>
+          <Link to="/compras/resumen" className={cn(buttonVariants({ variant: 'outline', size: 'md', fullWidth: true }), 'sm:w-auto')}>
+            Ver resumen
+          </Link>
+          {permissions['COMPRAS.CREAR'] ? (
+            <Link to="/compras/ordenes/nuevo" className={cn(buttonVariants({ variant: 'default', size: 'md', fullWidth: true }), 'sm:w-auto')}>
+              Nueva orden
+            </Link>
+          ) : null}
         </div>
       </div>
 
@@ -356,14 +306,9 @@ function ComprasOrdenesListPage() {
             className="w-full rounded-md border border-input bg-background px-3 py-2 pr-9 text-sm"
           />
         </div>
-
         <label className="w-full text-sm sm:max-w-xs">
           Estado
-          <select
-            value={estadoFilter}
-            onChange={(event) => setEstadoFilter(event.target.value)}
-            className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
-          >
+          <select value={estadoFilter} onChange={(event) => setEstadoFilter(event.target.value)} className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2">
             <option value="ACTIVAS">Activas</option>
             <option value="ALL">Todas</option>
             <option value="BORRADOR">Borrador</option>
@@ -382,215 +327,59 @@ function ComprasOrdenesListPage() {
           <table className="min-w-full text-sm">
             <thead className="bg-muted/40">
               <tr>
-                <th className="px-3 py-2 text-left font-medium">
-                  <button type="button" onClick={() => toggleSort('numero')} className="inline-flex items-center gap-1 hover:text-primary">
-                    Numero <span className="text-xs text-muted-foreground">{getSortIndicator('numero')}</span>
-                  </button>
-                </th>
-                <th className="px-3 py-2 text-left font-medium">
-                  <button type="button" onClick={() => toggleSort('proveedor')} className="inline-flex items-center gap-1 hover:text-primary">
-                    Proveedor <span className="text-xs text-muted-foreground">{getSortIndicator('proveedor')}</span>
-                  </button>
-                </th>
-                <th className="px-3 py-2 text-left font-medium">
-                  <button type="button" onClick={() => toggleSort('fecha_emision')} className="inline-flex items-center gap-1 hover:text-primary">
-                    Fecha emision <span className="text-xs text-muted-foreground">{getSortIndicator('fecha_emision')}</span>
-                  </button>
-                </th>
-                <th className="px-3 py-2 text-left font-medium">
-                  <button type="button" onClick={() => toggleSort('estado')} className="inline-flex items-center gap-1 hover:text-primary">
-                    Estado <span className="text-xs text-muted-foreground">{getSortIndicator('estado')}</span>
-                  </button>
-                </th>
-                <th className="px-3 py-2 text-left font-medium">
-                  <button type="button" onClick={() => toggleSort('total')} className="inline-flex items-center gap-1 hover:text-primary">
-                    Total <span className="text-xs text-muted-foreground">{getSortIndicator('total')}</span>
-                  </button>
-                </th>
+                <th className="px-3 py-2 text-left font-medium"><button type="button" onClick={() => toggleSort('numero')} className="inline-flex items-center gap-1 hover:text-primary">Numero <span className="text-xs text-muted-foreground">{getSortIndicator('numero')}</span></button></th>
+                <th className="px-3 py-2 text-left font-medium"><button type="button" onClick={() => toggleSort('proveedor')} className="inline-flex items-center gap-1 hover:text-primary">Proveedor <span className="text-xs text-muted-foreground">{getSortIndicator('proveedor')}</span></button></th>
+                <th className="px-3 py-2 text-left font-medium"><button type="button" onClick={() => toggleSort('fecha_emision')} className="inline-flex items-center gap-1 hover:text-primary">Fecha emision <span className="text-xs text-muted-foreground">{getSortIndicator('fecha_emision')}</span></button></th>
+                <th className="px-3 py-2 text-left font-medium"><button type="button" onClick={() => toggleSort('estado')} className="inline-flex items-center gap-1 hover:text-primary">Estado <span className="text-xs text-muted-foreground">{getSortIndicator('estado')}</span></button></th>
+                <th className="px-3 py-2 text-left font-medium"><button type="button" onClick={() => toggleSort('total')} className="inline-flex items-center gap-1 hover:text-primary">Total <span className="text-xs text-muted-foreground">{getSortIndicator('total')}</span></button></th>
                 <th className="px-3 py-2 text-left font-medium">Documentos asociados</th>
                 <th className="px-3 py-2 text-right font-medium">Acciones</th>
               </tr>
             </thead>
             <tbody>
               {filteredOrdenes.length === 0 ? (
-                <tr>
-                  <td className="px-3 py-3 text-muted-foreground" colSpan={7}>
-                    No hay ordenes de compra.
-                  </td>
-                </tr>
-              ) : (
-                paginatedOrdenes.map((orden) => {
-                  const proveedor = proveedorById.get(String(orden.proveedor))
-                  const contacto = contactoById.get(String(proveedor?.contacto))
-                  const ultimoDocAsociado = ultimoDocumentoByOrdenId.get(String(orden.id))
-
-                  return (
-                    <tr key={orden.id} className="border-t border-border">
-                      <td className="px-3 py-2">{orden.numero}</td>
-                      <td className="px-3 py-2">{contacto?.nombre || '-'}</td>
-                      <td className="px-3 py-2">{formatDateChile(orden.fecha_emision)}</td>
-                      <td className="px-3 py-2">{orden.estado || '-'}</td>
-                      <td className="px-3 py-2">{formatMoney(orden.total)}</td>
-                      <td className="px-3 py-2">
-                        {!ultimoDocAsociado ? (
-                          <span className="text-muted-foreground">-</span>
-                        ) : (
-                          <Link
-                            to={`/compras/documentos/${ultimoDocAsociado.id}`}
-                            className="text-xs text-primary hover:underline"
-                          >
-                            {ultimoDocAsociado.tipo_documento === 'FACTURA_COMPRA'
-                              ? 'FAC'
-                              : ultimoDocAsociado.tipo_documento === 'BOLETA_COMPRA'
-                              ? 'BOL'
-                              : 'GUIA'}
-                            {' '}
-                            {ultimoDocAsociado.serie ? `${ultimoDocAsociado.serie}-` : ''}
-                            {ultimoDocAsociado.folio || 'S/F'}
-                            {' '}
-                            ({ultimoDocAsociado.estado || '-'})
-                          </Link>
-                        )}
-                      </td>
-                      <td className="px-3 py-2">
-                        <div className="flex justify-end gap-2">
-                          <Link
-                            to={`/compras/ordenes/${orden.id}`}
-                            className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'h-8 px-3 text-xs')}
-                          >
-                            Ver
-                          </Link>
-
-                          <Link
-                            to={`/compras/ordenes/${orden.id}/trazabilidad`}
-                            className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'h-8 px-3 text-xs')}
-                          >
-                            Seguimiento
-                          </Link>
-
-                          {orden.estado === 'BORRADOR' ? (
-                            <Link
-                              to={`/compras/documentos/nuevo?orden_compra=${orden.id}`}
-                              className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'h-8 px-3 text-xs')}
-                            >
-                              Crear doc
-                            </Link>
-                          ) : null}
-
-                          {orden.estado === 'ENVIADA' || orden.estado === 'PARCIAL' ? (
-                            <Link
-                              to={`/compras/documentos/nuevo?orden_compra=${orden.id}`}
-                              className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'h-8 px-3 text-xs')}
-                            >
-                              Crear doc
-                            </Link>
-                          ) : null}
-
-                          {orden.estado === 'ENVIADA' || orden.estado === 'PARCIAL' ? (
-                            <Link
-                              to={`/compras/recepciones/nuevo?orden_compra=${orden.id}`}
-                              className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'h-8 px-3 text-xs')}
-                            >
-                              Recepcion
-                            </Link>
-                          ) : null}
-
-                          {orden.estado === 'BORRADOR' ? (
-                            <Button
-                              size="sm"
-                              variant="default"
-                              className="h-8 px-3 text-xs"
-                              disabled={updatingId === orden.id}
-                              onClick={() => updateEstado(orden, 'enviar')}
-                            >
-                              Enviar
-                            </Button>
-                          ) : null}
-
-                          {orden.estado === 'BORRADOR' ? (
-                            <Link
-                              to={`/compras/ordenes/${orden.id}/editar`}
-                              className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'h-8 px-3 text-xs')}
-                            >
-                              Editar
-                            </Link>
-                          ) : null}
-
-                          {orden.estado !== 'CANCELADA' && orden.estado !== 'RECIBIDA' ? (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="border-destructive/40 text-destructive hover:bg-destructive/10"
-                              disabled={updatingId === orden.id}
-                              onClick={() => updateEstado(orden, 'anular')}
-                            >
-                              Anular
-                            </Button>
-                          ) : null}
-
-                          {orden.estado !== 'BORRADOR' && orden.estado !== 'CANCELADA' && !orden.tiene_documentos_activos ? (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="text-xs"
-                              disabled={updatingId === orden.id}
-                              onClick={() => openActionDialog(orden, 'corregir')}
-                            >
-                              Corregir
-                            </Button>
-                          ) : null}
-
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="text-xs"
-                            disabled={updatingId === orden.id}
-                            onClick={() => openActionDialog(orden, 'duplicar')}
-                          >
-                            Duplicar
-                          </Button>
-
-                          {!orden.tiene_documentos ? (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="border-destructive/40 text-destructive hover:bg-destructive/10"
-                              disabled={updatingId === orden.id}
-                              onClick={() => openActionDialog(orden, 'eliminar')}
-                            >
-                              Eliminar
-                            </Button>
-                          ) : null}
-                        </div>
-                      </td>
-                    </tr>
-                  )
-                })
-              )}
+                <tr><td className="px-3 py-3 text-muted-foreground" colSpan={7}>No hay ordenes de compra.</td></tr>
+              ) : paginatedOrdenes.map((orden) => {
+                const proveedor = proveedorById.get(String(orden.proveedor))
+                const contacto = contactoById.get(String(proveedor?.contacto))
+                const ultimoDocAsociado = ultimoDocumentoByOrdenId.get(String(orden.id))
+                return (
+                  <tr key={orden.id} className="border-t border-border">
+                    <td className="px-3 py-2">{orden.numero}</td>
+                    <td className="px-3 py-2">{contacto?.nombre || '-'}</td>
+                    <td className="px-3 py-2">{formatDateChile(orden.fecha_emision)}</td>
+                    <td className="px-3 py-2">{orden.estado || '-'}</td>
+                    <td className="px-3 py-2">{formatMoney(orden.total)}</td>
+                    <td className="px-3 py-2">
+                      {!ultimoDocAsociado ? <span className="text-muted-foreground">-</span> : (
+                        <Link to={`/compras/documentos/${ultimoDocAsociado.id}`} className="text-xs text-primary hover:underline">
+                          {ultimoDocAsociado.tipo_documento === 'FACTURA_COMPRA' ? 'FAC' : ultimoDocAsociado.tipo_documento === 'BOLETA_COMPRA' ? 'BOL' : 'GUIA'} {ultimoDocAsociado.serie ? `${ultimoDocAsociado.serie}-` : ''}{ultimoDocAsociado.folio || 'S/F'} ({ultimoDocAsociado.estado || '-'})
+                        </Link>
+                      )}
+                    </td>
+                    <td className="px-3 py-2"><div className="flex justify-end gap-2">
+                      <Link to={`/compras/ordenes/${orden.id}`} className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'h-8 px-3 text-xs')}>Ver</Link>
+                      <Link to={`/compras/ordenes/${orden.id}/trazabilidad`} className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'h-8 px-3 text-xs')}>Seguimiento</Link>
+                      {permissions['COMPRAS.CREAR'] && canCrearDocumento(orden) ? <Link to={`/compras/documentos/nuevo?orden_compra=${orden.id}`} className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'h-8 px-3 text-xs')}>Crear doc</Link> : null}
+                      {permissions['COMPRAS.CREAR'] && canCrearRecepcion(orden) ? <Link to={`/compras/recepciones/nuevo?orden_compra=${orden.id}`} className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'h-8 px-3 text-xs')}>Recepcion</Link> : null}
+                      {canEnviarOrden(orden, permissions) ? <Button size="sm" variant="default" className="h-8 px-3 text-xs" disabled={updatingId === orden.id} onClick={() => updateEstado(orden, 'enviar')}>Enviar</Button> : null}
+                      {canEditarOrden(orden, permissions) ? <Link to={`/compras/ordenes/${orden.id}/editar`} className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'h-8 px-3 text-xs')}>Editar</Link> : null}
+                      {canAnularOrden(orden, permissions) ? <Button size="sm" variant="outline" className="border-destructive/40 text-destructive hover:bg-destructive/10" disabled={updatingId === orden.id} onClick={() => updateEstado(orden, 'anular')}>Anular</Button> : null}
+                      {canCorregirOrden(orden, permissions) ? <Button size="sm" variant="outline" className="text-xs" disabled={updatingId === orden.id} onClick={() => { setActionItem(orden); setActionType('corregir'); setActionReason(''); setActionDialogOpen(true) }}>Corregir</Button> : null}
+                      {canDuplicarOrden(permissions) ? <Button size="sm" variant="outline" className="text-xs" disabled={updatingId === orden.id} onClick={() => { setActionItem(orden); setActionType('duplicar'); setActionReason(''); setActionDialogOpen(true) }}>Duplicar</Button> : null}
+                      {canEliminarOrden(orden, permissions) ? <Button size="sm" variant="outline" className="border-destructive/40 text-destructive hover:bg-destructive/10" disabled={updatingId === orden.id} onClick={() => { setActionItem(orden); setActionType('eliminar'); setActionReason(''); setActionDialogOpen(true) }}>Eliminar</Button> : null}
+                    </div></td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         </div>
       ) : null}
 
-      <TablePagination
-        currentPage={currentPage}
-        totalPages={totalPages}
-        totalRows={totalRows}
-        pageSize={pageSize}
-        onPrev={prevPage}
-        onNext={nextPage}
-      />
+      <TablePagination currentPage={currentPage} totalPages={totalPages} totalRows={totalRows} pageSize={pageSize} onPrev={prevPage} onNext={nextPage} />
 
-      <DocumentActionsDialog
-        actionType={actionType}
-        open={actionDialogOpen}
-        loading={Boolean(actionItem && updatingId === actionItem.id)}
-        value={actionReason}
-        onChange={setActionReason}
-        item={actionItem}
-        onCancel={closeActionDialog}
-        onConfirm={handleActionConfirm}
-      />
+      <DocumentActionsDialog actionType={actionType} open={actionDialogOpen} loading={Boolean(actionItem && updatingId === actionItem.id)} value={actionReason} onChange={setActionReason} item={actionItem} onCancel={closeActionDialog} onConfirm={handleActionConfirm} />
     </section>
   )
 }

@@ -12,6 +12,7 @@ import { cn } from '@/lib/utils'
 import { getProductosCatalog } from '@/modules/productos/services/productosCatalogCache'
 import { downloadExcelFile } from '@/modules/shared/exports/downloadExcelFile'
 import { downloadSimpleTablePdf } from '@/modules/shared/exports/downloadSimpleTablePdf'
+import { usePermissions } from '@/modules/shared/auth/usePermission'
 
 const TIPO_LABELS = {
   GUIA_RECEPCION: 'Guia de recepcion',
@@ -35,8 +36,13 @@ function formatMoney(value) {
   return formatCurrencyCLP(value)
 }
 
+function canEditarDocumento(documento, permissions) {
+  return permissions['COMPRAS.EDITAR'] && documento?.estado === 'BORRADOR'
+}
+
 function ComprasDocumentosDetailPage() {
   const { id } = useParams()
+  const permissions = usePermissions(['COMPRAS.EDITAR'])
   const [status, setStatus] = useState('idle')
   const [documento, setDocumento] = useState(null)
   const [items, setItems] = useState([])
@@ -218,12 +224,14 @@ function ComprasDocumentosDetailPage() {
             onExportExcel={handleExportExcel}
             onExportPdf={handleExportPdf}
           />
-          <Link
-            to={`/compras/documentos/${documento.id}/editar`}
-            className={cn(buttonVariants({ variant: 'outline', size: 'md', fullWidth: true }), 'sm:w-auto')}
-          >
-            Editar
-          </Link>
+          {canEditarDocumento(documento, permissions) ? (
+            <Link
+              to={`/compras/documentos/${documento.id}/editar`}
+              className={cn(buttonVariants({ variant: 'outline', size: 'md', fullWidth: true }), 'sm:w-auto')}
+            >
+              Editar
+            </Link>
+          ) : null}
           <Link
             to="/compras/documentos"
             className={cn(buttonVariants({ variant: 'default', size: 'md', fullWidth: true }), 'sm:w-auto')}

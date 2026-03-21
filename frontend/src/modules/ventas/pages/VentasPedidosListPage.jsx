@@ -15,6 +15,18 @@ import { downloadExcelFile } from '@/modules/shared/exports/downloadExcelFile'
 import { downloadSimpleTablePdf } from '@/modules/shared/exports/downloadSimpleTablePdf'
 import { usePermissions } from '@/modules/shared/auth/usePermission'
 
+function canEditPedido(row, permissions) {
+  return permissions[VENTAS_PERMISSIONS.editar] && row?.estado === 'BORRADOR'
+}
+
+function canConfirmPedido(row, permissions) {
+  return permissions[VENTAS_PERMISSIONS.aprobar] && row?.estado === 'BORRADOR'
+}
+
+function canAnularPedido(row, permissions) {
+  return permissions[VENTAS_PERMISSIONS.anular] && ['BORRADOR', 'CONFIRMADO', 'EN_PROCESO'].includes(String(row?.estado))
+}
+
 function VentasPedidosListPage() {
   const navigate = useNavigate()
   const [search, setSearch] = useState('')
@@ -29,9 +41,6 @@ function VentasPedidosListPage() {
     VENTAS_PERMISSIONS.anular,
   ])
   const canCreate = permissions[VENTAS_PERMISSIONS.crear]
-  const canEdit = permissions[VENTAS_PERMISSIONS.editar]
-  const canApprove = permissions[VENTAS_PERMISSIONS.aprobar]
-  const canAnular = permissions[VENTAS_PERMISSIONS.anular]
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
@@ -165,7 +174,7 @@ function VentasPedidosListPage() {
                 <td className="px-3 py-2 text-right">{formatMoney(row.total)}</td>
                 <td className="px-3 py-2">
                   <div className="flex justify-end gap-2">
-                    {canEdit ? (
+                    {canEditPedido(row, permissions) ? (
                       <Link
                         to={`/ventas/pedidos/${row.id}/editar`}
                         className={cn(buttonVariants({ variant: 'outline', size: 'sm' }))}
@@ -173,7 +182,7 @@ function VentasPedidosListPage() {
                         Editar
                       </Link>
                     ) : null}
-                    {canApprove && row.estado === 'BORRADOR' ? (
+                    {canConfirmPedido(row, permissions) ? (
                       <Button
                         size="sm"
                         disabled={updatingId === row.id}
@@ -182,7 +191,7 @@ function VentasPedidosListPage() {
                         Confirmar
                       </Button>
                     ) : null}
-                    {canAnular && ['BORRADOR', 'CONFIRMADO', 'EN_PROCESO'].includes(String(row.estado)) ? (
+                    {canAnularPedido(row, permissions) ? (
                       <Button
                         variant="destructive"
                         size="sm"

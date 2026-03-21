@@ -109,7 +109,7 @@ describe('ventas/forms integration', () => {
       http.get('*/pedidos-venta/', async () => HttpResponse.json([{ id: 'ped-1', numero: 'PV-001' }])),
       http.get('*/productos/', async () => HttpResponse.json([{ id: 'prod-1', nombre: 'Producto 1', precio_referencia: 1000, impuesto: 1 }])),
       http.get('*/impuestos/', async () => HttpResponse.json([{ id: 1, nombre: 'IVA', porcentaje: 19 }])),
-      http.get('*/guias-despacho/g-1/', async () => HttpResponse.json({ id: 'g-1', numero: 'GD-001', cliente: 'cli-1', cliente_nombre: 'Cliente 1', pedido_venta: 'ped-1', fecha_despacho: '2026-03-19', observaciones: '' })),
+      http.get('*/guias-despacho/g-1/', async () => HttpResponse.json({ id: 'g-1', numero: 'GD-001', estado: 'BORRADOR', cliente: 'cli-1', cliente_nombre: 'Cliente 1', pedido_venta: 'ped-1', fecha_despacho: '2026-03-19', observaciones: '' })),
       http.get('*/guias-despacho-items/', async () => HttpResponse.json([{ id: 'gi-1', guia_despacho: 'g-1', producto: 'prod-1', descripcion: 'Producto 1', cantidad: 1, precio_unitario: 1000, impuesto: 1, impuesto_porcentaje: 19 }])),
       http.patch('*/guias-despacho/g-1/', async ({ request }) => {
         guiaPatchPayload = await request.json()
@@ -218,7 +218,7 @@ describe('ventas/forms integration', () => {
       http.get('*/facturas-venta/', async () => HttpResponse.json([{ id: 'f-1', numero: 'FV-001' }])),
       http.get('*/facturas-venta-items/', async () => HttpResponse.json([{ id: 'fi-1', factura_venta: 'f-1', producto: 'prod-1', descripcion: 'Producto 1', cantidad: 1, precio_unitario: 1000, descuento: 0, impuesto: 1, impuesto_porcentaje: 19 }])),
       http.get('*/productos/', async () => HttpResponse.json([{ id: 'prod-1', nombre: 'Producto 1', precio_referencia: 1000, impuesto: 1 }])),
-      http.get('*/notas-credito-venta/nc-1/', async () => HttpResponse.json({ id: 'nc-1', numero: 'NC-001', cliente: 'cli-1', factura_venta: 'f-1', fecha_emision: '2026-03-19', motivo: 'Ajuste', observaciones: '' })),
+      http.get('*/notas-credito-venta/nc-1/', async () => HttpResponse.json({ id: 'nc-1', numero: 'NC-001', estado: 'BORRADOR', cliente: 'cli-1', factura_venta: 'f-1', fecha_emision: '2026-03-19', motivo: 'Ajuste', observaciones: '' })),
       http.get('*/notas-credito-venta-items/', async () => HttpResponse.json([{ id: 'nci-1', nota_credito_venta: 'nc-1', factura_item: 'fi-1', producto: 'prod-1', descripcion: 'Producto 1', cantidad: 1, precio_unitario: 1000, descuento: 0, impuesto: 1, impuesto_porcentaje: 19 }])),
       http.patch('*/notas-credito-venta/nc-1/', async ({ request }) => {
         notaPatchPayload = await request.json()
@@ -298,6 +298,30 @@ describe('ventas/forms integration', () => {
     expect(screen.getByRole('button', { name: 'Guardar cambios' })).toBeDisabled()
   })
 
+  it('bloquea edit de guia cuando la guia ya no esta en borrador', async () => {
+    server.use(
+      http.get('*/clientes/', async () => HttpResponse.json([{ id: 'cli-1', nombre: 'Cliente 1' }])),
+      http.get('*/pedidos-venta/', async () => HttpResponse.json([{ id: 'ped-1', numero: 'PV-001' }])),
+      http.get('*/productos/', async () => HttpResponse.json([{ id: 'prod-1', nombre: 'Producto 1', precio_referencia: 1000, impuesto: 1 }])),
+      http.get('*/impuestos/', async () => HttpResponse.json([{ id: 1, nombre: 'IVA', porcentaje: 19 }])),
+      http.get('*/guias-despacho/g-2/', async () => HttpResponse.json({ id: 'g-2', numero: 'GD-002', estado: 'CONFIRMADA', cliente: 'cli-1', pedido_venta: 'ped-1', fecha_despacho: '2026-03-19', observaciones: '' })),
+      http.get('*/guias-despacho-items/', async () => HttpResponse.json([{ id: 'gi-1', guia_despacho: 'g-2', producto: 'prod-1', descripcion: 'Producto 1', cantidad: 1, precio_unitario: 1000, impuesto: 1, impuesto_porcentaje: 19 }])),
+    )
+
+    renderWithProviders(
+      <Routes>
+        <Route path="/ventas/guias/:id/editar" element={<VentasGuiasFormPage />} />
+      </Routes>,
+      {
+        preloadedState: authState(['VENTAS.VER', 'VENTAS.EDITAR']),
+        initialEntries: ['/ventas/guias/g-2/editar'],
+      },
+    )
+
+    expect(await screen.findByText('Solo se pueden editar guias en estado BORRADOR.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Guardar cambios' })).toBeDisabled()
+  })
+
   it('bloquea create de guia cuando no tiene permiso', async () => {
     server.use(
       http.get('*/clientes/', async () => HttpResponse.json([{ id: 'cli-1', nombre: 'Cliente 1' }])),
@@ -337,6 +361,55 @@ describe('ventas/forms integration', () => {
     )
 
     expect(await screen.findByText('No tiene permiso para editar notas de credito.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Guardar cambios' })).toBeDisabled()
+  })
+
+  it('bloquea edit de factura emitida aunque el usuario tenga permiso', async () => {
+    server.use(
+      http.get('*/clientes/', async () => HttpResponse.json([{ id: 'cli-1', nombre: 'Cliente 1' }])),
+      http.get('*/pedidos-venta/', async () => HttpResponse.json([{ id: 'ped-1', numero: 'PV-001' }])),
+      http.get('*/guias-despacho/', async () => HttpResponse.json([{ id: 'g-1', numero: 'GD-001' }])),
+      http.get('*/productos/', async () => HttpResponse.json([{ id: 'prod-1', nombre: 'Producto 1', precio_referencia: 1000, impuesto: 1 }])),
+      http.get('*/impuestos/', async () => HttpResponse.json([{ id: 1, nombre: 'IVA', porcentaje: 19 }])),
+      http.get('*/facturas-venta/f-2/', async () => HttpResponse.json({ id: 'f-2', numero: 'FV-002', estado: 'EMITIDA', cliente: 'cli-1', pedido_venta: 'ped-1', guia_despacho: 'g-1', fecha_emision: '2026-03-19', fecha_vencimiento: '2026-03-20', observaciones: '' })),
+      http.get('*/facturas-venta-items/', async () => HttpResponse.json([{ id: 'fi-1', factura_venta: 'f-2', producto: 'prod-1', descripcion: 'Producto 1', cantidad: 1, precio_unitario: 1000, descuento: 0, impuesto: 1, impuesto_porcentaje: 19 }])),
+    )
+
+    renderWithProviders(
+      <Routes>
+        <Route path="/ventas/facturas/:id/editar" element={<VentasFacturasFormPage />} />
+      </Routes>,
+      {
+        preloadedState: authState(['VENTAS.VER', 'VENTAS.EDITAR']),
+        initialEntries: ['/ventas/facturas/f-2/editar'],
+      },
+    )
+
+    expect(await screen.findByText('Solo se pueden editar facturas en estado BORRADOR.')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Guardar cambios' })).toBeDisabled()
+  })
+
+  it('bloquea edit de nota emitida aunque el usuario tenga permiso', async () => {
+    server.use(
+      http.get('*/clientes/', async () => HttpResponse.json([{ id: 'cli-1', nombre: 'Cliente 1' }])),
+      http.get('*/facturas-venta/', async () => HttpResponse.json([{ id: 'f-1', numero: 'FV-001' }])),
+      http.get('*/facturas-venta-items/', async () => HttpResponse.json([{ id: 'fi-1', factura_venta: 'f-1', producto: 'prod-1', descripcion: 'Producto 1', cantidad: 1, precio_unitario: 1000, descuento: 0, impuesto: 1, impuesto_porcentaje: 19 }])),
+      http.get('*/productos/', async () => HttpResponse.json([{ id: 'prod-1', nombre: 'Producto 1', precio_referencia: 1000, impuesto: 1 }])),
+      http.get('*/notas-credito-venta/nc-2/', async () => HttpResponse.json({ id: 'nc-2', numero: 'NC-002', estado: 'EMITIDA', cliente: 'cli-1', factura_venta: 'f-1', fecha_emision: '2026-03-19', motivo: 'Ajuste', observaciones: '' })),
+      http.get('*/notas-credito-venta-items/', async () => HttpResponse.json([{ id: 'nci-1', nota_credito_venta: 'nc-2', factura_item: 'fi-1', producto: 'prod-1', descripcion: 'Producto 1', cantidad: 1, precio_unitario: 1000, descuento: 0, impuesto: 1, impuesto_porcentaje: 19 }])),
+    )
+
+    renderWithProviders(
+      <Routes>
+        <Route path="/ventas/notas/:id/editar" element={<VentasNotasFormPage />} />
+      </Routes>,
+      {
+        preloadedState: authState(['VENTAS.VER', 'VENTAS.EDITAR']),
+        initialEntries: ['/ventas/notas/nc-2/editar'],
+      },
+    )
+
+    expect(await screen.findByText('Solo se pueden editar notas de credito en estado BORRADOR.')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Guardar cambios' })).toBeDisabled()
   })
 })

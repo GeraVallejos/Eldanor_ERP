@@ -45,4 +45,4 @@ class ConflictError(AppError):
 
     status_code = 409
     default_detail = "Conflicto con el estado actual del recurso."
-    default_error_code = "CONFLICT_ERROR"
+    default_error_code = "CONFLICT"
