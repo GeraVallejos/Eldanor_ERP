@@ -25,6 +25,14 @@ function formatBoolean(value) {
   return value ? 'Si' : 'No'
 }
 
+function formatCostoPromedio(producto) {
+  if (producto?.tipo === 'SERVICIO' || !producto?.maneja_inventario) {
+    return 'No aplica'
+  }
+
+  return formatMoney(producto.costo_promedio)
+}
+
 function TrazabilidadBadge({ children, tone = 'default' }) {
   const toneClassName = {
     default: 'border-border bg-muted/40 text-foreground',
@@ -252,7 +260,7 @@ function ProductosDetailPage() {
             <div className="mt-4 space-y-3">
               <DetailRow label="Estado" value={producto.activo ? 'Activo' : 'Inactivo'} />
               <DetailRow label="Stock actual" value={formatSmartNumber(producto.stock_actual ?? 0, { maximumFractionDigits: 2 })} />
-              <DetailRow label="Costo promedio" value={formatSmartNumber(producto.costo_promedio ?? 0, { maximumFractionDigits: 4 })} />
+              <DetailRow label="Costo promedio" value={formatCostoPromedio(producto)} />
             </div>
           </div>
 

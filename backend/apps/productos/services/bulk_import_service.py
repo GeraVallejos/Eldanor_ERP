@@ -173,8 +173,6 @@ def _resolve_import_empresa(user, empresa):
         "No hay empresa activa para ejecutar la carga masiva.",
         error_code="BULK_IMPORT_NO_EMPRESA",
     )
-
-
 def _registrar_resumen_importacion(*, empresa, user, payload):
     """Registra auditoría y eventos de integración para la carga masiva de productos."""
     DomainEventService.record_event(
@@ -224,6 +222,12 @@ def bulk_import_productos(*, uploaded_file, user, empresa):
         uploaded_file,
         required_headers=["nombre", "sku"],
     )
+
+    if any("stock_actual" in row for _line, row in rows):
+        raise BusinessRuleError(
+            "La columna stock_actual ya no esta soportada. Gestione el stock desde inventario.",
+            error_code="BULK_IMPORT_STOCK_ACTUAL_NO_SOPORTADO",
+        )
 
     sku_candidates = []
     for _line, row in rows:

@@ -89,6 +89,26 @@ class TestInventarioService:
         assert snapshot.stock == Decimal("4.00")
         assert snapshot.valor_stock == Decimal("0.00")
 
+    def test_entrada_sin_costo_unitario_usa_precio_costo_del_maestro(self, empresa, usuario, producto_inventariable):
+        set_current_empresa(empresa)
+        producto_inventariable.precio_costo = Decimal("2500.00")
+        producto_inventariable.save(skip_clean=True, update_fields=["precio_costo"])
+
+        mov = InventarioService.registrar_movimiento(
+            producto_id=producto_inventariable.id,
+            tipo=TipoMovimiento.ENTRADA,
+            cantidad=Decimal("4.00"),
+            referencia="ENTRADA-MAESTRO-1",
+            empresa=empresa,
+            usuario=usuario,
+        )
+
+        producto_inventariable.refresh_from_db()
+        snapshot = InventorySnapshot.all_objects.get(movimiento=mov)
+        assert mov.costo_unitario == Decimal("2500.0000")
+        assert producto_inventariable.costo_promedio == Decimal("2500.0000")
+        assert snapshot.valor_stock == Decimal("10000.00")
+
     def test_no_permite_costo_unitario_negativo(self, empresa, usuario, producto_inventariable):
         set_current_empresa(empresa)
 

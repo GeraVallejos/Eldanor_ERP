@@ -31,6 +31,16 @@ class InventarioService:
         return Decimal(value).quantize(Decimal("0.0001"))
 
     @staticmethod
+    def _resolver_costo_base_producto(producto):
+        """Obtiene el costo base del producto usando costo promedio o precio costo como respaldo."""
+        costo_promedio = Decimal(producto.costo_promedio or 0)
+        if costo_promedio > 0:
+            return InventarioService._cost(costo_promedio)
+
+        precio_costo = Decimal(producto.precio_costo or 0)
+        return InventarioService._cost(precio_costo)
+
+    @staticmethod
     def _validar_cantidad_producto(*, producto, cantidad, field_name="cantidad"):
         """Aplica reglas de fraccionamiento definidas en el maestro del producto."""
         cantidad = Decimal(cantidad)
@@ -506,7 +516,12 @@ class InventarioService:
                     f"Stock insuficiente para {producto.nombre}"
                 )
 
-        costo_movimiento = Decimal(costo_unitario) if costo_unitario is not None else producto.costo_promedio
+        # En el primer ingreso sin historial usamos el costo del maestro para no valorizar a cero.
+        costo_movimiento = (
+            Decimal(costo_unitario)
+            if costo_unitario is not None
+            else InventarioService._resolver_costo_base_producto(producto)
+        )
         costo_movimiento = InventarioService._cost(costo_movimiento)
 
         valor_total = InventarioService._money(Decimal(cantidad) * Decimal(costo_movimiento))

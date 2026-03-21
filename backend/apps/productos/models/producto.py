@@ -138,6 +138,7 @@ class Producto(TenantRelationValidationMixin, BaseModel):
         clean_producto(self)  
 
     def save(self, *args, **kwargs):
+        update_fields = kwargs.get("update_fields")
         self.nombre = normalizar_texto(self.nombre)
         self.descripcion = normalizar_texto(self.descripcion)
         # Normalizacion de SKU
@@ -178,6 +179,37 @@ class Producto(TenantRelationValidationMixin, BaseModel):
         if self.usa_series:
             self.usa_lotes = True
             self.permite_decimales = False
+
+        should_sync_cost_from_master = self._state.adding
+        if not should_sync_cost_from_master and self.pk:
+            original = (
+                self.__class__.all_objects
+                .filter(pk=self.pk)
+                .only("precio_costo", "maneja_inventario", "tipo")
+                .first()
+            )
+            if original:
+                should_sync_cost_from_master = any([
+                    original.precio_costo != self.precio_costo,
+                    original.maneja_inventario != self.maneja_inventario,
+                    original.tipo != self.tipo,
+                ])
+
+        if update_fields is not None:
+            relevant_update_fields = {"precio_costo", "maneja_inventario", "tipo"}
+            should_sync_cost_from_master = should_sync_cost_from_master and bool(
+                set(update_fields) & relevant_update_fields
+            )
+
+        if should_sync_cost_from_master and self.tipo == TipoProducto.PRODUCTO and self.maneja_inventario:
+            tiene_historial_inventario = False
+            if self.pk:
+                from apps.inventario.models.movimiento import MovimientoInventario
+
+                tiene_historial_inventario = MovimientoInventario.all_objects.filter(producto=self).exists()
+
+            if not tiene_historial_inventario:
+                self.costo_promedio = self.precio_costo or 0
 
         super().save(*args, **kwargs)
 

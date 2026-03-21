@@ -1,12 +1,14 @@
 import { zodResolver } from '@hookform/resolvers/zod'
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useForm, useWatch } from 'react-hook-form'
 import { useDispatch, useSelector } from 'react-redux'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { z } from 'zod'
 import ApiContractError from '@/components/ui/ApiContractError'
 import Button from '@/components/ui/Button'
+import { api } from '@/api/client'
+import { normalizeApiError } from '@/api/errors'
 import { buttonVariants } from '@/components/ui/buttonVariants'
 import { cn } from '@/lib/utils'
 import { invalidateProductosCatalogCache } from '@/modules/productos/services/productosCatalogCache'
@@ -101,6 +103,8 @@ const productoSchema = z
   })
 
 function ProductosCreatePage() {
+  const { id } = useParams()
+  const navigate = useNavigate()
   const dispatch = useDispatch()
   const categorias = useSelector(selectCategorias)
   const impuestos = useSelector(selectImpuestos)
@@ -108,6 +112,10 @@ function ProductosCreatePage() {
   const catalogError = useSelector(selectCatalogError)
   const createStatus = useSelector(selectCreateProductoStatus)
   const createError = useSelector(selectCreateProductoError)
+  const [pageStatus, setPageStatus] = useState('idle')
+  const [submitting, setSubmitting] = useState(false)
+  const [submitError, setSubmitError] = useState(null)
+  const isEditMode = Boolean(id)
 
   const {
     register,
@@ -147,6 +155,56 @@ function ProductosCreatePage() {
       dispatch(fetchCatalogosProducto())
     }
   }, [catalogStatus, dispatch])
+
+  useEffect(() => {
+    let active = true
+
+    const loadProducto = async () => {
+      if (!isEditMode) {
+        setPageStatus('idle')
+        return
+      }
+
+      setPageStatus('loading')
+      try {
+        const { data } = await api.get(`/productos/${id}/`, { suppressGlobalErrorToast: true })
+        if (!active) {
+          return
+        }
+        reset({
+          nombre: data.nombre || '',
+          descripcion: data.descripcion || '',
+          sku: data.sku || '',
+          tipo: data.tipo || 'PRODUCTO',
+          categoria: data.categoria ? String(data.categoria) : '',
+          impuesto: data.impuesto ? String(data.impuesto) : '',
+          precio_referencia: Number(data.precio_referencia ?? 0),
+          precio_costo: Number(data.precio_costo ?? 0),
+          unidad_medida: data.unidad_medida || 'UN',
+          permite_decimales: Boolean(data.permite_decimales ?? true),
+          maneja_inventario: Boolean(data.maneja_inventario),
+          stock_minimo: Number(data.stock_minimo ?? 0),
+          usa_lotes: Boolean(data.usa_lotes),
+          usa_series: Boolean(data.usa_series),
+          usa_vencimiento: Boolean(data.usa_vencimiento),
+          activo: Boolean(data.activo),
+        })
+        setPageStatus('succeeded')
+      } catch (error) {
+        if (!active) {
+          return
+        }
+        setPageStatus('failed')
+        toast.error(normalizeApiError(error, { fallback: 'No se pudo cargar el producto.' }))
+      }
+    }
+
+    void loadProducto()
+
+    return () => {
+      active = false
+    }
+  }, [id, isEditMode, reset])
 
   useEffect(() => {
     if (tipoSeleccionado === 'SERVICIO') {
@@ -193,6 +251,8 @@ function ProductosCreatePage() {
 
   const onSubmit = async (values) => {
     dispatch(resetCreateProductoState())
+    setSubmitError(null)
+    setSubmitting(true)
 
     const payload = applyOperationalRules({
       ...values,
@@ -203,9 +263,19 @@ function ProductosCreatePage() {
     })
 
     try {
-      await dispatch(createProducto(payload)).unwrap()
+      if (isEditMode) {
+        await api.patch(`/productos/${id}/`, payload, { suppressGlobalErrorToast: true })
+      } else {
+        await dispatch(createProducto(payload)).unwrap()
+      }
       invalidateProductosCatalogCache()
-      toast.success('Producto creado correctamente.')
+      toast.success(isEditMode ? 'Producto actualizado correctamente.' : 'Producto creado correctamente.')
+      dispatch(fetchProductos())
+      dispatch(resetCreateProductoState())
+      if (isEditMode) {
+        navigate(`/productos/${id}`)
+        return
+      }
       reset({
         nombre: '',
         descripcion: '',
@@ -224,19 +294,50 @@ function ProductosCreatePage() {
         usa_vencimiento: false,
         activo: true,
       })
-      dispatch(fetchProductos())
-      dispatch(resetCreateProductoState())
     } catch (error) {
+      if (isEditMode) {
+        const normalizedError = normalizeApiError(error, { fallback: 'No se pudo actualizar el producto.' })
+        setSubmitError(error?.response?.data || null)
+        toast.error(normalizedError)
+        return
+      }
       toast.error(typeof error === 'string' ? error : (error?.message || 'No se pudo crear el producto.'))
+    } finally {
+      setSubmitting(false)
     }
+  }
+
+  if (isEditMode && pageStatus === 'loading') {
+    return <p className="text-sm text-muted-foreground">Cargando producto...</p>
+  }
+
+  if (isEditMode && pageStatus === 'failed') {
+    return (
+      <section className="space-y-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-2xl font-semibold">Editar producto</h2>
+            <p className="text-sm text-muted-foreground">No fue posible cargar el producto solicitado.</p>
+          </div>
+          <Link
+            to="/productos"
+            className={cn(buttonVariants({ variant: 'outline', size: 'md' }))}
+          >
+            Volver al listado
+          </Link>
+        </div>
+      </section>
+    )
   }
 
   return (
     <section className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-2xl font-semibold">Nuevo producto</h2>
-          <p className="text-sm text-muted-foreground">Formulario seguro para alta de productos.</p>
+          <h2 className="text-2xl font-semibold">{isEditMode ? 'Editar producto' : 'Nuevo producto'}</h2>
+          <p className="text-sm text-muted-foreground">
+            {isEditMode ? 'Actualice los datos maestros del producto.' : 'Formulario seguro para alta de productos.'}
+          </p>
         </div>
         <Link
           to="/productos"
@@ -248,8 +349,8 @@ function ProductosCreatePage() {
 
       <form className="rounded-md border border-border bg-card p-4" onSubmit={handleSubmit(onSubmit)}>
         <ApiContractError
-          error={typeof createError === 'object' ? createError : null}
-          title="No se pudo crear el producto."
+          error={typeof (isEditMode ? submitError : createError) === 'object' ? (isEditMode ? submitError : createError) : null}
+          title={isEditMode ? 'No se pudo actualizar el producto.' : 'No se pudo crear el producto.'}
         />
         <div className="grid gap-3 md:grid-cols-2">
           <label className="text-sm">
@@ -370,11 +471,13 @@ function ProductosCreatePage() {
 
         <div className="mt-4">
           <Button
-            disabled={createStatus === 'loading'}
+            disabled={submitting || (createStatus === 'loading' && !isEditMode)}
             size="md"
             type="submit"
           >
-            {createStatus === 'loading' ? 'Guardando...' : 'Crear producto'}
+            {submitting || (createStatus === 'loading' && !isEditMode)
+              ? 'Guardando...'
+              : (isEditMode ? 'Guardar cambios' : 'Crear producto')}
           </Button>
         </div>
       </form>

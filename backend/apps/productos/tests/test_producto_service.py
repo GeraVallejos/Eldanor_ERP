@@ -45,6 +45,7 @@ class TestProductoService:
         )
 
         assert producto.pk is not None
+        assert producto.costo_promedio == Decimal("1000")
         assert DomainEvent.all_objects.filter(
             empresa=empresa,
             aggregate_type="Producto",
