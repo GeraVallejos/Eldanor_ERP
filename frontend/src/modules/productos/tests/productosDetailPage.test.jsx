@@ -33,6 +33,72 @@ describe('productos/ProductosDetailPage', () => {
           costo_promedio: '31000.0000',
         }),
       ),
+      http.get('*/productos/prod-1/trazabilidad/', async () =>
+        HttpResponse.json({
+          producto_id: 'prod-1',
+          fecha_referencia: '2026-03-21',
+          resumen: {
+            listas_configuradas: 1,
+            listas_activas_vigentes: 1,
+            pedidos_venta: 1,
+            documentos_compra: 1,
+          },
+          listas_precio: [
+            {
+              id: 'lista-1',
+              nombre: 'Lista Cliente Norte',
+              cliente_nombre: 'Constructora Norte',
+              moneda_codigo: 'CLP',
+              precio: '44990.00',
+              descuento_maximo: '5.00',
+              fecha_desde: '2026-03-01',
+              fecha_hasta: null,
+              activa: true,
+              prioridad: 10,
+              esta_vigente: true,
+            },
+          ],
+          uso_documentos: {
+            pedidos_venta: {
+              cantidad: 1,
+              ultimos: [
+                {
+                  id: 'pv-1',
+                  numero: 'PV-001',
+                  estado: 'CONFIRMADO',
+                  fecha_emision: '2026-03-20',
+                  cliente_nombre: 'Constructora Norte',
+                  lista_precio_nombre: 'Lista Cliente Norte',
+                  cantidad: '2.00',
+                  precio_unitario: '44990.00',
+                },
+              ],
+            },
+            documentos_compra: {
+              cantidad: 1,
+              ultimos: [
+                {
+                  id: 'dc-1',
+                  tipo_documento: 'FACTURA_COMPRA',
+                  folio: '1234',
+                  estado: 'CONFIRMADO',
+                  fecha_emision: '2026-03-18',
+                  proveedor_nombre: 'Proveedor Industrial',
+                  cantidad: '4.00',
+                  precio_unitario: '32000.00',
+                },
+              ],
+            },
+          },
+          alertas: [
+            {
+              codigo: 'SIN_STOCK_MINIMO',
+              nivel: 'warning',
+              detalle: 'El producto maneja inventario, pero no tiene stock minimo definido.',
+            },
+          ],
+        }),
+      ),
     )
 
     renderWithProviders(
@@ -63,6 +129,10 @@ describe('productos/ProductosDetailPage', () => {
 
     expect(await screen.findByText('Taladro industrial')).toBeInTheDocument()
     expect(screen.getByText(/El stock actual y el costo promedio se administran desde inventario/i)).toBeInTheDocument()
+    expect(screen.getByText('Trazabilidad comercial')).toBeInTheDocument()
+    expect(screen.getByText('Lista Cliente Norte')).toBeInTheDocument()
+    expect(screen.getByText(/Pedidos de venta recientes \(1\)/i)).toBeInTheDocument()
+    expect(screen.getByText('SIN_STOCK_MINIMO')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Ir a inventario' })).toBeInTheDocument()
   })
 })

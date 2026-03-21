@@ -4,6 +4,7 @@ import { toast } from 'sonner'
 import { api } from '@/api/client'
 import { normalizeApiError } from '@/api/errors'
 import { buttonVariants } from '@/components/ui/buttonVariants'
+import { formatDateChile } from '@/lib/dateTimeFormat'
 import { formatCurrencyCLP, formatSmartNumber } from '@/lib/numberFormat'
 import { cn } from '@/lib/utils'
 
@@ -24,10 +25,39 @@ function formatBoolean(value) {
   return value ? 'Si' : 'No'
 }
 
+function TrazabilidadBadge({ children, tone = 'default' }) {
+  const toneClassName = {
+    default: 'border-border bg-muted/40 text-foreground',
+    warning: 'border-amber-200 bg-amber-50 text-amber-900',
+    info: 'border-sky-200 bg-sky-50 text-sky-900',
+  }
+
+  return (
+    <span className={cn('inline-flex items-center rounded-full border px-2.5 py-1 text-xs font-medium', toneClassName[tone] || toneClassName.default)}>
+      {children}
+    </span>
+  )
+}
+
 function ProductosDetailPage() {
   const { id } = useParams()
   const [status, setStatus] = useState('idle')
   const [producto, setProducto] = useState(null)
+  const [trazabilidad, setTrazabilidad] = useState({
+    resumen: {
+      listas_configuradas: 0,
+      listas_activas_vigentes: 0,
+      pedidos_venta: 0,
+      documentos_compra: 0,
+    },
+    listas_precio: [],
+    uso_documentos: {
+      pedidos_venta: { cantidad: 0, ultimos: [] },
+      documentos_compra: { cantidad: 0, ultimos: [] },
+    },
+    alertas: [],
+  })
+  const [trazabilidadDisponible, setTrazabilidadDisponible] = useState(true)
 
   useEffect(() => {
     let active = true
@@ -35,11 +65,29 @@ function ProductosDetailPage() {
     const loadProducto = async () => {
       setStatus('loading')
       try {
-        const { data } = await api.get(`/productos/${id}/`, { suppressGlobalErrorToast: true })
+        const [productoResult, trazabilidadResult] = await Promise.allSettled([
+          api.get(`/productos/${id}/`, { suppressGlobalErrorToast: true }),
+          api.get(`/productos/${id}/trazabilidad/`, { suppressGlobalErrorToast: true }),
+        ])
+
         if (!active) {
           return
         }
-        setProducto(data)
+
+        if (productoResult.status !== 'fulfilled') {
+          throw productoResult.reason
+        }
+
+        setProducto(productoResult.value.data)
+
+        if (trazabilidadResult.status === 'fulfilled') {
+          setTrazabilidad(trazabilidadResult.value.data)
+          setTrazabilidadDisponible(true)
+        } else {
+          setTrazabilidadDisponible(false)
+          toast.error('No se pudo cargar la trazabilidad comercial del producto.')
+        }
+
         setStatus('succeeded')
       } catch (error) {
         if (!active) {
@@ -138,6 +186,64 @@ function ProductosDetailPage() {
               <DetailRow label="Stock minimo" value={formatSmartNumber(producto.stock_minimo ?? 0, { maximumFractionDigits: 2 })} />
             </div>
           </div>
+
+          <div className="rounded-xl border border-border bg-card p-5">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <h3 className="text-lg font-semibold">Trazabilidad comercial</h3>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Resumen de listas de precio y referencias documentales del producto.
+                </p>
+              </div>
+              <TrazabilidadBadge tone="info">
+                {trazabilidad.resumen.listas_activas_vigentes} listas vigentes
+              </TrazabilidadBadge>
+            </div>
+
+            {!trazabilidadDisponible ? (
+              <p className="mt-4 text-sm text-muted-foreground">
+                La trazabilidad comercial no estuvo disponible en esta carga.
+              </p>
+            ) : (
+              <>
+                <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                  <DetailRow label="Listas configuradas" value={trazabilidad.resumen.listas_configuradas} />
+                  <DetailRow label="Listas vigentes" value={trazabilidad.resumen.listas_activas_vigentes} />
+                  <DetailRow label="Pedidos de venta" value={trazabilidad.resumen.pedidos_venta} />
+                  <DetailRow label="Documentos de compra" value={trazabilidad.resumen.documentos_compra} />
+                </div>
+
+                <div className="mt-4 space-y-3">
+                  <h4 className="text-sm font-semibold">Listas de precio donde el producto esta configurado</h4>
+                  {trazabilidad.listas_precio.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No hay listas de precio configuradas para este producto.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {trazabilidad.listas_precio.map((item) => (
+                        <div key={item.id} className="rounded-lg border border-border bg-background/70 p-3">
+                          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                            <div>
+                              <p className="text-sm font-medium text-foreground">{item.nombre}</p>
+                              <p className="mt-1 text-xs text-muted-foreground">
+                                {item.cliente_nombre || 'Lista general'} · {item.moneda_codigo || '-'} · Desde {formatDateChile(item.fecha_desde)}
+                                {item.fecha_hasta ? ` hasta ${formatDateChile(item.fecha_hasta)}` : ''}
+                              </p>
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                              <TrazabilidadBadge tone={item.esta_vigente ? 'info' : 'default'}>
+                                {item.esta_vigente ? 'Vigente' : 'No vigente'}
+                              </TrazabilidadBadge>
+                              <TrazabilidadBadge>Precio {formatMoney(item.precio)}</TrazabilidadBadge>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
         </div>
 
         <div className="space-y-4">
@@ -160,6 +266,73 @@ function ProductosDetailPage() {
               <Link to="/inventario/resumen" className={cn(buttonVariants({ variant: 'outline', size: 'md' }))}>
                 Ir a inventario
               </Link>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-border bg-card p-5">
+            <h3 className="text-lg font-semibold">Alertas de configuracion</h3>
+            <div className="mt-4 space-y-3">
+              {!trazabilidadDisponible ? (
+                <p className="text-sm text-muted-foreground">No fue posible evaluar alertas en esta carga.</p>
+              ) : trazabilidad.alertas.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No se detectaron alertas de configuracion para este producto.</p>
+              ) : (
+                trazabilidad.alertas.map((alerta) => (
+                  <div key={alerta.codigo} className="rounded-lg border border-border bg-background/70 p-3">
+                    <div className="flex items-center gap-2">
+                      <TrazabilidadBadge tone={alerta.nivel === 'warning' ? 'warning' : 'info'}>
+                        {alerta.codigo}
+                      </TrazabilidadBadge>
+                    </div>
+                    <p className="mt-2 text-sm text-foreground">{alerta.detalle}</p>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-border bg-card p-5">
+            <h3 className="text-lg font-semibold">Uso en documentos</h3>
+            <div className="mt-4 space-y-4">
+              <div>
+                <p className="text-sm font-medium text-foreground">
+                  Pedidos de venta recientes ({trazabilidad.uso_documentos.pedidos_venta.cantidad})
+                </p>
+                <div className="mt-2 space-y-2">
+                  {trazabilidad.uso_documentos.pedidos_venta.ultimos.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">Sin referencias en pedidos de venta.</p>
+                  ) : (
+                    trazabilidad.uso_documentos.pedidos_venta.ultimos.map((row) => (
+                      <div key={row.id} className="rounded-lg border border-border bg-background/70 p-3">
+                        <p className="text-sm font-medium text-foreground">{row.numero || 'Pedido sin numero'}</p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {row.cliente_nombre || 'Sin cliente'} · {formatDateChile(row.fecha_emision)} · {row.estado || '-'}
+                        </p>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              <div>
+                <p className="text-sm font-medium text-foreground">
+                  Documentos de compra recientes ({trazabilidad.uso_documentos.documentos_compra.cantidad})
+                </p>
+                <div className="mt-2 space-y-2">
+                  {trazabilidad.uso_documentos.documentos_compra.ultimos.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">Sin referencias en documentos de compra.</p>
+                  ) : (
+                    trazabilidad.uso_documentos.documentos_compra.ultimos.map((row) => (
+                      <div key={row.id} className="rounded-lg border border-border bg-background/70 p-3">
+                        <p className="text-sm font-medium text-foreground">{row.tipo_documento || 'Documento'} {row.folio || '-'}</p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {row.proveedor_nombre || 'Sin proveedor'} · {formatDateChile(row.fecha_emision)} · {row.estado || '-'}
+                        </p>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
             </div>
           </div>
         </div>

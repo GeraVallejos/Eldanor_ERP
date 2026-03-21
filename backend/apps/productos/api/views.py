@@ -25,6 +25,7 @@ from django.utils.dateparse import parse_date
 from apps.productos.services.bulk_import_service import bulk_import_productos, build_productos_bulk_template
 from apps.productos.services.precio_service import PrecioComercialService
 from apps.productos.services.producto_service import ProductoService
+from apps.productos.services.producto_trazabilidad_service import ProductoTrazabilidadService
 
 
 
@@ -43,6 +44,7 @@ class ProductoViewSet(TenantViewSetMixin, ModelViewSet ):
         "bulk_import": Acciones.CREAR,
         "bulk_template": Acciones.VER,
         "precio": Acciones.VER,
+        "trazabilidad": Acciones.VER,
     }
 
     @staticmethod
@@ -65,7 +67,7 @@ class ProductoViewSet(TenantViewSetMixin, ModelViewSet ):
         queryset = super().get_queryset()
         # En acciones de detalle permitimos acceder a inactivos para roles avanzados,
         # evitando 404 al reactivar productos previamente anulados.
-        if self.action in {"retrieve", "update", "partial_update", "destroy", "precio"}:
+        if self.action in {"retrieve", "update", "partial_update", "destroy", "precio", "trazabilidad"}:
             if self._user_can_access_inactive():
                 return queryset
             return queryset.filter(activo=True)
@@ -183,6 +185,18 @@ class ProductoViewSet(TenantViewSetMixin, ModelViewSet ):
                 "lista_id": str(resultado["lista"].id) if resultado["lista"] else None,
             }
         )
+
+    @action(detail=True, methods=["get"], url_path="trazabilidad")
+    def trazabilidad(self, request, pk=None):
+        self._set_tenant_context()
+        producto = self.get_object()
+        fecha = parse_date(request.query_params.get("fecha") or "") or date.today()
+        payload = ProductoTrazabilidadService.obtener_resumen(
+            empresa=self.get_empresa(),
+            producto=producto,
+            fecha=fecha,
+        )
+        return Response(payload)
 
 
 class CategoriaViewSet(TenantViewSetMixin, ModelViewSet):
