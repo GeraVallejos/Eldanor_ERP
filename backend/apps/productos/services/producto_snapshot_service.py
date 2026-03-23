@@ -114,30 +114,34 @@ class ProductoSnapshotService:
     ):
         """Registra una nueva version inmutable del maestro despues de un cambio funcional."""
         producto_id_ref = producto_id_ref or producto.id
-        ultima_version = (
-            ProductoSnapshot.all_objects
-            .filter(empresa=empresa, producto_id_ref=producto_id_ref)
-            .order_by("-version")
-            .values_list("version", flat=True)
-            .first()
-        ) or 0
+        for _ in range(3):
+            ultima_version = (
+                ProductoSnapshot.all_objects
+                .select_for_update()
+                .filter(empresa=empresa, producto_id_ref=producto_id_ref)
+                .order_by("-version")
+                .values_list("version", flat=True)
+                .first()
+            ) or 0
 
-        try:
-            return ProductoSnapshot.all_objects.create(
-                empresa=empresa,
-                creado_por=usuario,
-                producto=producto if attach_producto and getattr(producto, "pk", None) else None,
-                producto_id_ref=producto_id_ref,
-                version=ultima_version + 1,
-                event_type=event_type,
-                changes=changes or {},
-                snapshot=snapshot or {},
-            )
-        except IntegrityError as exc:
-            raise ConflictError(
-                "No se pudo registrar la nueva version del maestro de producto.",
-                meta={"source": "ProductoSnapshotService"},
-            ) from exc
+            try:
+                return ProductoSnapshot.all_objects.create(
+                    empresa=empresa,
+                    creado_por=usuario,
+                    producto=producto if attach_producto and getattr(producto, "pk", None) else None,
+                    producto_id_ref=producto_id_ref,
+                    version=ultima_version + 1,
+                    event_type=event_type,
+                    changes=changes or {},
+                    snapshot=snapshot or {},
+                )
+            except IntegrityError:
+                continue
+
+        raise ConflictError(
+            "No se pudo registrar la nueva version del maestro de producto.",
+            meta={"source": "ProductoSnapshotService"},
+        )
 
     @classmethod
     def comparar_versiones(cls, *, empresa, producto_id, version_desde, version_hasta):

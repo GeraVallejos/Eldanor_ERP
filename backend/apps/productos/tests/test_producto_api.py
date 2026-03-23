@@ -8,13 +8,13 @@ from rest_framework import status
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from apps.auditoria.services import AuditoriaService
-from apps.compras.models import DocumentoCompraProveedor, DocumentoCompraProveedorItem
+from apps.compras.models import DocumentoCompraProveedor, DocumentoCompraProveedorItem, EstadoDocumentoCompra
 from apps.contactos.models import Cliente, Contacto, Proveedor
 from apps.core.models import UserEmpresa
 from apps.inventario.models import StockProducto
 from apps.productos.models import ListaPrecio, ListaPrecioItem, Producto, ProductoSnapshot
 from apps.tesoreria.models import Moneda
-from apps.ventas.models import PedidoVenta, PedidoVentaItem
+from apps.ventas.models import EstadoPedidoVenta, PedidoVenta, PedidoVentaItem
 
 
 def _token(user):
@@ -373,6 +373,7 @@ class TestProductoApi:
             impuestos=Decimal("0"),
             total=Decimal("7500"),
             moneda=moneda_base,
+            estado=EstadoDocumentoCompra.CONFIRMADO,
         )
         DocumentoCompraProveedorItem.objects.create(
             empresa=empresa,
@@ -455,6 +456,125 @@ class TestProductoApi:
         assert "GOB_SIN_CATEGORIA" in hallazgos
         assert "GOB_SIN_IMPUESTO" in hallazgos
         assert "GOB_STOCK_MINIMO_NO_DEFINIDO" in hallazgos
+
+    def test_trazabilidad_excluye_documentos_borrador_y_anulado(self, api_client, owner_usuario, empresa, proveedor):
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
+        cliente_contacto = Contacto.objects.create(
+            empresa=empresa,
+            nombre="Cliente Estados",
+            rut="12121212-9",
+            email="cliente_estados@test.com",
+        )
+        cliente = Cliente.objects.create(empresa=empresa, contacto=cliente_contacto)
+        producto = Producto.objects.create(
+            empresa=empresa,
+            nombre="Producto Estados",
+            sku="P-EST-001",
+            precio_referencia=Decimal("4900"),
+            maneja_inventario=True,
+            stock_minimo=Decimal("1"),
+        )
+
+        pedido_borrador = PedidoVenta.objects.create(
+            empresa=empresa,
+            creado_por=owner_usuario,
+            cliente=cliente,
+            numero="PV-BORR-001",
+            fecha_emision=date.today(),
+            estado=EstadoPedidoVenta.BORRADOR,
+            subtotal=Decimal("4900"),
+            impuestos=Decimal("0"),
+            total=Decimal("4900"),
+        )
+        PedidoVentaItem.objects.create(
+            empresa=empresa,
+            creado_por=owner_usuario,
+            pedido_venta=pedido_borrador,
+            producto=producto,
+            descripcion="Producto borrador",
+            cantidad=Decimal("1"),
+            precio_unitario=Decimal("4900"),
+            subtotal=Decimal("4900"),
+            total=Decimal("4900"),
+        )
+
+        documento_borrador = DocumentoCompraProveedor.objects.create(
+            empresa=empresa,
+            creado_por=owner_usuario,
+            tipo_documento="FACTURA_COMPRA",
+            proveedor=proveedor,
+            folio="FAC-BORR-001",
+            fecha_emision=date.today(),
+            fecha_recepcion=date.today(),
+            subtotal_neto=Decimal("4900"),
+            impuestos=Decimal("0"),
+            total=Decimal("4900"),
+            estado=EstadoDocumentoCompra.BORRADOR,
+        )
+        DocumentoCompraProveedorItem.objects.create(
+            empresa=empresa,
+            creado_por=owner_usuario,
+            documento=documento_borrador,
+            producto=producto,
+            cantidad=Decimal("1"),
+            precio_unitario=Decimal("4900"),
+            subtotal=Decimal("4900"),
+        )
+
+        resp = api_client.get(reverse("producto-trazabilidad", args=[producto.id]))
+
+        assert resp.status_code == status.HTTP_200_OK, resp.data
+        assert resp.data["resumen"]["pedidos_venta"] == 0
+        assert resp.data["resumen"]["documentos_compra"] == 0
+
+    def test_gobernanza_no_penaliza_uso_en_borrador_sin_lista_vigente(self, api_client, owner_usuario, empresa):
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
+        cliente_contacto = Contacto.objects.create(
+            empresa=empresa,
+            nombre="Cliente Gobernanza Estados",
+            rut="13131313-6",
+            email="cliente_gob_estados@test.com",
+        )
+        cliente = Cliente.objects.create(empresa=empresa, contacto=cliente_contacto)
+        producto = Producto.objects.create(
+            empresa=empresa,
+            creado_por=owner_usuario,
+            nombre="Producto Gobernanza Estados",
+            sku="PGE-001",
+            precio_referencia=Decimal("3200"),
+            maneja_inventario=True,
+            stock_minimo=Decimal("1"),
+            impuesto=None,
+        )
+
+        pedido_borrador = PedidoVenta.objects.create(
+            empresa=empresa,
+            creado_por=owner_usuario,
+            cliente=cliente,
+            numero="PV-GOB-001",
+            fecha_emision=date.today(),
+            estado=EstadoPedidoVenta.BORRADOR,
+            subtotal=Decimal("3200"),
+            impuestos=Decimal("0"),
+            total=Decimal("3200"),
+        )
+        PedidoVentaItem.objects.create(
+            empresa=empresa,
+            creado_por=owner_usuario,
+            pedido_venta=pedido_borrador,
+            producto=producto,
+            descripcion="Producto gobernanza borrador",
+            cantidad=Decimal("1"),
+            precio_unitario=Decimal("3200"),
+            subtotal=Decimal("3200"),
+            total=Decimal("3200"),
+        )
+
+        resp = api_client.get(reverse("producto-gobernanza", args=[producto.id]))
+
+        assert resp.status_code == status.HTTP_200_OK, resp.data
+        hallazgos = {item["codigo"] for item in resp.data["hallazgos"]}
+        assert "GOB_SIN_PRECIO_VIGENTE" not in hallazgos
 
     def test_versiones_producto_expone_snapshots_ordenados(self, api_client, owner_usuario, empresa):
         api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")

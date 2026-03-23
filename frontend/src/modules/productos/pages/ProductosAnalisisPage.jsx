@@ -1,7 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
-import { api } from '@/api/client'
 import { normalizeApiError } from '@/api/errors'
 import Button from '@/components/ui/Button'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
@@ -9,6 +8,8 @@ import { buttonVariants } from '@/components/ui/buttonVariants'
 import { formatDateChile } from '@/lib/dateTimeFormat'
 import { formatCurrencyCLP } from '@/lib/numberFormat'
 import { cn } from '@/lib/utils'
+import { productosApi } from '@/modules/productos/store/api'
+import { useProductoAnalisis } from '@/modules/productos/store/hooks'
 import { usePermissions } from '@/modules/shared/auth/usePermission'
 
 function DetailRow({ label, value }) {
@@ -45,84 +46,38 @@ function TrazabilidadBadge({ children, tone = 'default' }) {
 function ProductosAnalisisPage() {
   const { id } = useParams()
   const permissions = usePermissions(['PRODUCTOS.EDITAR'])
-  const [status, setStatus] = useState('idle')
-  const [producto, setProducto] = useState(null)
-  const [historial, setHistorial] = useState({ count: 0, results: [] })
-  const [versiones, setVersiones] = useState({ count: 0, results: [] })
-  const [gobernanza, setGobernanza] = useState({ score: 0, estado: 'RIESGO', readiness: {}, hallazgos: [], metricas: {} })
+  const {
+    status,
+    producto,
+    trazabilidad,
+    historial,
+    versiones,
+    gobernanza,
+    reload,
+    setProducto,
+  } = useProductoAnalisis(id)
   const [comparacionVersiones, setComparacionVersiones] = useState(null)
   const [compareVersionDesde, setCompareVersionDesde] = useState('')
   const [compareVersionHasta, setCompareVersionHasta] = useState('')
   const [compareLoading, setCompareLoading] = useState(false)
   const [restoreTarget, setRestoreTarget] = useState(null)
   const [restoreLoading, setRestoreLoading] = useState(false)
-  const [trazabilidad, setTrazabilidad] = useState({
-    resumen: {
-      listas_configuradas: 0,
-      listas_activas_vigentes: 0,
-      pedidos_venta: 0,
-      documentos_compra: 0,
-    },
-    listas_precio: [],
-    uso_documentos: {
-      pedidos_venta: { cantidad: 0, ultimos: [] },
-      documentos_compra: { cantidad: 0, ultimos: [] },
-    },
-    alertas: [],
-  })
+  const hasShownLoadErrorRef = useRef(false)
   const historialPreview = historial.results.slice(0, 5)
   const versionesPreview = versiones.results.slice(0, 5)
   const versionActual = versiones.results[0]?.version ?? null
 
   useEffect(() => {
-    let active = true
-
-    const loadAnalisis = async () => {
-      setStatus('loading')
-      try {
-        const [productoResult, trazabilidadResult, historialResult, versionesResult, gobernanzaResult] = await Promise.allSettled([
-          api.get(`/productos/${id}/`, { suppressGlobalErrorToast: true }),
-          api.get(`/productos/${id}/trazabilidad/`, { suppressGlobalErrorToast: true }),
-          api.get(`/productos/${id}/historial/`, { suppressGlobalErrorToast: true }),
-          api.get(`/productos/${id}/versiones/`, { suppressGlobalErrorToast: true }),
-          api.get(`/productos/${id}/gobernanza/`, { suppressGlobalErrorToast: true }),
-        ])
-
-        if (!active) {
-          return
-        }
-
-        if (productoResult.status !== 'fulfilled') {
-          throw productoResult.reason
-        }
-
-        setProducto(productoResult.value.data)
-        setTrazabilidad(trazabilidadResult.status === 'fulfilled' ? trazabilidadResult.value.data : {
-          resumen: { listas_configuradas: 0, listas_activas_vigentes: 0, pedidos_venta: 0, documentos_compra: 0 },
-          listas_precio: [],
-          uso_documentos: { pedidos_venta: { cantidad: 0, ultimos: [] }, documentos_compra: { cantidad: 0, ultimos: [] } },
-          alertas: [],
-        })
-        setHistorial(historialResult.status === 'fulfilled' ? historialResult.value.data : { count: 0, results: [] })
-        setVersiones(versionesResult.status === 'fulfilled' ? versionesResult.value.data : { count: 0, results: [] })
-        setGobernanza(gobernanzaResult.status === 'fulfilled' ? gobernanzaResult.value.data : { score: 0, estado: 'RIESGO', readiness: {}, hallazgos: [], metricas: {} })
-        setStatus('succeeded')
-      } catch (error) {
-        if (!active) {
-          return
-        }
-        setStatus('failed')
-        toast.error(normalizeApiError(error, { fallback: 'No se pudo cargar el analisis del producto.' }))
-      }
+    if (status !== 'failed' || hasShownLoadErrorRef.current) {
+      return
     }
 
-    if (id) {
-      void loadAnalisis()
-    }
+    toast.error('No se pudo cargar el analisis del producto.')
+    hasShownLoadErrorRef.current = true
+  }, [status])
 
-    return () => {
-      active = false
-    }
+  useEffect(() => {
+    hasShownLoadErrorRef.current = false
   }, [id])
 
   useEffect(() => {
@@ -139,10 +94,12 @@ function ProductosAnalisisPage() {
 
     setCompareLoading(true)
     try {
-      const { data } = await api.get(`/productos/${id}/versiones/comparar/`, {
-        params: { version_desde: versionDesde, version_hasta: versionHasta },
-        suppressGlobalErrorToast: true,
-      })
+      const data = await productosApi.executeDetailAction(
+        productosApi.endpoints.productos,
+        id,
+        'versiones/comparar',
+        { params: { version_desde: versionDesde, version_hasta: versionHasta } },
+      )
       setComparacionVersiones(data)
     } catch (error) {
       toast.error(normalizeApiError(error, { fallback: 'No se pudo comparar las versiones del producto.' }))
@@ -152,16 +109,7 @@ function ProductosAnalisisPage() {
   }
 
   const refreshAnalisis = async () => {
-    const [historialResult, versionesResult, gobernanzaResult, productoResult] = await Promise.all([
-      api.get(`/productos/${id}/historial/`, { suppressGlobalErrorToast: true }),
-      api.get(`/productos/${id}/versiones/`, { suppressGlobalErrorToast: true }),
-      api.get(`/productos/${id}/gobernanza/`, { suppressGlobalErrorToast: true }),
-      api.get(`/productos/${id}/`, { suppressGlobalErrorToast: true }),
-    ])
-    setHistorial(historialResult.data)
-    setVersiones(versionesResult.data)
-    setGobernanza(gobernanzaResult.data)
-    setProducto(productoResult.data)
+    await reload()
   }
 
   const restoreVersion = async () => {
@@ -171,17 +119,18 @@ function ProductosAnalisisPage() {
 
     setRestoreLoading(true)
     try {
-      const { data } = await api.post(
-        `/productos/${id}/versiones/restaurar/`,
-        { version: restoreTarget.version },
-        { suppressGlobalErrorToast: true },
+      const data = await productosApi.executeDetailAction(
+        productosApi.endpoints.productos,
+        id,
+        'versiones/restaurar',
+        { method: 'post', payload: { version: restoreTarget.version } },
       )
       setProducto(data.producto)
       toast.success(`Version ${data.version_restaurada} restaurada sobre el maestro.`)
       setRestoreTarget(null)
       await Promise.all([loadVersionComparison(), refreshAnalisis()])
     } catch (error) {
-      toast.error(normalizeApiError(error, { fallback: 'No se pudo restaurar la version seleccionada.' }))
+      toast.error('No se pudo restaurar la version seleccionada.')
     } finally {
       setRestoreLoading(false)
     }
@@ -357,7 +306,7 @@ function ProductosAnalisisPage() {
                         Object.entries(comparacionVersiones.changes).map(([field, values]) => (
                           <div key={field} className="rounded-md border border-border bg-background/70 px-3 py-2 text-sm">
                             <p className="font-medium text-foreground">{field}</p>
-                            <p className="mt-1 text-muted-foreground">{String(values[0] ?? '-')} -> {String(values[1] ?? '-')}</p>
+                            <p className="mt-1 text-muted-foreground">{String(values[0] ?? '-')} {' -> '} {String(values[1] ?? '-')}</p>
                           </div>
                         ))
                       )}

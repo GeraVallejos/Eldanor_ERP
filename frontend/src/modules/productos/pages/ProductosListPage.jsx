@@ -9,7 +9,6 @@ import {
 import { useDispatch, useSelector } from 'react-redux'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
-import { api } from '@/api/client'
 import { normalizeApiError } from '@/api/errors'
 import ActiveSearchFilter from '@/components/ui/ActiveSearchFilter'
 import Button from '@/components/ui/Button'
@@ -23,6 +22,7 @@ import { formatCurrencyCLP, formatSmartNumber } from '@/lib/numberFormat'
 import { useResponsiveTablePageSize } from '@/lib/useResponsiveTablePageSize'
 import { cn } from '@/lib/utils'
 import { invalidateProductosCatalogCache } from '@/modules/productos/services/productosCatalogCache'
+import { productosApi } from '@/modules/productos/store/api'
 import { downloadExcelFile } from '@/modules/shared/exports/downloadExcelFile'
 import { downloadSimpleTablePdf } from '@/modules/shared/exports/downloadSimpleTablePdf'
 import {
@@ -227,13 +227,9 @@ function ProductosListPage() {
       if (requestOptions.tipo) params.tipo = requestOptions.tipo
       if (requestOptions.categoria) params.categoria = requestOptions.categoria
 
-      const { data } = await api.get('/productos/', {
-        params,
-        suppressGlobalErrorToast: true,
-      })
-
-      const results = Array.isArray(data?.results) ? data.results : []
-      const count = Number(data?.count ?? results.length)
+      const data = await productosApi.getListWithCount(productosApi.endpoints.productos, params)
+      const results = data.results
+      const count = data.count
       totalPages = Math.max(1, Math.ceil(count / pageSize))
       allRows.push(...results)
       currentPage += 1
@@ -251,7 +247,7 @@ function ProductosListPage() {
     setDeletingId(producto.id)
 
     try {
-      await api.delete(`/productos/${producto.id}/`, { suppressGlobalErrorToast: true })
+      await productosApi.removeOne(productosApi.endpoints.productos, producto.id)
       invalidateProductosCatalogCache()
       toast.success('Producto procesado correctamente.')
       dispatch(fetchProductos(buildProductosQueryParams()))

@@ -1,15 +1,9 @@
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
-import { api } from '@/api/client'
 import { normalizeApiError } from '@/api/errors'
 import Button from '@/components/ui/Button'
+import { productosApi } from '@/modules/productos/store/api'
 import { usePermissions } from '@/modules/shared/auth/usePermission'
-
-function normalizeListResponse(data) {
-  if (Array.isArray(data)) return data
-  if (Array.isArray(data?.results)) return data.results
-  return []
-}
 
 function ProductosImpuestosPage() {
   const permissions = usePermissions(['PRODUCTOS.CREAR', 'PRODUCTOS.EDITAR', 'PRODUCTOS.BORRAR'])
@@ -27,8 +21,8 @@ function ProductosImpuestosPage() {
   const loadData = async () => {
     setStatus('loading')
     try {
-      const { data } = await api.get('/impuestos/', { suppressGlobalErrorToast: true })
-      setRows(normalizeListResponse(data))
+      const data = await productosApi.getList(productosApi.endpoints.impuestos)
+      setRows(data)
       setStatus('succeeded')
     } catch (error) {
       setStatus('failed')
@@ -79,10 +73,10 @@ function ProductosImpuestosPage() {
     setSaving(true)
     try {
       if (form.id) {
-        await api.patch(`/impuestos/${form.id}/`, payload, { suppressGlobalErrorToast: true })
+        await productosApi.updateOne(productosApi.endpoints.impuestos, form.id, payload)
         toast.success('Impuesto actualizado.')
       } else {
-        await api.post('/impuestos/', payload, { suppressGlobalErrorToast: true })
+        await productosApi.createOne(productosApi.endpoints.impuestos, payload)
         toast.success('Impuesto creado.')
       }
 
@@ -102,7 +96,7 @@ function ProductosImpuestosPage() {
     }
     setDeletingId(id)
     try {
-      await api.delete(`/impuestos/${id}/`, { suppressGlobalErrorToast: true })
+      await productosApi.removeOne(productosApi.endpoints.impuestos, id)
       toast.success('Impuesto eliminado.')
       await loadData()
     } catch (error) {

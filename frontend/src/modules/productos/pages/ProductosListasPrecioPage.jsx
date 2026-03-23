@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
-import { api } from '@/api/client'
 import { normalizeApiError } from '@/api/errors'
 import Button from '@/components/ui/Button'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import { buttonVariants } from '@/components/ui/buttonVariants'
 import { normalizeUpperInput } from '@/lib/textFormat'
 import { cn } from '@/lib/utils'
+import { productosApi } from '@/modules/productos/store/api'
 import { usePermissions } from '@/modules/shared/auth/usePermission'
 
 const PRIORIDAD_OPTIONS = [
@@ -32,16 +32,6 @@ const PRIORIDAD_OPTIONS = [
     description: 'Sirve como lista secundaria o fallback comercial.',
   },
 ]
-
-function normalizeListResponse(data) {
-  if (Array.isArray(data)) {
-    return data
-  }
-  if (Array.isArray(data?.results)) {
-    return data.results
-  }
-  return []
-}
 
 function emptyListaForm() {
   return {
@@ -105,17 +95,17 @@ function ProductosListasPrecioPage() {
     setStatus('loading')
     try {
       const [
-        { data: listasData },
-        { data: monedasData },
-        { data: clientesData },
+        listasData,
+        monedasData,
+        clientesData,
       ] = await Promise.all([
-        api.get('/listas-precio/', { suppressGlobalErrorToast: true }),
-        api.get('/monedas/', { suppressGlobalErrorToast: true }),
-        api.get('/clientes/', { suppressGlobalErrorToast: true }),
+        productosApi.getList(productosApi.endpoints.listasPrecio),
+        productosApi.getList(productosApi.endpoints.monedas),
+        productosApi.getList(productosApi.endpoints.clientes),
       ])
-      setListas(normalizeListResponse(listasData))
-      setMonedas(normalizeListResponse(monedasData))
-      setClientes(normalizeListResponse(clientesData))
+      setListas(listasData)
+      setMonedas(monedasData)
+      setClientes(clientesData)
       setStatus('succeeded')
     } catch (error) {
       setStatus('failed')
@@ -194,10 +184,10 @@ function ProductosListasPrecioPage() {
     setSavingLista(true)
     try {
       if (formLista.id) {
-        await api.patch(`/listas-precio/${formLista.id}/`, payload, { suppressGlobalErrorToast: true })
+        await productosApi.updateOne(productosApi.endpoints.listasPrecio, formLista.id, payload)
         toast.success('Lista de precio actualizada.')
       } else {
-        await api.post('/listas-precio/', payload, { suppressGlobalErrorToast: true })
+        await productosApi.createOne(productosApi.endpoints.listasPrecio, payload)
         toast.success('Lista de precio creada.')
       }
       resetListaForm()
@@ -219,7 +209,7 @@ function ProductosListasPrecioPage() {
     }
 
     try {
-      await api.delete(`/listas-precio/${deletingTarget.id}/`, { suppressGlobalErrorToast: true })
+      await productosApi.removeOne(productosApi.endpoints.listasPrecio, deletingTarget.id)
       toast.success('Lista de precio procesada correctamente.')
       if (String(formLista.id) === String(deletingTarget.id)) {
         resetListaForm()

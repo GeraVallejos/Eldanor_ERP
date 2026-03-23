@@ -160,4 +160,75 @@ class TestPrecioComercialService:
         assert resultado["precio"] == Decimal("12345")
         assert resultado["lista"] is None
 
+    def test_fallback_a_lista_general_si_lista_cliente_no_tiene_item(self, empresa, usuario):
+        set_current_empresa(empresa)
+        producto = Producto.objects.create(
+            empresa=empresa,
+            creado_por=usuario,
+            nombre="Producto Fallback General",
+            sku="FALLBACK-GEN-001",
+            precio_referencia=Decimal("12345"),
+        )
+        otro_producto = Producto.objects.create(
+            empresa=empresa,
+            creado_por=usuario,
+            nombre="Producto Solo Cliente",
+            sku="SOLO-CLIENTE-001",
+            precio_referencia=Decimal("5000"),
+        )
+        contacto = Contacto.objects.create(
+            empresa=empresa,
+            nombre="Cliente Jerarquia",
+            rut="16161616-8",
+            email="cliente_jerarquia@test.com",
+        )
+        cliente = Cliente.objects.create(empresa=empresa, contacto=contacto)
+        clp = Moneda.all_objects.get(empresa=empresa, codigo="CLP")
+
+        lista_cliente = ListaPrecio.objects.create(
+            empresa=empresa,
+            creado_por=usuario,
+            nombre="Lista Cliente Jerarquia",
+            moneda=clp,
+            cliente=cliente,
+            fecha_desde=date(2026, 1, 1),
+            prioridad=10,
+            activa=True,
+        )
+        ListaPrecioItem.objects.create(
+            empresa=empresa,
+            creado_por=usuario,
+            lista=lista_cliente,
+            producto=otro_producto,
+            precio=Decimal("4500"),
+        )
+
+        lista_general = ListaPrecio.objects.create(
+            empresa=empresa,
+            creado_por=usuario,
+            nombre="Lista General Base",
+            moneda=clp,
+            fecha_desde=date(2026, 1, 1),
+            prioridad=100,
+            activa=True,
+        )
+        ListaPrecioItem.objects.create(
+            empresa=empresa,
+            creado_por=usuario,
+            lista=lista_general,
+            producto=producto,
+            precio=Decimal("9900"),
+        )
+
+        resultado = PrecioComercialService.obtener_precio(
+            empresa=empresa,
+            producto=producto,
+            cliente=cliente,
+            fecha=date(2026, 3, 12),
+        )
+
+        assert resultado["fuente"] == "LISTA_PRECIO"
+        assert resultado["precio"] == Decimal("9900")
+        assert resultado["lista"].id == lista_general.id
+
 

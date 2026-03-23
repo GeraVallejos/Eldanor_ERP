@@ -1,7 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
-import { api } from '@/api/client'
 import { normalizeApiError } from '@/api/errors'
 import ActiveSearchFilter from '@/components/ui/ActiveSearchFilter'
 import Button from '@/components/ui/Button'
@@ -13,17 +12,10 @@ import { buttonVariants } from '@/components/ui/buttonVariants'
 import { formatSmartNumber } from '@/lib/numberFormat'
 import { useResponsiveTablePageSize } from '@/lib/useResponsiveTablePageSize'
 import { cn } from '@/lib/utils'
+import { searchProductosCatalog } from '@/modules/productos/services/productosCatalogCache'
+import { productosApi } from '@/modules/productos/store/api'
+import { useListaPrecioCabecera } from '@/modules/productos/store/hooks'
 import { usePermissions } from '@/modules/shared/auth/usePermission'
-
-function normalizeListResponse(data) {
-  if (Array.isArray(data)) {
-    return data
-  }
-  if (Array.isArray(data?.results)) {
-    return data.results
-  }
-  return []
-}
 
 function emptyItemForm() {
   return { id: null, producto: '', precio: '', descuento_maximo: '0' }
@@ -44,8 +36,7 @@ function ProductosListaPrecioDetailPage() {
   const { id } = useParams()
   const itemsPageSize = useResponsiveTablePageSize({ mobileRows: 6, reservedHeight: 640, desktopMaxRows: 9 })
   const permissions = usePermissions(['PRODUCTOS.CREAR', 'PRODUCTOS.EDITAR', 'PRODUCTOS.BORRAR'])
-  const [status, setStatus] = useState('idle')
-  const [lista, setLista] = useState(null)
+  const { status: listaStatus, lista } = useListaPrecioCabecera(id)
   const [items, setItems] = useState([])
   const [itemsTotalCount, setItemsTotalCount] = useState(0)
   const [baseItemsTotalCount, setBaseItemsTotalCount] = useState(0)
@@ -53,40 +44,36 @@ function ProductosListaPrecioDetailPage() {
   const [productoSearch, setProductoSearch] = useState('')
   const [loadingProductos, setLoadingProductos] = useState(false)
   const [loadingItems, setLoadingItems] = useState(false)
+  const [itemsStatus, setItemsStatus] = useState('idle')
   const [savingItem, setSavingItem] = useState(false)
   const [deletingTarget, setDeletingTarget] = useState(null)
   const [itemsPage, setItemsPage] = useState(1)
   const [formItem, setFormItem] = useState(emptyItemForm)
+  const hasLoadedInitialItemsRef = useRef(false)
+  const hasShownLoadErrorRef = useRef(false)
+  const skipNextReactiveLoadRef = useRef(false)
 
   const handleProductoSearchChange = useCallback((value) => {
     setItemsPage(1)
     setProductoSearch(value)
   }, [])
 
-  const loadLista = useCallback(async () => {
-    try {
-      const { data } = await api.get(`/listas-precio/${id}/`, { suppressGlobalErrorToast: true })
-      setLista(data)
-    } catch (error) {
-      throw error
-    }
-  }, [id])
-
   const loadItems = useCallback(async ({ page = 1, query = '' } = {}) => {
+    setItemsStatus('loading')
     setLoadingItems(true)
     try {
       const normalizedQuery = String(query || '').trim()
-      const { data } = await api.get('/listas-precio-items/', {
-        params: {
+      const data = await productosApi.getListWithCount(
+        productosApi.endpoints.listasPrecioItems,
+        {
           lista: id,
           page,
           page_size: itemsPageSize,
           ...(normalizedQuery ? { q: normalizedQuery } : {}),
         },
-        suppressGlobalErrorToast: true,
-      })
-      const nextItems = normalizeListResponse(data)
-      const totalCount = Number(data?.count ?? nextItems.length)
+      )
+      const nextItems = data.results
+      const totalCount = data.count
       setItems(nextItems)
       setItemsTotalCount(totalCount)
       if (!normalizedQuery) {
@@ -95,6 +82,10 @@ function ProductosListaPrecioDetailPage() {
       if (page > 1 && nextItems.length === 0 && totalCount > 0) {
         setItemsPage((prev) => Math.max(1, prev - 1))
       }
+      setItemsStatus('succeeded')
+    } catch (error) {
+      setItemsStatus('failed')
+      throw error
     } finally {
       setLoadingItems(false)
     }
@@ -104,19 +95,17 @@ function ProductosListaPrecioDetailPage() {
     let active = true
 
     const loadPage = async () => {
-      setStatus('loading')
       try {
-        await Promise.all([loadLista(), loadItems({ page: 1, query: '' })])
+        await loadItems({ page: 1, query: '' })
         if (!active) {
           return
         }
-        setStatus('succeeded')
-      } catch (error) {
+        hasLoadedInitialItemsRef.current = true
+        skipNextReactiveLoadRef.current = true
+      } catch {
         if (!active) {
           return
         }
-        setStatus('failed')
-        toast.error(normalizeApiError(error, { fallback: 'No se pudo cargar la lista de precio.' }))
       }
     }
 
@@ -125,29 +114,63 @@ function ProductosListaPrecioDetailPage() {
     return () => {
       active = false
     }
-  }, [loadItems, loadLista])
+  }, [loadItems])
+
+  const status = useMemo(() => {
+    if (listaStatus === 'failed' || itemsStatus === 'failed') {
+      return 'failed'
+    }
+
+    if (
+      listaStatus === 'idle'
+      || listaStatus === 'loading'
+      || itemsStatus === 'idle'
+      || itemsStatus === 'loading'
+    ) {
+      return 'loading'
+    }
+
+    return 'succeeded'
+  }, [itemsStatus, listaStatus])
 
   useEffect(() => {
-    if (status === 'idle' || status === 'loading') {
+    if (!hasLoadedInitialItemsRef.current || status === 'loading') {
       return
     }
+
+    if (skipNextReactiveLoadRef.current) {
+      skipNextReactiveLoadRef.current = false
+      return
+    }
+
     void loadItems({ page: itemsPage, query: productoSearch })
-  }, [itemsPage, itemsPageSize, loadItems, productoSearch, status])
+  }, [itemsPage, loadItems, productoSearch, status])
+
+  useEffect(() => {
+    if (status !== 'failed' || hasShownLoadErrorRef.current) {
+      return
+    }
+
+    toast.error('No se pudo cargar la lista de precio.')
+    hasShownLoadErrorRef.current = true
+  }, [status])
+
+  useEffect(() => {
+    hasLoadedInitialItemsRef.current = false
+    hasShownLoadErrorRef.current = false
+    skipNextReactiveLoadRef.current = false
+  }, [id])
 
   useEffect(() => {
     const timeoutId = setTimeout(async () => {
       setLoadingProductos(true)
       try {
-        const params = {}
         const normalizedSearch = String(productoSearch || '').trim()
-        if (normalizedSearch) {
-          params.q = normalizedSearch
-        }
-        const { data } = await api.get('/productos/', {
-          params,
-          suppressGlobalErrorToast: true,
+        const data = await searchProductosCatalog({
+          query: normalizedSearch,
+          limit: normalizedSearch ? 50 : 25,
         })
-        setProductos(normalizeListResponse(data))
+        setProductos(productosApi.normalizeListResponse(data))
       } catch (error) {
         toast.error(normalizeApiError(error, { fallback: 'No se pudo buscar productos para la lista.' }))
       } finally {
@@ -235,10 +258,10 @@ function ProductosListaPrecioDetailPage() {
     setSavingItem(true)
     try {
       if (formItem.id) {
-        await api.patch(`/listas-precio-items/${formItem.id}/`, payload, { suppressGlobalErrorToast: true })
+        await productosApi.updateOne(productosApi.endpoints.listasPrecioItems, formItem.id, payload)
         toast.success('Precio actualizado en la lista.')
       } else {
-        await api.post('/listas-precio-items/', payload, { suppressGlobalErrorToast: true })
+        await productosApi.createOne(productosApi.endpoints.listasPrecioItems, payload)
         toast.success('Precio agregado a la lista.')
       }
       resetItemForm()
@@ -261,7 +284,7 @@ function ProductosListaPrecioDetailPage() {
     }
 
     try {
-      await api.delete(`/listas-precio-items/${deletingTarget.id}/`, { suppressGlobalErrorToast: true })
+      await productosApi.removeOne(productosApi.endpoints.listasPrecioItems, deletingTarget.id)
       toast.success('Precio eliminado de la lista.')
       setDeletingTarget(null)
       await loadItems({ page: itemsPage, query: productoSearch })

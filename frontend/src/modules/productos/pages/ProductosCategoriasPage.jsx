@@ -1,15 +1,9 @@
 import { useEffect, useState } from 'react'
 import { toast } from 'sonner'
-import { api } from '@/api/client'
 import { normalizeApiError } from '@/api/errors'
 import Button from '@/components/ui/Button'
+import { productosApi } from '@/modules/productos/store/api'
 import { usePermissions } from '@/modules/shared/auth/usePermission'
-
-function normalizeListResponse(data) {
-  if (Array.isArray(data)) return data
-  if (Array.isArray(data?.results)) return data.results
-  return []
-}
 
 function ProductosCategoriasPage() {
   const permissions = usePermissions(['PRODUCTOS.CREAR', 'PRODUCTOS.EDITAR', 'PRODUCTOS.BORRAR'])
@@ -27,8 +21,8 @@ function ProductosCategoriasPage() {
   const loadData = async () => {
     setStatus('loading')
     try {
-      const { data } = await api.get('/categorias/', { suppressGlobalErrorToast: true })
-      setRows(normalizeListResponse(data))
+      const data = await productosApi.getList(productosApi.endpoints.categorias)
+      setRows(data)
       setStatus('succeeded')
     } catch (error) {
       setStatus('failed')
@@ -74,10 +68,10 @@ function ProductosCategoriasPage() {
     setSaving(true)
     try {
       if (form.id) {
-        await api.patch(`/categorias/${form.id}/`, payload, { suppressGlobalErrorToast: true })
+        await productosApi.updateOne(productosApi.endpoints.categorias, form.id, payload)
         toast.success('Categoria actualizada.')
       } else {
-        await api.post('/categorias/', payload, { suppressGlobalErrorToast: true })
+        await productosApi.createOne(productosApi.endpoints.categorias, payload)
         toast.success('Categoria creada.')
       }
 
@@ -97,7 +91,7 @@ function ProductosCategoriasPage() {
     }
     setDeletingId(id)
     try {
-      await api.delete(`/categorias/${id}/`, { suppressGlobalErrorToast: true })
+      await productosApi.removeOne(productosApi.endpoints.categorias, id)
       toast.success('Categoria eliminada.')
       await loadData()
     } catch (error) {

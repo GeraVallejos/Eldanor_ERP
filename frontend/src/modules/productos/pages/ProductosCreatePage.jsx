@@ -7,12 +7,12 @@ import { toast } from 'sonner'
 import { z } from 'zod'
 import ApiContractError from '@/components/ui/ApiContractError'
 import Button from '@/components/ui/Button'
-import { api } from '@/api/client'
 import { normalizeApiError } from '@/api/errors'
 import { buttonVariants } from '@/components/ui/buttonVariants'
 import { normalizeUpperInput } from '@/lib/textFormat'
 import { cn } from '@/lib/utils'
 import { invalidateProductosCatalogCache } from '@/modules/productos/services/productosCatalogCache'
+import { productosApi } from '@/modules/productos/store/api'
 import {
   createProducto,
   fetchCatalogosProducto,
@@ -169,7 +169,7 @@ function ProductosCreatePage() {
 
       setPageStatus('loading')
       try {
-        const { data } = await api.get(`/productos/${id}/`, { suppressGlobalErrorToast: true })
+        const data = await productosApi.getOne(productosApi.endpoints.productos, id)
         if (!active) {
           return
         }
@@ -265,7 +265,7 @@ function ProductosCreatePage() {
 
     try {
       if (isEditMode) {
-        await api.patch(`/productos/${id}/`, payload, { suppressGlobalErrorToast: true })
+        await productosApi.updateOne(productosApi.endpoints.productos, id, payload)
       } else {
         await dispatch(createProducto(payload)).unwrap()
       }

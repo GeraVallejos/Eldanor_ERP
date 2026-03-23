@@ -1,35 +1,11 @@
 import { createAsyncThunk, createSlice } from '@reduxjs/toolkit'
-import { api } from '@/api/client'
 import { extractApiErrorContract, normalizeApiError } from '@/api/errors'
 import { login, logout } from '@/modules/auth/authSlice'
 import { invalidateProductosCatalogCache } from '@/modules/productos/services/productosCatalogCache'
-
-function normalizeProductsResponse(data) {
-  if (Array.isArray(data)) {
-    return data
-  }
-
-  if (Array.isArray(data?.results)) {
-    return data.results
-  }
-
-  return []
-}
-
-function normalizeCatalogResponse(data) {
-  if (Array.isArray(data)) {
-    return data
-  }
-
-  if (Array.isArray(data?.results)) {
-    return data.results
-  }
-
-  return []
-}
+import { productosApi } from '@/modules/productos/store/api'
 
 function normalizeProductsPayload(data, options = {}) {
-  const items = normalizeProductsResponse(data)
+  const items = productosApi.normalizeListResponse(data)
   const pageSize = Number(options?.pageSize || 0)
   const currentPage = Number(options?.page || 1)
 
@@ -94,10 +70,10 @@ export const fetchProductos = createAsyncThunk(
         params.page_size = pageSize
       }
 
-      const { data } = await api.get('/productos/', {
-        params: Object.keys(params).length > 0 ? params : undefined,
-        suppressGlobalErrorToast: true,
-      })
+      const data = await productosApi.getListWithCount(
+        productosApi.endpoints.productos,
+        Object.keys(params).length > 0 ? params : undefined,
+      )
       return normalizeProductsPayload(data, { page, pageSize })
     } catch (error) {
       return rejectWithValue(
@@ -111,14 +87,14 @@ export const fetchCatalogosProducto = createAsyncThunk(
   'productos/fetchCatalogosProducto',
   async (_, { rejectWithValue }) => {
     try {
-      const [{ data: categoriasData }, { data: impuestosData }] = await Promise.all([
-        api.get('/categorias/', { suppressGlobalErrorToast: true }),
-        api.get('/impuestos/', { suppressGlobalErrorToast: true }),
+      const [categoriasData, impuestosData] = await Promise.all([
+        productosApi.getList(productosApi.endpoints.categorias),
+        productosApi.getList(productosApi.endpoints.impuestos),
       ])
 
       return {
-        categorias: normalizeCatalogResponse(categoriasData),
-        impuestos: normalizeCatalogResponse(impuestosData),
+        categorias: categoriasData,
+        impuestos: impuestosData,
       }
     } catch (error) {
       return rejectWithValue(
@@ -132,9 +108,7 @@ export const createProducto = createAsyncThunk(
   'productos/createProducto',
   async (payload, { rejectWithValue }) => {
     try {
-      const { data } = await api.post('/productos/', payload, {
-        suppressGlobalErrorToast: true,
-      })
+      const data = await productosApi.createOne(productosApi.endpoints.productos, payload)
       invalidateProductosCatalogCache()
       return data
     } catch (error) {

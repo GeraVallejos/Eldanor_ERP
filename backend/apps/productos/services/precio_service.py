@@ -10,7 +10,8 @@ class PrecioComercialService:
     """Servicio de resolucion de precio para ventas y cotizaciones."""
 
     @staticmethod
-    def _resolver_lista(*, empresa, cliente=None, fecha=None):
+    def _listas_candidatas(*, empresa, cliente=None, fecha=None):
+        """Retorna listas vigentes ordenadas por precedencia comercial para el contexto dado."""
         fecha = fecha or date.today()
 
         queryset = ListaPrecio.all_objects.filter(
@@ -21,25 +22,31 @@ class PrecioComercialService:
             models.Q(fecha_hasta__isnull=True) | models.Q(fecha_hasta__gte=fecha)
         )
 
+        listas = []
         if cliente:
-            lista_cliente = (
-                queryset.filter(cliente=cliente)
-                .order_by("prioridad", "-fecha_desde", "-creado_en")
-                .first()
+            listas.extend(
+                queryset.filter(cliente=cliente).order_by("prioridad", "-fecha_desde", "-creado_en")
             )
-            if lista_cliente:
-                return lista_cliente
 
-        return queryset.filter(cliente__isnull=True).order_by("prioridad", "-fecha_desde", "-creado_en").first()
+        listas.extend(
+            queryset.filter(cliente__isnull=True).order_by("prioridad", "-fecha_desde", "-creado_en")
+        )
+        return listas
 
     @staticmethod
     def obtener_precio(*, empresa, producto, cliente=None, fecha=None, moneda_destino=None):
-        """Resuelve precio comercial priorizando lista cliente y fallback a referencia."""
+        """Resuelve precio comercial priorizando lista cliente, luego lista general y finalmente referencia."""
         fecha = fecha or date.today()
-        lista = PrecioComercialService._resolver_lista(empresa=empresa, cliente=cliente, fecha=fecha)
         lista_aplicada = None
+        monto = producto.precio_referencia
+        moneda_origen = producto.moneda
+        fuente = "PRODUCTO_REFERENCIA"
 
-        if lista:
+        for lista in PrecioComercialService._listas_candidatas(
+            empresa=empresa,
+            cliente=cliente,
+            fecha=fecha,
+        ):
             item = ListaPrecioItem.all_objects.filter(
                 empresa=empresa,
                 lista=lista,
@@ -50,14 +57,7 @@ class PrecioComercialService:
                 moneda_origen = lista.moneda
                 fuente = "LISTA_PRECIO"
                 lista_aplicada = lista
-            else:
-                monto = producto.precio_referencia
-                moneda_origen = producto.moneda
-                fuente = "PRODUCTO_REFERENCIA"
-        else:
-            monto = producto.precio_referencia
-            moneda_origen = producto.moneda
-            fuente = "PRODUCTO_REFERENCIA"
+                break
 
         if moneda_destino and moneda_origen and moneda_destino.id != moneda_origen.id:
             monto = TipoCambioService.convertir_monto(

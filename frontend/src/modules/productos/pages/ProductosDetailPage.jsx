@@ -1,11 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
-import { api } from '@/api/client'
-import { normalizeApiError } from '@/api/errors'
 import { buttonVariants } from '@/components/ui/buttonVariants'
 import { formatCurrencyCLP, formatSmartNumber } from '@/lib/numberFormat'
 import { cn } from '@/lib/utils'
+import { useProductoDetail } from '@/modules/productos/store/hooks'
 import { usePermissions } from '@/modules/shared/auth/usePermission'
 
 function DetailRow({ label, value }) {
@@ -50,55 +49,20 @@ function ScoreBadge({ score }) {
 function ProductosDetailPage() {
   const { id } = useParams()
   const permissions = usePermissions(['PRODUCTOS.EDITAR'])
-  const [status, setStatus] = useState('idle')
-  const [producto, setProducto] = useState(null)
-  const [gobernanza, setGobernanza] = useState({ score: 100, estado: 'LISTO', hallazgos: [] })
+  const { status, producto, gobernanza } = useProductoDetail(id)
+  const hasShownDetailErrorRef = useRef(false)
 
   useEffect(() => {
-    let active = true
-
-    const loadProducto = async () => {
-      setStatus('loading')
-      try {
-        const [productoResult, gobernanzaResult] = await Promise.allSettled([
-          api.get(`/productos/${id}/`, { suppressGlobalErrorToast: true }),
-          api.get(`/productos/${id}/gobernanza/`, { suppressGlobalErrorToast: true }),
-        ])
-
-        if (!active) {
-          return
-        }
-
-        if (productoResult.status !== 'fulfilled') {
-          throw productoResult.reason
-        }
-
-        setProducto(productoResult.value.data)
-
-        if (gobernanzaResult.status === 'fulfilled') {
-          setGobernanza(gobernanzaResult.value.data)
-        } else {
-          setGobernanza({ score: 100, estado: 'LISTO', hallazgos: [] })
-          toast.error('No se pudo cargar la evaluacion de gobernanza del producto.')
-        }
-
-        setStatus('succeeded')
-      } catch (error) {
-        if (!active) {
-          return
-        }
-        setStatus('failed')
-        toast.error(normalizeApiError(error, { fallback: 'No se pudo cargar el detalle del producto.' }))
-      }
+    if (status !== 'failed' || hasShownDetailErrorRef.current) {
+      return
     }
 
-    if (id) {
-      void loadProducto()
-    }
+    toast.error('No se pudo cargar el detalle del producto.')
+    hasShownDetailErrorRef.current = true
+  }, [status])
 
-    return () => {
-      active = false
-    }
+  useEffect(() => {
+    hasShownDetailErrorRef.current = false
   }, [id])
 
   if (status === 'loading') {
