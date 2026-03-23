@@ -299,6 +299,9 @@ function ProductosListPage() {
       }),
     ]
 
+  // TanStack Table expone callbacks no compatibles con la regla del React Compiler.
+  // Aqui se usa de forma local y no se propaga a hooks memoizados.
+  // eslint-disable-next-line react-hooks/incompatible-library
   const table = useReactTable({
     data: productos,
     columns,
