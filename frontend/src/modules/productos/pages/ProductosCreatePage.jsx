@@ -10,6 +10,7 @@ import Button from '@/components/ui/Button'
 import { api } from '@/api/client'
 import { normalizeApiError } from '@/api/errors'
 import { buttonVariants } from '@/components/ui/buttonVariants'
+import { normalizeUpperInput } from '@/lib/textFormat'
 import { cn } from '@/lib/utils'
 import { invalidateProductosCatalogCache } from '@/modules/productos/services/productosCatalogCache'
 import {
@@ -149,6 +150,7 @@ function ProductosCreatePage() {
   const tipoSeleccionado = useWatch({ control, name: 'tipo' })
   const manejaInventarioSeleccionado = useWatch({ control, name: 'maneja_inventario' })
   const usaSeriesSeleccionado = useWatch({ control, name: 'usa_series' })
+  const permiteDecimalesSeleccionado = useWatch({ control, name: 'permite_decimales' })
 
   useEffect(() => {
     if (catalogStatus === 'idle') {
@@ -213,11 +215,6 @@ function ProductosCreatePage() {
       setValue('usa_lotes', false, { shouldValidate: true })
       setValue('usa_series', false, { shouldValidate: true })
       setValue('usa_vencimiento', false, { shouldValidate: true })
-      return
-    }
-
-    if (tipoSeleccionado === 'PRODUCTO') {
-      setValue('maneja_inventario', true, { shouldValidate: true })
     }
   }, [setValue, tipoSeleccionado])
 
@@ -261,6 +258,10 @@ function ProductosCreatePage() {
       descripcion: values.descripcion?.trim() || '',
       maneja_inventario: values.tipo === 'SERVICIO' ? false : values.maneja_inventario,
     })
+
+    if (isEditMode) {
+      delete payload.precio_costo
+    }
 
     try {
       if (isEditMode) {
@@ -355,19 +356,41 @@ function ProductosCreatePage() {
         <div className="grid gap-3 md:grid-cols-2">
           <label className="text-sm">
             Nombre
-            <input className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2" {...register('nombre')} />
+            <input
+              className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
+              {...register('nombre', {
+                onChange: (event) => {
+                  event.target.value = normalizeUpperInput(event.target.value)
+                },
+              })}
+            />
             {errors.nombre && <span className="mt-1 block text-xs text-destructive">{errors.nombre.message}</span>}
           </label>
 
           <label className="text-sm">
             SKU
-            <input className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2" {...register('sku')} />
+            <input
+              className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
+              {...register('sku', {
+                onChange: (event) => {
+                  event.target.value = normalizeUpperInput(event.target.value)
+                },
+              })}
+            />
             {errors.sku && <span className="mt-1 block text-xs text-destructive">{errors.sku.message}</span>}
           </label>
 
           <label className="text-sm md:col-span-2">
             Descripcion
-            <textarea className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2" rows={3} {...register('descripcion')} />
+            <textarea
+              className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
+              rows={3}
+              {...register('descripcion', {
+                onChange: (event) => {
+                  event.target.value = normalizeUpperInput(event.target.value)
+                },
+              })}
+            />
             {errors.descripcion && <span className="mt-1 block text-xs text-destructive">{errors.descripcion.message}</span>}
           </label>
 
@@ -401,14 +424,26 @@ function ProductosCreatePage() {
 
           <label className="text-sm">
             Precio referencia
-            <input type="number" step="1" min="0" className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2" {...register('precio_referencia', { valueAsNumber: true })} />
+            <input type="number" step="0.01" min="0" className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2" {...register('precio_referencia', { valueAsNumber: true })} />
             {errors.precio_referencia && <span className="mt-1 block text-xs text-destructive">{errors.precio_referencia.message}</span>}
           </label>
 
           <label className="text-sm">
             Precio costo
-            <input type="number" step="1" min="0" className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2" {...register('precio_costo', { valueAsNumber: true })} />
+            <input
+              type="number"
+              step="0.01"
+              min="0"
+              disabled={isEditMode}
+              className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 disabled:cursor-not-allowed disabled:opacity-70"
+              {...register('precio_costo', { valueAsNumber: true })}
+            />
             {errors.precio_costo && <span className="mt-1 block text-xs text-destructive">{errors.precio_costo.message}</span>}
+            {isEditMode ? (
+              <span className="mt-1 block text-xs text-muted-foreground">
+                El costo se actualiza desde documentos, recepciones o ajustes autorizados; no desde el maestro.
+              </span>
+            ) : null}
           </label>
 
           <label className="text-sm">
@@ -425,7 +460,7 @@ function ProductosCreatePage() {
             Stock minimo
             <input
               type="number"
-              step="1"
+              step={permiteDecimalesSeleccionado ? '0.01' : '1'}
               min="0"
               disabled={!manejaInventarioSeleccionado || tipoSeleccionado === 'SERVICIO'}
               className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"

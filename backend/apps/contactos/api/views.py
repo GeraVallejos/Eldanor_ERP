@@ -196,6 +196,7 @@ class ClienteViewSet(ContactosAuditoriaMixin, ContactosInactiveFilterMixin, Tena
             uploaded_file=request.FILES.get("file"),
             user=request.user,
             empresa=self.get_empresa(),
+            dry_run=self._is_truthy(request.data.get("dry_run")),
         )
         return Response(payload)
 
@@ -276,6 +277,7 @@ class ProveedorViewSet(ContactosAuditoriaMixin, ContactosInactiveFilterMixin, Te
             uploaded_file=request.FILES.get("file"),
             user=request.user,
             empresa=self.get_empresa(),
+            dry_run=self._is_truthy(request.data.get("dry_run")),
         )
         return Response(payload)
 

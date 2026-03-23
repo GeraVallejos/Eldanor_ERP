@@ -18,6 +18,7 @@ function SearchableSelect({
   options,
   value,
   onChange,
+  onSearchChange,
   placeholder = 'Buscar...',
   emptyText = 'Sin resultados',
   disabled = false,
@@ -25,6 +26,7 @@ function SearchableSelect({
   className = '',
   inputClassName = '',
   maxVisibleOptions = 30,
+  loading = false,
 }) {
   const containerRef = useRef(null)
   const inputRef = useRef(null)
@@ -137,10 +139,14 @@ function SearchableSelect({
             setCursor(-1)
           }}
           onChange={(event) => {
-            setQuery(event.target.value)
+            const nextQuery = event.target.value
+            setQuery(nextQuery)
             setOpen(true)
             setCursor(-1)
-            if (!event.target.value.trim()) {
+            if (typeof onSearchChange === 'function') {
+              onSearchChange(nextQuery)
+            }
+            if (!nextQuery.trim()) {
               onChange('')
             }
           }}
@@ -206,7 +212,7 @@ function SearchableSelect({
               className="overflow-auto rounded-md border border-border bg-card shadow-lg"
             >
               {filteredOptions.length === 0 ? (
-                <div className="px-3 py-2 text-xs text-muted-foreground">{emptyText}</div>
+                <div className="px-3 py-2 text-xs text-muted-foreground">{loading ? 'Buscando...' : emptyText}</div>
               ) : (
                 filteredOptions.map((option, index) => (
                   <button

@@ -9,6 +9,11 @@ from apps.core.roles import RolUsuario
 from apps.core.services.csv_import import parse_csv_upload
 from apps.core.services.domain_event_service import DomainEventService
 from apps.core.services.outbox_service import OutboxService
+from apps.core.services.bulk_import import (
+    build_bulk_import_result,
+    bulk_import_execution_context,
+    format_bulk_import_row_error,
+)
 from apps.core.services.xlsx_template import build_xlsx_template
 from apps.tesoreria.models import CuentaBancariaEmpresa, MovimientoBancario, OrigenMovimientoBancario
 
@@ -141,7 +146,7 @@ def _registrar_resumen_importacion(*, empresa, user, payload):
     )
 
 
-def import_movimientos_bancarios(*, uploaded_file, user, empresa):
+def import_movimientos_bancarios(*, uploaded_file, user, empresa, dry_run=False):
     """Importa movimientos bancarios desde CSV/XLSX sin conciliar automaticamente."""
     _ensure_admin_user(user, empresa)
 
@@ -154,69 +159,73 @@ def import_movimientos_bancarios(*, uploaded_file, user, empresa):
     updated = 0
     errors = []
 
-    for line_number, row in rows:
-        try:
-            cuenta_bancaria = _resolve_cuenta_bancaria(empresa=empresa, row=row)
-            fecha = _to_date(row.get("fecha"), field_name="fecha")
-            tipo = _normalize_text(row.get("tipo")).upper()
-            if tipo not in {"CREDITO", "DEBITO"}:
-                raise BusinessRuleError("Tipo invalido. Use CREDITO o DEBITO.")
+    with bulk_import_execution_context(dry_run=dry_run):
+        for line_number, row in rows:
+            try:
+                cuenta_bancaria = _resolve_cuenta_bancaria(empresa=empresa, row=row)
+                fecha = _to_date(row.get("fecha"), field_name="fecha")
+                tipo = _normalize_text(row.get("tipo")).upper()
+                if tipo not in {"CREDITO", "DEBITO"}:
+                    raise BusinessRuleError("Tipo invalido. Use CREDITO o DEBITO.")
 
-            monto = _to_decimal(row.get("monto"))
-            if monto <= 0:
-                raise BusinessRuleError("El monto del movimiento debe ser mayor a cero.")
+                monto = _to_decimal(row.get("monto"))
+                if monto <= 0:
+                    raise BusinessRuleError("El monto del movimiento debe ser mayor a cero.")
 
-            referencia = _normalize_text(row.get("referencia"))
-            descripcion = _normalize_text(row.get("descripcion"))
-            activa = _to_bool(row.get("activo"), default=True)
+                referencia = _normalize_text(row.get("referencia"))
+                descripcion = _normalize_text(row.get("descripcion"))
+                activa = _to_bool(row.get("activo"), default=True)
 
-            existing = MovimientoBancario.all_objects.filter(
-                empresa=empresa,
-                cuenta_bancaria=cuenta_bancaria,
-                fecha=fecha,
-                tipo=tipo,
-                monto=monto,
-                referencia=referencia,
-            ).first()
+                existing = MovimientoBancario.all_objects.filter(
+                    empresa=empresa,
+                    cuenta_bancaria=cuenta_bancaria,
+                    fecha=fecha,
+                    tipo=tipo,
+                    monto=monto,
+                    referencia=referencia,
+                ).first()
 
-            payload = {
-                "empresa": empresa,
-                "creado_por": user,
-                "cuenta_bancaria": cuenta_bancaria,
-                "fecha": fecha,
-                "referencia": referencia,
-                "descripcion": descripcion,
-                "tipo": tipo,
-                "monto": monto,
-                "origen": OrigenMovimientoBancario.IMPORTACION,
-            }
-
-            if existing:
-                existing.descripcion = descripcion or existing.descripcion
-                existing.origen = OrigenMovimientoBancario.IMPORTACION
-                if not activa and not existing.conciliado:
-                    existing.conciliado = False
-                existing.save(update_fields=["descripcion", "origen", "conciliado", "actualizado_en"])
-                updated += 1
-            else:
-                MovimientoBancario.all_objects.create(**payload)
-                created += 1
-        except Exception as exc:  # pragma: no cover
-            errors.append(
-                {
-                    "line": line_number,
-                    "referencia": row.get("referencia") or "",
-                    "detail": str(exc),
+                payload = {
+                    "empresa": empresa,
+                    "creado_por": user,
+                    "cuenta_bancaria": cuenta_bancaria,
+                    "fecha": fecha,
+                    "referencia": referencia,
+                    "descripcion": descripcion,
+                    "tipo": tipo,
+                    "monto": monto,
+                    "origen": OrigenMovimientoBancario.IMPORTACION,
                 }
-            )
 
-    result = {
-        "created": created,
-        "updated": updated,
-        "errors": errors,
-        "total_rows": len(rows),
-        "successful_rows": created + updated,
-    }
+                if existing:
+                    existing.descripcion = descripcion or existing.descripcion
+                    existing.origen = OrigenMovimientoBancario.IMPORTACION
+                    if not activa and not existing.conciliado:
+                        existing.conciliado = False
+                    existing.save(update_fields=["descripcion", "origen", "conciliado", "actualizado_en"])
+                    updated += 1
+                else:
+                    MovimientoBancario.all_objects.create(**payload)
+                    created += 1
+            except Exception as exc:  # pragma: no cover
+                errors.append(
+                    {
+                        "line": line_number,
+                        "referencia": row.get("referencia") or "",
+                        "detail": format_bulk_import_row_error(exc),
+                    }
+                )
+
+        result = build_bulk_import_result(
+            created=created,
+            updated=updated,
+            errors=errors,
+            warnings=[],
+            total_rows=len(rows),
+            dry_run=dry_run,
+        )
+        if dry_run:
+            return result
     _registrar_resumen_importacion(
         empresa=empresa,
         user=user,
@@ -269,4 +278,5 @@ def build_movimientos_bancarios_template(*, user, empresa):
         sample_row=sample,
         instructions=instructions,
         sheet_name="MovimientosBancarios",
+        template_title="Plantilla de importacion - Movimientos bancarios",
     )

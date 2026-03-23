@@ -4,6 +4,17 @@ export async function downloadExcelFile({ sheetName, fileName, columns, rows }) 
   const sheet = workbook.addWorksheet(sheetName || 'Reporte')
 
   sheet.columns = Array.isArray(columns) ? columns : []
+  if (Array.isArray(columns)) {
+    columns.forEach((column, index) => {
+      const worksheetColumn = sheet.getColumn(index + 1)
+      if (column?.numFmt) {
+        worksheetColumn.numFmt = column.numFmt
+      }
+      if (column?.alignment) {
+        worksheetColumn.alignment = column.alignment
+      }
+    })
+  }
 
   if (Array.isArray(rows)) {
     rows.forEach((row) => {

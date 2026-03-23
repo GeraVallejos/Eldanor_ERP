@@ -32,9 +32,26 @@ describe('productos/ProductosListPage', () => {
     },
   ]
 
+  function buildProductosResponse(request) {
+    const url = new URL(request.url)
+    const tipo = url.searchParams.get('tipo')
+    const page = Number(url.searchParams.get('page') || 1)
+    const pageSize = Number(url.searchParams.get('page_size') || productosMixtos.length)
+
+    let results = productosMixtos
+    if (tipo) {
+      results = productosMixtos.filter((item) => item.tipo === tipo)
+    }
+
+    return HttpResponse.json({
+      count: results.length,
+      results: results.slice((page - 1) * pageSize, page * pageSize),
+    })
+  }
+
   it('oculta acciones de escritura cuando el usuario solo tiene permiso de lectura', async () => {
     server.use(
-      http.get('*/productos/', async () => HttpResponse.json(productosMixtos)),
+      http.get('*/productos/', async ({ request }) => buildProductosResponse(request)),
     )
 
     renderWithProviders(<ProductosListPage />, {
@@ -66,7 +83,7 @@ describe('productos/ProductosListPage', () => {
 
   it('no muestra carga masiva si el usuario no cumple la regla de rol admin', async () => {
     server.use(
-      http.get('*/productos/', async () => HttpResponse.json(productosMixtos)),
+      http.get('*/productos/', async ({ request }) => buildProductosResponse(request)),
     )
 
     renderWithProviders(<ProductosListPage />, {
@@ -97,7 +114,7 @@ describe('productos/ProductosListPage', () => {
   it('permite cambiar a servicios desde el filtro por tipo', async () => {
     const user = userEvent.setup()
     server.use(
-      http.get('*/productos/', async () => HttpResponse.json(productosMixtos)),
+      http.get('*/productos/', async ({ request }) => buildProductosResponse(request)),
     )
 
     renderWithProviders(<ProductosListPage />, {

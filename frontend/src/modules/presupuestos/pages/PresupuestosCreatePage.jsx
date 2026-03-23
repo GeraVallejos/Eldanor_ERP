@@ -6,7 +6,7 @@ import { extractApiErrorContract, normalizeApiError } from '@/api/errors'
 import ApiContractError from '@/components/ui/ApiContractError'
 import Button from '@/components/ui/Button'
 import { getChileDateSuffix } from '@/lib/dateTimeFormat'
-import { getProductosCatalog } from '@/modules/productos/services/productosCatalogCache'
+import { mergeProductosCatalog, searchProductosCatalog } from '@/modules/productos/services/productosCatalogCache'
 import { buttonVariants } from '@/components/ui/buttonVariants'
 import { cn } from '@/lib/utils'
 
@@ -93,6 +93,7 @@ function PresupuestosCreatePage() {
     itemIndex: null,
     optionIndex: -1,
   })
+  const [loadingProductos, setLoadingProductos] = useState(false)
   const [fieldErrors, setFieldErrors] = useState({
     cliente: '',
     fecha: '',
@@ -116,18 +117,20 @@ function PresupuestosCreatePage() {
       const [
         { data: clientesData },
         { data: contactosData },
-        productosData,
+        productosProductoData,
+        productosServicioData,
         { data: impuestosData },
       ] = await Promise.all([
         api.get('/clientes/', { suppressGlobalErrorToast: true }),
         api.get('/contactos/', { suppressGlobalErrorToast: true }),
-        getProductosCatalog(),
+        searchProductosCatalog({ tipo: 'PRODUCTO' }),
+        searchProductosCatalog({ tipo: 'SERVICIO' }),
         api.get('/impuestos/', { suppressGlobalErrorToast: true }),
       ])
 
       setClientes(normalizeListResponse(clientesData))
       setContactos(normalizeListResponse(contactosData))
-      setProductos(productosData)
+      setProductos(mergeProductosCatalog(productosProductoData, productosServicioData))
       setImpuestos(normalizeListResponse(impuestosData))
     } catch (error) {
       toast.error(normalizeApiError(error, { fallback: 'No se pudieron cargar los clientes.' }))
@@ -141,6 +144,18 @@ function PresupuestosCreatePage() {
 
     return () => clearTimeout(timeoutId)
   }, [])
+
+  const searchProductos = async (query, tipo = '') => {
+    setLoadingProductos(true)
+    try {
+      const results = await searchProductosCatalog({ query, tipo })
+      setProductos((prev) => mergeProductosCatalog(prev, results))
+    } catch (error) {
+      toast.error(normalizeApiError(error, { fallback: 'No se pudieron buscar productos.' }))
+    } finally {
+      setLoadingProductos(false)
+    }
+  }
 
   const contactoById = useMemo(() => {
     const map = new Map()
@@ -479,6 +494,9 @@ function PresupuestosCreatePage() {
   }
 
   const handleProductoSearchChange = (index, value) => {
+    const itemType = String(items[index]?.tipo || 'PRODUCTO').toUpperCase()
+    void searchProductos(value, itemType)
+
     setItems((prev) => {
       const next = [...prev]
       const current = { ...next[index] }
@@ -1098,7 +1116,7 @@ function PresupuestosCreatePage() {
                         <div className="absolute z-50 mt-1 max-h-56 w-full overflow-auto rounded-md border border-border bg-popover p-1 shadow-lg">
                           {getFilteredProductosForItem(item).length === 0 ? (
                             <p className="px-2 py-2 text-xs text-muted-foreground">
-                              No hay coincidencias para "{item.producto_search}".
+                              {loadingProductos ? 'Buscando productos...' : `No hay coincidencias para "${item.producto_search}".`}
                             </p>
                           ) : (
                             getFilteredProductosForItem(item).slice(0, 30).map((producto) => (

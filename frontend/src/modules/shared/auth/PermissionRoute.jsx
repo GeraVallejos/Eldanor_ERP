@@ -1,11 +1,16 @@
 import { useMemo } from 'react'
 import { useSelector } from 'react-redux'
 import { selectCurrentUser } from '@/modules/auth/authSlice'
-import { hasPermission } from '@/modules/shared/auth/permissions'
+import { hasAnyPermission, hasPermission } from '@/modules/shared/auth/permissions'
 
-function PermissionRoute({ permission, message, children }) {
+function PermissionRoute({ permission, message, children, requireAny = false }) {
   const user = useSelector(selectCurrentUser)
-  const canAccess = useMemo(() => hasPermission(user, permission), [user, permission])
+  const canAccess = useMemo(() => {
+    if (Array.isArray(permission)) {
+      return requireAny ? hasAnyPermission(user, permission) : permission.every((code) => hasPermission(user, code))
+    }
+    return hasPermission(user, permission)
+  }, [requireAny, user, permission])
 
   if (!canAccess) {
     return (

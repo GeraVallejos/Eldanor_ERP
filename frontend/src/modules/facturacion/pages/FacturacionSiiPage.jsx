@@ -164,7 +164,7 @@ function FacturacionSiiPage() {
           <p className="text-sm text-muted-foreground">Configuracion administrativa de emision tributaria, certificados y control de folios.</p>
         </div>
         {canEdit ? (
-          <BulkImportButton endpoint="/rangos-folios-tributarios/bulk_import/" templateEndpoint="/rangos-folios-tributarios/bulk_template/" onCompleted={() => { void loadData() }} />
+          <BulkImportButton endpoint="/rangos-folios-tributarios/bulk_import/" templateEndpoint="/rangos-folios-tributarios/bulk_template/" previewBeforeImport onCompleted={() => { void loadData() }} />
         ) : null}
       </div>
 

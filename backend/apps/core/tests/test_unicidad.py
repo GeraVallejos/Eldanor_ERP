@@ -70,6 +70,8 @@ def test_unicidad_cruzada_rut_cliente():
     contacto_a = Contacto.objects.create(
         nombre="CLIENTE A", 
         rut="12.345.678-5", 
+        email="cliente.a@test.com",
+        tipo="EMPRESA",
         empresa=emp_a
     )
     Cliente.objects.create(contacto=contacto_a)
@@ -81,6 +83,8 @@ def test_unicidad_cruzada_rut_cliente():
     contacto_b = Contacto.objects.create(
         nombre="CLIENTE B", 
         rut="12.345.678-5", 
+        email="cliente.b@test.com",
+        tipo="EMPRESA",
         empresa=emp_b
     )
     cliente_b = Cliente.objects.create(contacto=contacto_b)
@@ -93,6 +97,8 @@ def test_unicidad_cruzada_rut_cliente():
         nuevo_contacto = Contacto(
             nombre="CLIENTE B DUPLICADO", 
             rut="12.345.678-5", 
+            email="cliente.b.duplicado@test.com",
+            tipo="EMPRESA",
             empresa=emp_b
         )
         nuevo_contacto.full_clean() # Gatilla la validaciÃ³n de unicidad

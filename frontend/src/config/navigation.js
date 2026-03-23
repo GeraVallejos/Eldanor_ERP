@@ -10,7 +10,8 @@ import {
   CircleDollarSign,
   Landmark,
 } from 'lucide-react'
-import { hasPermission } from '@/modules/shared/auth/permissions'
+import { hasAnyPermission, hasPermission } from '@/modules/shared/auth/permissions'
+import { PRODUCTOS_MANAGE_ANY } from '@/config/productosAccess'
 
 const NAV_MODULES = [
   {
@@ -31,21 +32,21 @@ const NAV_MODULES = [
         label: 'Categorias',
         to: '/productos/categorias',
         enabled: true,
-        requiredPermissions: ['PRODUCTOS.EDITAR'],
+        requiredAnyPermissions: PRODUCTOS_MANAGE_ANY,
       },
       {
         id: 'productos-impuestos',
         label: 'Impuestos',
         to: '/productos/impuestos',
         enabled: true,
-        requiredPermissions: ['PRODUCTOS.EDITAR'],
+        requiredAnyPermissions: PRODUCTOS_MANAGE_ANY,
       },
       {
         id: 'productos-listas-precio',
         label: 'Listas de precio',
         to: '/productos/listas-precio',
         enabled: true,
-        requiredPermissions: ['PRODUCTOS.EDITAR'],
+        requiredAnyPermissions: PRODUCTOS_MANAGE_ANY,
       },
     ],
   },
@@ -325,6 +326,15 @@ function hasRequiredPermissions(userPermissions, requiredPermissions) {
   return requiredPermissions.every((permission) => hasPermission(mockUser, permission))
 }
 
+function hasRequiredAnyPermissions(userPermissions, requiredPermissions) {
+  if (!requiredPermissions?.length) {
+    return true
+  }
+
+  const mockUser = { permissions: userPermissions }
+  return hasAnyPermission(mockUser, requiredPermissions)
+}
+
 function hasRequiredRoles(userRoles, requiredRoles) {
   if (!requiredRoles?.length) {
     return true
@@ -344,11 +354,13 @@ export function resolveNavigation(user) {
   return NAV_MODULES
     .filter((module) => module.enabled !== false)
     .filter((module) => hasRequiredPermissions(userPermissions, module.requiredPermissions))
+    .filter((module) => hasRequiredAnyPermissions(userPermissions, module.requiredAnyPermissions))
     .filter((module) => hasRequiredRoles(userRoles, module.requiredRoles))
     .map((module) => {
       const children = (module.children || [])
         .filter((item) => item.enabled !== false)
         .filter((item) => hasRequiredPermissions(userPermissions, item.requiredPermissions))
+        .filter((item) => hasRequiredAnyPermissions(userPermissions, item.requiredAnyPermissions))
         .filter((item) => hasRequiredRoles(userRoles, item.requiredRoles))
 
       return {

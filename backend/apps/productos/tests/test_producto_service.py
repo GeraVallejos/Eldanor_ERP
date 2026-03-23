@@ -8,7 +8,7 @@ from apps.compras.models import DocumentoCompraProveedor, DocumentoCompraProveed
 from apps.contactos.models import Contacto, Proveedor
 from apps.core.models import DomainEvent, OutboxEvent
 from apps.core.tenant import set_current_empresa, set_current_user
-from apps.productos.models import Producto
+from apps.productos.models import Producto, ProductoSnapshot
 from apps.productos.services.producto_service import ProductoService
 
 
@@ -63,6 +63,9 @@ class TestProductoService:
             entity_id=str(producto.id),
             event_type="PRODUCTO_CREADO",
         ).exists()
+        snapshot = ProductoSnapshot.all_objects.get(empresa=empresa, producto_id_ref=producto.id, version=1)
+        assert snapshot.event_type == "producto.creado"
+        assert snapshot.snapshot["sku"] == "PROD-SERVICE-001"
 
     def test_actualizar_producto_registra_changed_fields(self, empresa, usuario):
         set_current_empresa(empresa)
@@ -103,6 +106,9 @@ class TestProductoService:
         ).latest("occurred_at")
         assert "nombre" in audit.changes
         assert "precio_referencia" in audit.changes
+        snapshot = ProductoSnapshot.all_objects.get(empresa=empresa, producto_id_ref=producto.id, version=1)
+        assert snapshot.event_type == "producto.actualizado"
+        assert snapshot.changes["nombre"][1] == "PRODUCTO ACTUALIZADO"
 
     def test_eliminar_producto_con_historial_lo_anula_y_traza_eventos(self, empresa, usuario, proveedor_producto):
         set_current_empresa(empresa)
@@ -162,3 +168,9 @@ class TestProductoService:
             entity_id=str(producto.id),
             event_type="PRODUCTO_ANULADO",
         ).exists()
+        snapshot = ProductoSnapshot.all_objects.filter(
+            empresa=empresa,
+            producto_id_ref=producto.id,
+            event_type="producto.anulado",
+        ).latest("version")
+        assert snapshot.snapshot["activo"] == "False"

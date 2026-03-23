@@ -4,6 +4,7 @@ import { useSelector } from 'react-redux'
 import { toast } from 'sonner'
 import { api } from '@/api/client'
 import { normalizeApiError } from '@/api/errors'
+import ActiveSearchFilter from '@/components/ui/ActiveSearchFilter'
 import Button from '@/components/ui/Button'
 import BulkImportButton from '@/components/ui/BulkImportButton'
 import MenuButton from '@/components/ui/MenuButton'
@@ -314,6 +315,7 @@ function ProveedoresListPage() {
             <BulkImportButton
               endpoint="/proveedores/bulk_import/"
               templateEndpoint="/proveedores/bulk_template/"
+              previewBeforeImport
               onCompleted={() => {
                 void loadData()
               }}
@@ -377,6 +379,14 @@ function ProveedoresListPage() {
           Mostrando {filteredProveedores.length} de {proveedores.length} proveedores
         </p>
       </div>
+
+      <ActiveSearchFilter
+        query={search}
+        filteredCount={filteredProveedores.length}
+        totalCount={proveedores.length}
+        noun="proveedores"
+        onClear={() => setSearch('')}
+      />
 
       {status === 'loading' && <p className="text-sm text-muted-foreground">Cargando proveedores...</p>}
 

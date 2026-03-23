@@ -49,6 +49,11 @@
 - NO usar `raise ValueError(...)` para reglas de negocio; usar `BusinessRuleError`, etc.
 - Ver [Arquitectura de Excepciones](exception_architecture.md) para tipos y mapeo HTTP.
 
+### Importacion masiva
+- Toda carga masiva nueva debe seguir el estandar documentado en [Importacion Masiva](bulk_import.md).
+- Regla base: mismo endpoint para preview y ejecucion real usando `dry_run`.
+- Reutilizar utilidades de `apps.core.services.bulk_import` para contexto transaccional, contrato de respuesta y formateo de errores.
+
 ### Permisos
 - Cada ViewSet define `permission_modulo` y `permission_action_map`.
 - Acciones personalizadas agregar a `permission_action_map`.

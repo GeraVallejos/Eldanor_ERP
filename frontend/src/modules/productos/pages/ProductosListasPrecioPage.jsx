@@ -1,9 +1,37 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
 import { api } from '@/api/client'
 import { normalizeApiError } from '@/api/errors'
 import Button from '@/components/ui/Button'
+import ConfirmDialog from '@/components/ui/ConfirmDialog'
+import { buttonVariants } from '@/components/ui/buttonVariants'
+import { normalizeUpperInput } from '@/lib/textFormat'
+import { cn } from '@/lib/utils'
 import { usePermissions } from '@/modules/shared/auth/usePermission'
+
+const PRIORIDAD_OPTIONS = [
+  {
+    value: '10',
+    label: 'Urgente',
+    description: 'Se aplica antes que otras listas equivalentes cuando coincide vigencia y alcance.',
+  },
+  {
+    value: '50',
+    label: 'Alta',
+    description: 'Prioridad elevada para clientes o campanas preferentes.',
+  },
+  {
+    value: '100',
+    label: 'Normal',
+    description: 'Nivel recomendado para la mayoria de las listas base.',
+  },
+  {
+    value: '200',
+    label: 'Respaldo',
+    description: 'Sirve como lista secundaria o fallback comercial.',
+  },
+]
 
 function normalizeListResponse(data) {
   if (Array.isArray(data)) {
@@ -15,90 +43,191 @@ function normalizeListResponse(data) {
   return []
 }
 
-function ProductosListasPrecioPage() {
-  const permissions = usePermissions(['PRODUCTOS.CREAR', 'PRODUCTOS.EDITAR'])
-  const [listas, setListas] = useState([])
-  const [items, setItems] = useState([])
-  const [productos, setProductos] = useState([])
-  const [monedas, setMonedas] = useState([])
-  const [selectedLista, setSelectedLista] = useState('')
-  const [formLista, setFormLista] = useState({ nombre: '', moneda: '', fecha_desde: '', activa: true })
-  const [formItem, setFormItem] = useState({ producto: '', precio: '' })
+function emptyListaForm() {
+  return {
+    id: null,
+    nombre: '',
+    moneda: '',
+    cliente: '',
+    fecha_desde: '',
+    fecha_hasta: '',
+    prioridad: '100',
+    activa: true,
+  }
+}
 
-  const loadData = async () => {
+function getPriorityOption(value) {
+  return PRIORIDAD_OPTIONS.find((option) => option.value === String(value)) || null
+}
+
+function getPriorityOptionsForValue(value) {
+  const normalizedValue = String(value ?? '')
+  const matched = getPriorityOption(normalizedValue)
+  if (matched) {
+    return PRIORIDAD_OPTIONS
+  }
+  if (!normalizedValue) {
+    return PRIORIDAD_OPTIONS
+  }
+  return [
+    ...PRIORIDAD_OPTIONS,
+    {
+      value: normalizedValue,
+      label: 'Personalizada',
+      description: 'Valor heredado de una configuracion anterior.',
+    },
+  ]
+}
+
+function formatPriorityDisplay(lista) {
+  const value = String(lista?.prioridad ?? '')
+  const matched = getPriorityOption(value)
+  if (matched) {
+    return matched.label
+  }
+  if (!value) {
+    return '-'
+  }
+  return 'Personalizada'
+}
+
+function ProductosListasPrecioPage() {
+  const permissions = usePermissions(['PRODUCTOS.CREAR', 'PRODUCTOS.EDITAR', 'PRODUCTOS.BORRAR'])
+  const [listas, setListas] = useState([])
+  const [monedas, setMonedas] = useState([])
+  const [clientes, setClientes] = useState([])
+  const [status, setStatus] = useState('idle')
+  const [savingLista, setSavingLista] = useState(false)
+  const [deletingTarget, setDeletingTarget] = useState(null)
+  const [formLista, setFormLista] = useState(emptyListaForm)
+
+  const loadBaseData = useCallback(async () => {
+    setStatus('loading')
     try {
       const [
         { data: listasData },
-        { data: productosData },
         { data: monedasData },
-        { data: itemsData },
+        { data: clientesData },
       ] = await Promise.all([
         api.get('/listas-precio/', { suppressGlobalErrorToast: true }),
-        api.get('/productos/', { suppressGlobalErrorToast: true }),
         api.get('/monedas/', { suppressGlobalErrorToast: true }),
-        api.get('/listas-precio-items/', { suppressGlobalErrorToast: true }),
+        api.get('/clientes/', { suppressGlobalErrorToast: true }),
       ])
       setListas(normalizeListResponse(listasData))
-      setProductos(normalizeListResponse(productosData))
       setMonedas(normalizeListResponse(monedasData))
-      setItems(normalizeListResponse(itemsData))
+      setClientes(normalizeListResponse(clientesData))
+      setStatus('succeeded')
     } catch (error) {
+      setStatus('failed')
       toast.error(normalizeApiError(error, { fallback: 'No se pudieron cargar las listas de precio.' }))
     }
-  }
-
-  useEffect(() => {
-    const id = setTimeout(() => { void loadData() }, 0)
-    return () => clearTimeout(id)
   }, [])
 
-  const productoLabelById = useMemo(() => {
+  useEffect(() => {
+    const id = setTimeout(() => { void loadBaseData() }, 0)
+    return () => clearTimeout(id)
+  }, [loadBaseData])
+
+  const clienteLabelById = useMemo(() => {
     const map = new Map()
-    productos.forEach((producto) => {
-      map.set(String(producto.id), producto.nombre)
+    clientes.forEach((cliente) => {
+      map.set(String(cliente.id), cliente.contacto_nombre || cliente.nombre || String(cliente.id))
     })
     return map
-  }, [productos])
+  }, [clientes])
 
-  const itemsListaSeleccionada = useMemo(
-    () => items.filter((item) => String(item.lista) === String(selectedLista)),
-    [items, selectedLista],
-  )
+  const monedaLabelById = useMemo(() => {
+    const map = new Map()
+    monedas.forEach((moneda) => {
+      map.set(String(moneda.id), moneda.codigo || moneda.nombre || String(moneda.id))
+    })
+    return map
+  }, [monedas])
 
-  const createLista = async (event) => {
+  const prioridadOptions = useMemo(() => getPriorityOptionsForValue(formLista.prioridad), [formLista.prioridad])
+  const prioridadSeleccionada = useMemo(() => {
+    return prioridadOptions.find((option) => option.value === String(formLista.prioridad)) || null
+  }, [formLista.prioridad, prioridadOptions])
+
+  const resetListaForm = () => setFormLista(emptyListaForm())
+
+  const startEditLista = (lista) => {
+    setFormLista({
+      id: lista.id,
+      nombre: lista.nombre || '',
+      moneda: String(lista.moneda || ''),
+      cliente: lista.cliente ? String(lista.cliente) : '',
+      fecha_desde: lista.fecha_desde || '',
+      fecha_hasta: lista.fecha_hasta || '',
+      prioridad: String(lista.prioridad ?? '100'),
+      activa: Boolean(lista.activa),
+    })
+  }
+
+  const submitLista = async (event) => {
     event.preventDefault()
-    if (!permissions['PRODUCTOS.CREAR']) {
-      toast.error('No tiene permiso para crear listas de precio.')
+    if (!(formLista.id ? permissions['PRODUCTOS.EDITAR'] : permissions['PRODUCTOS.CREAR'])) {
+      toast.error('No tiene permiso para guardar listas de precio.')
       return
     }
+
+    const prioridad = Number(String(formLista.prioridad || '100').trim())
+    const payload = {
+      nombre: String(formLista.nombre || '').trim(),
+      moneda: formLista.moneda || null,
+      cliente: formLista.cliente || null,
+      fecha_desde: formLista.fecha_desde || null,
+      fecha_hasta: formLista.fecha_hasta || null,
+      prioridad: Number.isFinite(prioridad) ? prioridad : null,
+      activa: Boolean(formLista.activa),
+    }
+
+    if (!payload.nombre || !payload.moneda || !payload.fecha_desde) {
+      toast.error('Nombre, moneda y vigencia desde son obligatorios.')
+      return
+    }
+    if (payload.prioridad === null || payload.prioridad < 0) {
+      toast.error('La prioridad debe ser un numero positivo.')
+      return
+    }
+
+    setSavingLista(true)
     try {
-      await api.post('/listas-precio/', formLista, { suppressGlobalErrorToast: true })
-      toast.success('Lista de precio creada.')
-      setFormLista({ nombre: '', moneda: '', fecha_desde: '', activa: true })
-      await loadData()
+      if (formLista.id) {
+        await api.patch(`/listas-precio/${formLista.id}/`, payload, { suppressGlobalErrorToast: true })
+        toast.success('Lista de precio actualizada.')
+      } else {
+        await api.post('/listas-precio/', payload, { suppressGlobalErrorToast: true })
+        toast.success('Lista de precio creada.')
+      }
+      resetListaForm()
+      await loadBaseData()
     } catch (error) {
-      toast.error(normalizeApiError(error, { fallback: 'No se pudo crear la lista.' }))
+      toast.error(normalizeApiError(error, { fallback: 'No se pudo guardar la lista.' }))
+    } finally {
+      setSavingLista(false)
     }
   }
 
-  const createItem = async (event) => {
-    event.preventDefault()
-    if (!permissions['PRODUCTOS.EDITAR']) {
-      toast.error('No tiene permiso para editar listas de precio.')
+  const confirmDelete = async () => {
+    if (!deletingTarget) {
       return
     }
+    if (!permissions['PRODUCTOS.BORRAR']) {
+      toast.error('No tiene permiso para eliminar listas de precio.')
+      return
+    }
+
     try {
-      await api.post('/listas-precio-items/', {
-        lista: selectedLista,
-        producto: formItem.producto,
-        precio: formItem.precio,
-      }, { suppressGlobalErrorToast: true })
-      toast.success('Precio agregado a la lista.')
-      setFormItem({ producto: '', precio: '' })
-      const { data } = await api.get('/listas-precio-items/', { suppressGlobalErrorToast: true })
-      setItems(normalizeListResponse(data))
+      await api.delete(`/listas-precio/${deletingTarget.id}/`, { suppressGlobalErrorToast: true })
+      toast.success('Lista de precio procesada correctamente.')
+      if (String(formLista.id) === String(deletingTarget.id)) {
+        resetListaForm()
+      }
+      setDeletingTarget(null)
+      await loadBaseData()
     } catch (error) {
-      toast.error(normalizeApiError(error, { fallback: 'No se pudo agregar el precio.' }))
+      toast.error(normalizeApiError(error, { fallback: 'No se pudo eliminar el registro.' }))
     }
   }
 
@@ -106,13 +235,18 @@ function ProductosListasPrecioPage() {
     <section className="space-y-4">
       <div>
         <h2 className="text-2xl font-semibold">Listas de precio</h2>
-        <p className="text-sm text-muted-foreground">Gestione listas comerciales y valores especificos por producto.</p>
+        <p className="text-sm text-muted-foreground">Administre cabeceras comerciales por cliente, vigencia y prioridad. Los precios por producto se gestionan dentro de cada lista.</p>
       </div>
 
-      <form className="flex flex-col gap-3 rounded-md border border-border bg-card p-4 md:flex-row md:items-end" onSubmit={createLista}>
-        <label className="text-sm md:min-w-80">
+      <form className="grid gap-3 rounded-md border border-border bg-card p-4 md:grid-cols-4" onSubmit={submitLista}>
+        <label className="text-sm md:col-span-2">
           Nombre lista
-          <input className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2" value={formLista.nombre} onChange={(event) => setFormLista((prev) => ({ ...prev, nombre: event.target.value }))} required />
+          <input
+            className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
+            value={formLista.nombre}
+            onChange={(event) => setFormLista((prev) => ({ ...prev, nombre: normalizeUpperInput(event.target.value) }))}
+            required
+          />
         </label>
         <label className="text-sm">
           Moneda
@@ -122,75 +256,110 @@ function ProductosListasPrecioPage() {
           </select>
         </label>
         <label className="text-sm">
+          Cliente
+          <select className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2" value={formLista.cliente} onChange={(event) => setFormLista((prev) => ({ ...prev, cliente: event.target.value }))}>
+            <option value="">Lista general</option>
+            {clientes.map((cliente) => <option key={cliente.id} value={cliente.id}>{cliente.contacto_nombre || cliente.id}</option>)}
+          </select>
+        </label>
+        <label className="text-sm">
           Vigencia desde
           <input type="date" className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2" value={formLista.fecha_desde} onChange={(event) => setFormLista((prev) => ({ ...prev, fecha_desde: event.target.value }))} required />
         </label>
+        <label className="text-sm">
+          Vigencia hasta
+          <input type="date" className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2" value={formLista.fecha_hasta} onChange={(event) => setFormLista((prev) => ({ ...prev, fecha_hasta: event.target.value }))} />
+        </label>
+        <label className="text-sm" htmlFor="lista-prioridad">
+          Nivel comercial
+        </label>
+        <div className="text-sm">
+          <select id="lista-prioridad" className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2" value={formLista.prioridad} onChange={(event) => setFormLista((prev) => ({ ...prev, prioridad: event.target.value }))}>
+            {prioridadOptions.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+          <span className="mt-1 block text-xs text-muted-foreground">
+            {prioridadSeleccionada?.description || 'La prioridad comercial ordena que lista se aplica primero cuando hay conflicto.'}
+          </span>
+        </div>
         <label className="inline-flex items-center gap-2 text-sm">
           <input type="checkbox" checked={formLista.activa} onChange={(event) => setFormLista((prev) => ({ ...prev, activa: event.target.checked }))} />
           Activa
         </label>
-        <Button type="submit">Crear lista</Button>
+        <div className="flex gap-2 md:col-span-4">
+          <Button type="submit" disabled={savingLista}>{savingLista ? 'Guardando...' : (formLista.id ? 'Actualizar lista' : 'Crear lista')}</Button>
+          {formLista.id ? <Button type="button" variant="outline" onClick={resetListaForm}>Cancelar</Button> : null}
+        </div>
       </form>
 
-      <div className="grid gap-4 md:grid-cols-[320px_minmax(0,1fr)]">
-        <div className="rounded-md border border-border bg-card p-4">
-          <label className="text-sm">
-            Seleccione lista
-            <select className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2" value={selectedLista} onChange={(event) => setSelectedLista(event.target.value)}>
-              <option value="">Seleccione</option>
-              {listas.map((lista) => <option key={lista.id} value={lista.id}>{lista.nombre}</option>)}
-            </select>
-          </label>
+      <div className="rounded-md border border-border bg-card">
+        <div className="border-b border-border px-4 py-3">
+          <h3 className="text-base font-semibold">Listas registradas</h3>
+          <p className="text-sm text-muted-foreground">Ingrese a una lista para gestionar sus precios por producto e importaciones masivas.</p>
         </div>
 
-        <div className="space-y-3 rounded-md border border-border bg-card p-4">
-          {selectedLista ? (
-            <>
-              <form className="grid gap-3 md:grid-cols-3" onSubmit={createItem}>
-                <label className="text-sm">
-                  Producto
-                  <select className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2" value={formItem.producto} onChange={(event) => setFormItem((prev) => ({ ...prev, producto: event.target.value }))} required>
-                    <option value="">Seleccione</option>
-                    {productos.map((producto) => <option key={producto.id} value={producto.id}>{producto.nombre}</option>)}
-                  </select>
-                </label>
-                <label className="text-sm">
-                  Precio
-                  <input type="number" min="0" step="1" className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2" value={formItem.precio} onChange={(event) => setFormItem((prev) => ({ ...prev, precio: event.target.value }))} required />
-                </label>
-                <div className="flex items-end">
-                  <Button type="submit">Agregar precio</Button>
+        {status === 'loading' ? (
+          <p className="px-4 py-4 text-sm text-muted-foreground">Cargando listas...</p>
+        ) : status === 'failed' ? (
+          <p className="px-4 py-4 text-sm text-destructive">No se pudieron cargar las listas de precio.</p>
+        ) : listas.length === 0 ? (
+          <p className="px-4 py-4 text-sm text-muted-foreground">No hay listas de precio registradas.</p>
+        ) : (
+          <div className="divide-y divide-border">
+            {listas.map((lista) => (
+              <div key={lista.id} className="flex flex-col gap-3 px-4 py-4 lg:flex-row lg:items-center lg:justify-between">
+                <div className="space-y-1">
+                  <p className="text-sm font-medium text-foreground">{lista.nombre}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {clienteLabelById.get(String(lista.cliente || '')) || 'Lista general'} | {monedaLabelById.get(String(lista.moneda || '')) || '-'}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {lista.fecha_desde || '-'} {lista.fecha_hasta ? `a ${lista.fecha_hasta}` : 'sin termino'} | {formatPriorityDisplay(lista)} | {lista.activa ? 'Activa' : 'Inactiva'}
+                  </p>
                 </div>
-              </form>
-
-              <div className="overflow-x-auto rounded-md border border-border">
-                <table className="min-w-full text-sm">
-                  <thead className="bg-muted/40">
-                    <tr>
-                      <th className="px-3 py-2 text-left font-medium">Producto</th>
-                      <th className="px-3 py-2 text-left font-medium">Precio</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {itemsListaSeleccionada.length === 0 ? (
-                      <tr><td className="px-3 py-3 text-muted-foreground" colSpan={2}>La lista seleccionada no tiene items.</td></tr>
-                    ) : (
-                      itemsListaSeleccionada.map((item) => (
-                        <tr key={item.id} className="border-t border-border">
-                          <td className="px-3 py-2">{productoLabelById.get(String(item.producto)) || item.producto}</td>
-                          <td className="px-3 py-2">{item.precio}</td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
+                <div className="flex flex-wrap gap-2">
+                  <Link
+                    to={`/productos/listas-precio/${lista.id}`}
+                    className={cn(buttonVariants({ variant: 'outline', size: 'sm' }))}
+                  >
+                    Gestionar precios
+                  </Link>
+                  {permissions['PRODUCTOS.EDITAR'] ? (
+                    <Button type="button" size="sm" variant="outline" onClick={() => startEditLista(lista)}>
+                      Editar cabecera
+                    </Button>
+                  ) : null}
+                  {permissions['PRODUCTOS.BORRAR'] ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="border-destructive/40 text-destructive hover:bg-destructive/10"
+                      onClick={() => setDeletingTarget({ id: lista.id, label: lista.nombre })}
+                    >
+                      Eliminar
+                    </Button>
+                  ) : null}
+                </div>
               </div>
-            </>
-          ) : (
-            <p className="text-sm text-muted-foreground">Seleccione una lista para administrar sus precios.</p>
-          )}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
+
+      <ConfirmDialog
+        open={Boolean(deletingTarget)}
+        title="Eliminar lista de precio"
+        description={
+          deletingTarget
+            ? `Se procesara la lista "${deletingTarget.label}". Si tiene historial comercial podria quedar desactivada en lugar de eliminarse.`
+            : ''
+        }
+        confirmLabel="Confirmar"
+        onCancel={() => setDeletingTarget(null)}
+        onConfirm={confirmDelete}
+      />
     </section>
   )
 }

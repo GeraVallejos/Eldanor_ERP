@@ -294,6 +294,61 @@ class VentaService:
         return venta
 ```
 
+### 2c.1 Si el modulo requiere importacion masiva
+
+Seguir estas reglas desde el inicio:
+
+- exponer `bulk_import` y `bulk_template`
+- soportar `dry_run=true` en el mismo endpoint
+- ejecutar preview con la misma logica funcional del flujo real
+- no persistir cambios en `dry_run`
+- devolver contrato estandar con `created`, `updated`, `errors`, `warnings`, `successful_rows`, `dry_run`
+- usar `apps.core.services.bulk_import`
+
+Patron recomendado:
+
+```python
+from apps.core.services.bulk_import import (
+    bulk_import_execution_context,
+    build_bulk_import_result,
+    format_bulk_import_row_error,
+)
+
+
+def import_entidades(*, uploaded_file, user, empresa, dry_run=False):
+    rows = parse_csv_upload(uploaded_file, required_headers=["codigo"])
+
+    created = 0
+    updated = 0
+    errors = []
+    warnings = []
+
+    with bulk_import_execution_context(dry_run=dry_run):
+        for line_number, row in rows:
+            try:
+                # misma logica del flujo real
+                ...
+            except Exception as exc:
+                errors.append({
+                    "line": line_number,
+                    "detail": format_bulk_import_row_error(exc),
+                })
+
+        result = build_bulk_import_result(
+            created=created,
+            updated=updated,
+            errors=errors,
+            warnings=warnings,
+            total_rows=len(rows),
+            dry_run=dry_run,
+        )
+        if dry_run:
+            return result
+
+    # auditoria y eventos solo en import real
+    return result
+```
+
 **2d. API** (`apps/ventas/api/views.py`)
 ```python
 from rest_framework import viewsets, status

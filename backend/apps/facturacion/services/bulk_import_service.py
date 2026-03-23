@@ -7,6 +7,11 @@ from apps.core.roles import RolUsuario
 from apps.core.services.csv_import import parse_csv_upload
 from apps.core.services.domain_event_service import DomainEventService
 from apps.core.services.outbox_service import OutboxService
+from apps.core.services.bulk_import import (
+    build_bulk_import_result,
+    bulk_import_execution_context,
+    format_bulk_import_row_error,
+)
 from apps.core.services.xlsx_template import build_xlsx_template
 from apps.facturacion.models import RangoFolioTributario, TipoDocumentoTributario
 
@@ -120,7 +125,7 @@ def _registrar_resumen_importacion(*, empresa, user, payload):
     )
 
 
-def import_rangos_folios_tributarios(*, uploaded_file, user, empresa):
+def import_rangos_folios_tributarios(*, uploaded_file, user, empresa, dry_run=False):
     """Importa rangos CAF por tipo de documento para la empresa activa."""
     _ensure_admin_user(user, empresa)
 
@@ -133,64 +138,68 @@ def import_rangos_folios_tributarios(*, uploaded_file, user, empresa):
     updated = 0
     errors = []
 
-    for line_number, row in rows:
-        try:
-            tipo_documento = _normalize_tipo_documento(row.get("tipo_documento"))
-            caf_nombre = _normalize_text(row.get("caf_nombre"))
-            if not caf_nombre:
-                raise BusinessRuleError("caf_nombre es obligatorio.")
+    with bulk_import_execution_context(dry_run=dry_run):
+        for line_number, row in rows:
+            try:
+                tipo_documento = _normalize_tipo_documento(row.get("tipo_documento"))
+                caf_nombre = _normalize_text(row.get("caf_nombre"))
+                if not caf_nombre:
+                    raise BusinessRuleError("caf_nombre es obligatorio.")
 
-            folio_desde = _to_optional_int(row.get("folio_desde"), field_name="folio_desde")
-            folio_hasta = _to_optional_int(row.get("folio_hasta"), field_name="folio_hasta")
-            if folio_desde is None or folio_hasta is None:
-                raise BusinessRuleError("Debe informar folio_desde y folio_hasta.")
+                folio_desde = _to_optional_int(row.get("folio_desde"), field_name="folio_desde")
+                folio_hasta = _to_optional_int(row.get("folio_hasta"), field_name="folio_hasta")
+                if folio_desde is None or folio_hasta is None:
+                    raise BusinessRuleError("Debe informar folio_desde y folio_hasta.")
 
-            existing = RangoFolioTributario.all_objects.filter(
-                empresa=empresa,
-                tipo_documento=tipo_documento,
-                folio_desde=folio_desde,
-                folio_hasta=folio_hasta,
-            ).first()
+                existing = RangoFolioTributario.all_objects.filter(
+                    empresa=empresa,
+                    tipo_documento=tipo_documento,
+                    folio_desde=folio_desde,
+                    folio_hasta=folio_hasta,
+                ).first()
 
-            payload = {
-                "empresa": empresa,
-                "creado_por": user,
-                "tipo_documento": tipo_documento,
-                "caf_nombre": caf_nombre,
-                "folio_desde": folio_desde,
-                "folio_hasta": folio_hasta,
-                "folio_actual": _to_optional_int(row.get("folio_actual"), field_name="folio_actual"),
-                "fecha_autorizacion": _to_optional_date(row.get("fecha_autorizacion"), field_name="fecha_autorizacion"),
-                "fecha_vencimiento": _to_optional_date(row.get("fecha_vencimiento"), field_name="fecha_vencimiento"),
-                "activo": _to_bool(row.get("activo"), default=True),
-            }
-
-            if existing:
-                for key, value in payload.items():
-                    if key in {"empresa", "creado_por"}:
-                        continue
-                    setattr(existing, key, value)
-                existing.save()
-                updated += 1
-            else:
-                RangoFolioTributario.all_objects.create(**payload)
-                created += 1
-        except Exception as exc:  # pragma: no cover
-            errors.append(
-                {
-                    "line": line_number,
-                    "tipo_documento": row.get("tipo_documento") or "",
-                    "detail": str(exc),
+                payload = {
+                    "empresa": empresa,
+                    "creado_por": user,
+                    "tipo_documento": tipo_documento,
+                    "caf_nombre": caf_nombre,
+                    "folio_desde": folio_desde,
+                    "folio_hasta": folio_hasta,
+                    "folio_actual": _to_optional_int(row.get("folio_actual"), field_name="folio_actual"),
+                    "fecha_autorizacion": _to_optional_date(row.get("fecha_autorizacion"), field_name="fecha_autorizacion"),
+                    "fecha_vencimiento": _to_optional_date(row.get("fecha_vencimiento"), field_name="fecha_vencimiento"),
+                    "activo": _to_bool(row.get("activo"), default=True),
                 }
-            )
 
-    result = {
-        "created": created,
-        "updated": updated,
-        "errors": errors,
-        "total_rows": len(rows),
-        "successful_rows": created + updated,
-    }
+                if existing:
+                    for key, value in payload.items():
+                        if key in {"empresa", "creado_por"}:
+                            continue
+                        setattr(existing, key, value)
+                    existing.save()
+                    updated += 1
+                else:
+                    RangoFolioTributario.all_objects.create(**payload)
+                    created += 1
+            except Exception as exc:  # pragma: no cover
+                errors.append(
+                    {
+                        "line": line_number,
+                        "tipo_documento": row.get("tipo_documento") or "",
+                        "detail": format_bulk_import_row_error(exc),
+                    }
+                )
+
+        result = build_bulk_import_result(
+            created=created,
+            updated=updated,
+            errors=errors,
+            warnings=[],
+            total_rows=len(rows),
+            dry_run=dry_run,
+        )
+        if dry_run:
+            return result
     _registrar_resumen_importacion(
         empresa=empresa,
         user=user,
@@ -228,7 +237,7 @@ def build_rangos_folios_template(*, user, empresa):
         "120",
         "2026-01-01",
         "2026-12-31",
-        "true",
+        "SI",
     ]
 
     instructions = [
@@ -244,5 +253,5 @@ def build_rangos_folios_template(*, user, empresa):
         sample_row=sample,
         instructions=instructions,
         sheet_name="RangosFolios",
+        template_title="Plantilla de importacion - Rangos folios tributarios",
     )
-

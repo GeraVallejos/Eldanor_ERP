@@ -134,6 +134,10 @@ class MovimientoBancarioViewSet(TenantViewSetMixin, ModelViewSet):
         "bulk_template": Acciones.VER,
     }
 
+    @staticmethod
+    def _is_truthy(value):
+        return str(value).strip().lower() in {"1", "true", "t", "yes", "y", "si", "on"}
+
     def perform_create(self, serializer):
         self._set_tenant_context()
         movimiento = TesoreriaBancariaService.registrar_movimiento_manual(
@@ -197,6 +201,7 @@ class MovimientoBancarioViewSet(TenantViewSetMixin, ModelViewSet):
             uploaded_file=request.FILES.get("file"),
             user=request.user,
             empresa=self.get_empresa(),
+            dry_run=self._is_truthy(request.data.get("dry_run")),
         )
         return Response(payload, status=status.HTTP_200_OK)
 

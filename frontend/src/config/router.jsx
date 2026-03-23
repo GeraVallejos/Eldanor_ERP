@@ -1,6 +1,7 @@
 import { Suspense, lazy } from 'react'
 import { createBrowserRouter } from 'react-router-dom'
 import ERPLayout from '@/layouts/ERPLayout'
+import { PRODUCTOS_MANAGE_ANY } from '@/config/productosAccess'
 import PrivateRoute from '@/modules/auth/components/PrivateRoute'
 import PublicOnlyRoute from '@/modules/auth/components/PublicOnlyRoute'
 import PermissionRoute from '@/modules/shared/auth/PermissionRoute'
@@ -57,8 +58,10 @@ const VentasNotasListPage = lazy(() => import('@/modules/ventas/pages/VentasNota
 const VentasNotasFormPage = lazy(() => import('@/modules/ventas/pages/VentasNotasFormPage'))
 const ProductosCreatePage = lazy(() => import('@/modules/productos/pages/ProductosCreatePage'))
 const ProductosCategoriasPage = lazy(() => import('@/modules/productos/pages/ProductosCategoriasPage'))
+const ProductosAnalisisPage = lazy(() => import('@/modules/productos/pages/ProductosAnalisisPage'))
 const ProductosDetailPage = lazy(() => import('@/modules/productos/pages/ProductosDetailPage'))
 const ProductosImpuestosPage = lazy(() => import('@/modules/productos/pages/ProductosImpuestosPage'))
+const ProductosListaPrecioDetailPage = lazy(() => import('@/modules/productos/pages/ProductosListaPrecioDetailPage'))
 const ProductosListasPrecioPage = lazy(() => import('@/modules/productos/pages/ProductosListasPrecioPage'))
 const ProductosListPage = lazy(() => import('@/modules/productos/pages/ProductosListPage'))
 const NotFoundPage = lazy(() => import('@/modules/shared/pages/NotFoundPage'))
@@ -72,9 +75,9 @@ function page(LazyPage) {
   )
 }
 
-function guardedPage(LazyPage, permission, message) {
+function guardedPage(LazyPage, permission, message, options = {}) {
   return (
-    <PermissionRoute permission={permission} message={message}>
+    <PermissionRoute permission={permission} message={message} requireAny={Boolean(options.requireAny)}>
       {page(LazyPage)}
     </PermissionRoute>
   )
@@ -100,11 +103,45 @@ const router = createBrowserRouter([
           { path: 'presupuestos/:id/trazabilidad', element: guardedPage(PresupuestoTrazabilidadPage, 'PRESUPUESTOS.VER', 'No tiene permiso para revisar la trazabilidad del presupuesto.') },
           { path: 'productos', element: guardedPage(ProductosListPage, 'PRODUCTOS.VER', 'No tiene permiso para revisar productos.') },
           { path: 'productos/:id', element: guardedPage(ProductosDetailPage, 'PRODUCTOS.VER', 'No tiene permiso para revisar el detalle del producto.') },
+          { path: 'productos/:id/analisis', element: guardedPage(ProductosAnalisisPage, 'PRODUCTOS.VER', 'No tiene permiso para revisar el analisis del producto.') },
           { path: 'productos/nuevo', element: guardedPage(ProductosCreatePage, 'PRODUCTOS.CREAR', 'No tiene permiso para crear productos.') },
           { path: 'productos/:id/editar', element: guardedPage(ProductosCreatePage, 'PRODUCTOS.EDITAR', 'No tiene permiso para editar productos.') },
-          { path: 'productos/categorias', element: guardedPage(ProductosCategoriasPage, 'PRODUCTOS.EDITAR', 'No tiene permiso para gestionar categorias.') },
-          { path: 'productos/impuestos', element: guardedPage(ProductosImpuestosPage, 'PRODUCTOS.EDITAR', 'No tiene permiso para gestionar impuestos.') },
-          { path: 'productos/listas-precio', element: guardedPage(ProductosListasPrecioPage, 'PRODUCTOS.EDITAR', 'No tiene permiso para gestionar listas de precio.') },
+          {
+            path: 'productos/categorias',
+            element: guardedPage(
+              ProductosCategoriasPage,
+              PRODUCTOS_MANAGE_ANY,
+              'No tiene permiso para gestionar categorias.',
+              { requireAny: true },
+            ),
+          },
+          {
+            path: 'productos/impuestos',
+            element: guardedPage(
+              ProductosImpuestosPage,
+              PRODUCTOS_MANAGE_ANY,
+              'No tiene permiso para gestionar impuestos.',
+              { requireAny: true },
+            ),
+          },
+          {
+            path: 'productos/listas-precio',
+            element: guardedPage(
+              ProductosListasPrecioPage,
+              PRODUCTOS_MANAGE_ANY,
+              'No tiene permiso para gestionar listas de precio.',
+              { requireAny: true },
+            ),
+          },
+          {
+            path: 'productos/listas-precio/:id',
+            element: guardedPage(
+              ProductosListaPrecioDetailPage,
+              PRODUCTOS_MANAGE_ANY,
+              'No tiene permiso para gestionar precios de la lista.',
+              { requireAny: true },
+            ),
+          },
           { path: 'compras/ordenes', element: guardedPage(ComprasOrdenesListPage, 'COMPRAS.VER', 'No tiene permiso para revisar ordenes de compra.') },
           { path: 'compras/resumen', element: guardedPage(ComprasResumenPage, 'COMPRAS.VER', 'No tiene permiso para revisar el resumen de compras.') },
           { path: 'compras/reportes', element: guardedPage(ComprasReportesPage, 'COMPRAS.VER', 'No tiene permiso para revisar reportes de compras.') },

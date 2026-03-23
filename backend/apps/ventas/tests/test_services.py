@@ -54,7 +54,12 @@ def usuario_owner(db, empresa):
 @pytest.fixture
 def cliente(db, empresa):
     set_current_empresa(empresa)
-    contacto = Contacto.objects.create(nombre="Cliente Service", email="cliente_service@test.com")
+    contacto = Contacto.objects.create(
+        nombre="Cliente Service",
+        rut="12.345.678-5",
+        email="cliente_service@test.com",
+        tipo="EMPRESA",
+    )
     c = Cliente.objects.create(contacto=contacto, dias_credito=30)
     set_current_empresa(None)
     return c

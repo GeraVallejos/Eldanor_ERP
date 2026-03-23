@@ -10,7 +10,7 @@ import { buttonVariants } from '@/components/ui/buttonVariants'
 import { formatDateTimeChile, getChileDateSuffix } from '@/lib/dateTimeFormat'
 import { formatCurrencyCLP, formatSmartNumber } from '@/lib/numberFormat'
 import { cn } from '@/lib/utils'
-import { getProductosCatalog } from '@/modules/productos/services/productosCatalogCache'
+import { mergeProductosCatalog, searchProductosCatalog } from '@/modules/productos/services/productosCatalogCache'
 import { downloadExcelFile } from '@/modules/shared/exports/downloadExcelFile'
 import { downloadSimpleTablePdf } from '@/modules/shared/exports/downloadSimpleTablePdf'
 
@@ -53,17 +53,30 @@ function InventarioReportesPage() {
     bodega_id: '',
   })
   const [onlyWithStock, setOnlyWithStock] = useState(true)
+  const [loadingProductos, setLoadingProductos] = useState(false)
 
   const loadCatalogs = useCallback(async () => {
     try {
       const [productosData, { data: bodegasData }] = await Promise.all([
-        getProductosCatalog(),
+        searchProductosCatalog({ tipo: 'PRODUCTO' }),
         api.get('/bodegas/', { suppressGlobalErrorToast: true }),
       ])
       setProductos(productosData)
       setBodegas(normalizeListResponse(bodegasData))
     } catch (error) {
       toast.error(normalizeApiError(error, { fallback: 'No se pudieron cargar los catalogos de reportes.' }))
+    }
+  }, [])
+
+  const searchProductos = useCallback(async (query) => {
+    setLoadingProductos(true)
+    try {
+      const results = await searchProductosCatalog({ query, tipo: 'PRODUCTO' })
+      setProductos((prev) => mergeProductosCatalog(prev, results))
+    } catch (error) {
+      toast.error(normalizeApiError(error, { fallback: 'No se pudieron buscar productos.' }))
+    } finally {
+      setLoadingProductos(false)
     }
   }, [])
 
@@ -319,10 +332,12 @@ function InventarioReportesPage() {
             className="mt-1"
             value={filters.producto_id}
             onChange={(next) => updateFilter('producto_id', next)}
+            onSearchChange={(next) => { void searchProductos(next) }}
             options={productoOptions}
             ariaLabel="Producto"
             placeholder="Buscar producto..."
             emptyText="No hay productos coincidentes"
+            loading={loadingProductos}
           />
         </label>
 

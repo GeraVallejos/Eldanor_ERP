@@ -33,4 +33,16 @@ describe('resolveNavigation', () => {
 
     expect(modules.map((module) => module.id)).toContain('productos')
   })
+
+  it('muestra administracion de productos cuando el usuario tiene algun permiso de gestion valido', () => {
+    const modules = resolveNavigation({
+      permissions: ['PRODUCTOS.VER', 'PRODUCTOS.CREAR'],
+    })
+
+    const productos = modules.find((module) => module.id === 'productos')
+    expect(productos).toBeDefined()
+    expect(productos.children.map((item) => item.id)).toContain('productos-categorias')
+    expect(productos.children.map((item) => item.id)).toContain('productos-impuestos')
+    expect(productos.children.map((item) => item.id)).toContain('productos-listas-precio')
+  })
 })

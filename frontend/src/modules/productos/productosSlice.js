@@ -28,8 +28,31 @@ function normalizeCatalogResponse(data) {
   return []
 }
 
+function normalizeProductsPayload(data, options = {}) {
+  const items = normalizeProductsResponse(data)
+  const pageSize = Number(options?.pageSize || 0)
+  const currentPage = Number(options?.page || 1)
+
+  if (Array.isArray(data?.results)) {
+    return {
+      items,
+      totalCount: Number(data?.count ?? items.length),
+      currentPage,
+      pageSize,
+    }
+  }
+
+  return {
+    items,
+    totalCount: items.length,
+    currentPage,
+    pageSize,
+  }
+}
+
 const initialState = {
   items: [],
+  totalCount: 0,
   status: 'idle',
   error: null,
   createStatus: 'idle',
@@ -45,11 +68,37 @@ export const fetchProductos = createAsyncThunk(
   async (options = {}, { rejectWithValue }) => {
     try {
       const includeInactive = Boolean(options?.includeInactive)
+      const query = String(options?.query || '').trim()
+      const tipo = String(options?.tipo || '').trim().toUpperCase()
+      const categoria = String(options?.categoria || '').trim()
+      const page = Number(options?.page || 0)
+      const pageSize = Number(options?.pageSize || 0)
+      const params = {}
+
+      if (includeInactive) {
+        params.include_inactive = 1
+      }
+      if (query) {
+        params.q = query
+      }
+      if (tipo && tipo !== 'ALL') {
+        params.tipo = tipo
+      }
+      if (categoria && categoria !== 'ALL') {
+        params.categoria = categoria
+      }
+      if (page > 0) {
+        params.page = page
+      }
+      if (pageSize > 0) {
+        params.page_size = pageSize
+      }
+
       const { data } = await api.get('/productos/', {
-        params: includeInactive ? { include_inactive: 1 } : undefined,
+        params: Object.keys(params).length > 0 ? params : undefined,
         suppressGlobalErrorToast: true,
       })
-      return normalizeProductsResponse(data)
+      return normalizeProductsPayload(data, { page, pageSize })
     } catch (error) {
       return rejectWithValue(
         normalizeApiError(error, { fallback: 'No se pudo cargar productos.' }),
@@ -102,6 +151,7 @@ const productosSlice = createSlice({
   reducers: {
     clearProductosState: (state) => {
       state.items = []
+      state.totalCount = 0
       state.status = 'idle'
       state.error = null
       state.createStatus = 'idle'
@@ -120,10 +170,12 @@ const productosSlice = createSlice({
       })
       .addCase(fetchProductos.fulfilled, (state, action) => {
         state.status = 'succeeded'
-        state.items = action.payload
+        state.items = action.payload.items
+        state.totalCount = action.payload.totalCount
       })
       .addCase(fetchProductos.rejected, (state, action) => {
         state.items = []
+        state.totalCount = 0
         state.status = 'failed'
         state.error = action.payload || 'Error al cargar productos.'
       })
@@ -149,6 +201,7 @@ const productosSlice = createSlice({
         state.createStatus = 'succeeded'
         state.createError = null
         state.items = [action.payload, ...state.items]
+        state.totalCount += 1
       })
       .addCase(createProducto.rejected, (state, action) => {
         state.createStatus = 'failed'
@@ -156,6 +209,7 @@ const productosSlice = createSlice({
       })
       .addCase(login.fulfilled, (state) => {
         state.items = []
+        state.totalCount = 0
         state.status = 'idle'
         state.error = null
         state.createStatus = 'idle'
@@ -167,6 +221,7 @@ const productosSlice = createSlice({
       })
       .addCase(logout, (state) => {
         state.items = []
+        state.totalCount = 0
         state.status = 'idle'
         state.error = null
         state.createStatus = 'idle'
@@ -182,6 +237,7 @@ const productosSlice = createSlice({
 export const { clearProductosState, resetCreateProductoState } = productosSlice.actions
 
 export const selectProductos = (state) => state.productos.items
+export const selectProductosTotalCount = (state) => state.productos.totalCount
 export const selectProductosStatus = (state) => state.productos.status
 export const selectProductosError = (state) => state.productos.error
 export const selectCreateProductoStatus = (state) => state.productos.createStatus

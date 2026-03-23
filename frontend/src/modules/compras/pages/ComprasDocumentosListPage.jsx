@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
 import { api } from '@/api/client'
+import ActiveSearchFilter from '@/components/ui/ActiveSearchFilter'
 import { normalizeApiError } from '@/api/errors'
 import Button from '@/components/ui/Button'
 import DocumentActionsDialog from '@/components/ui/DocumentActionsDialog'
@@ -200,6 +201,13 @@ function ComprasDocumentosListPage() {
     })
   }, [documentos, search, estadoFilter, tipoFilter, proveedorById, contactoById])
 
+  const hasActiveFilters = Boolean(search.trim()) || estadoFilter !== 'ACTIVOS' || tipoFilter !== 'ALL'
+  const activeFilterLabel = [
+    search.trim() ? `busqueda "${search.trim()}"` : '',
+    estadoFilter !== 'ACTIVOS' ? `estado ${estadoFilter}` : '',
+    tipoFilter !== 'ALL' ? `tipo ${TIPO_LABELS[tipoFilter] || tipoFilter}` : '',
+  ].filter(Boolean).join(' y ')
+
   const { paginatedRows: paginatedDocumentos, toggleSort, getSortIndicator, currentPage, totalPages, totalRows, nextPage, prevPage } = useTableSorting(filtered, {
     accessors: {
       creado_en: (doc) => doc.creado_en,
@@ -359,13 +367,30 @@ function ComprasDocumentosListPage() {
       <div className="grid grid-cols-1 gap-2 md:grid-cols-3 md:items-end">
         <label className="text-sm">
           Buscar
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Folio, proveedor, tipo o estado..."
-            className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-          />
+          <div className="relative mt-1">
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Escape') {
+                  setSearch('')
+                }
+              }}
+              placeholder="Folio, proveedor, tipo o estado..."
+              className="w-full rounded-md border border-input bg-background px-3 py-2 pr-9 text-sm"
+            />
+            {search ? (
+              <button
+                type="button"
+                onClick={() => setSearch('')}
+                className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-muted-foreground transition hover:bg-muted hover:text-foreground"
+                aria-label="Limpiar busqueda"
+              >
+                x
+              </button>
+            ) : null}
+          </div>
         </label>
 
         <label className="text-sm">
@@ -397,6 +422,20 @@ function ComprasDocumentosListPage() {
           </select>
         </label>
       </div>
+
+      {hasActiveFilters ? (
+        <ActiveSearchFilter
+          activeLabel={activeFilterLabel}
+          filteredCount={filtered.length}
+          totalCount={documentos.length}
+          noun="documentos"
+          onClear={() => {
+            setSearch('')
+            setEstadoFilter('ACTIVOS')
+            setTipoFilter('ALL')
+          }}
+        />
+      ) : null}
 
       {status === 'loading' ? <p className="text-sm text-muted-foreground">Cargando documentos...</p> : null}
 

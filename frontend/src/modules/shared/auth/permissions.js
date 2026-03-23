@@ -28,6 +28,14 @@ export function hasPermission(user, permissionCode) {
   return permissions.includes(`${moduleCode}.*`)
 }
 
+export function hasAnyPermission(user, permissionCodes = []) {
+  if (!Array.isArray(permissionCodes) || permissionCodes.length === 0) {
+    return false
+  }
+
+  return permissionCodes.some((permissionCode) => hasPermission(user, permissionCode))
+}
+
 export function canManagePresupuestoStatus(user, currentStatus, targetStatus) {
   const from = String(currentStatus || '').toUpperCase()
   const to = String(targetStatus || '').toUpperCase()

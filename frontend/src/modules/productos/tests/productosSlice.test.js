@@ -5,6 +5,7 @@ import {
   fetchCatalogosProducto,
   fetchProductos,
   selectProductos,
+  selectProductosTotalCount,
 } from '@/modules/productos/productosSlice'
 import { logout } from '@/modules/auth/authSlice'
 import { server } from '@/test/msw/server'
@@ -18,6 +19,7 @@ describe('productosSlice', () => {
 
     expect(result.type).toBe('productos/fetchProductos/fulfilled')
     expect(selectProductos(store.getState())).toHaveLength(1)
+    expect(selectProductosTotalCount(store.getState())).toBe(1)
     expect(selectProductos(store.getState())[0].nombre).toBe('Servicio de poda')
   })
 
@@ -73,6 +75,7 @@ describe('productosSlice', () => {
       },
       productos: {
         items: [{ id: 300, nombre: 'Temporal' }],
+        totalCount: 1,
         status: 'succeeded',
         error: null,
         createStatus: 'idle',
@@ -87,6 +90,7 @@ describe('productosSlice', () => {
     store.dispatch(logout())
 
     expect(store.getState().productos.items).toEqual([])
+    expect(store.getState().productos.totalCount).toBe(0)
     expect(store.getState().productos.status).toBe('idle')
     expect(store.getState().productos.catalogStatus).toBe('idle')
   })

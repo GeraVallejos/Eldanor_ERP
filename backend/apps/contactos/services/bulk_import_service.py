@@ -7,7 +7,13 @@ from apps.auditoria.models import AuditSeverity
 from apps.auditoria.services import AuditoriaService
 from apps.core.permisos.constantes_permisos import Acciones, Modulos
 from apps.core.roles import RolUsuario
-from apps.core.services import DomainEventService, OutboxService
+from apps.core.services import (
+    DomainEventService,
+    OutboxService,
+    build_bulk_import_result,
+    bulk_import_execution_context,
+    format_bulk_import_row_error,
+)
 from apps.core.services.csv_import import parse_csv_upload
 from apps.core.services.xlsx_template import build_xlsx_template
 from apps.core.validators import formatear_rut, validar_rut_con_dv
@@ -48,6 +54,14 @@ def _to_decimal(raw_value, *, default=Decimal("0")):
 
 def _normalize_text(value):
     return str(value or "").strip()
+
+
+def _require_text_field(row, field_name, *, label=None):
+    """Exige un texto obligatorio por fila y devuelve el valor normalizado."""
+    value = _normalize_text(row.get(field_name))
+    if not value:
+        raise BusinessRuleError(f"El campo {label or field_name} es obligatorio.")
+    return value
 
 
 def _normalize_rut(value):
@@ -157,33 +171,22 @@ def _registrar_auditoria_importacion(*, empresa, user, entity_type, summary, pay
 
 
 def _find_or_create_contacto(row, *, empresa, user):
-    rut = _normalize_rut(row.get("rut"))
-    nombre = _normalize_text(row.get("nombre"))
-    if not nombre:
-        raise BusinessRuleError("El nombre es obligatorio.")
+    """Resuelve un contacto por RUT obligatorio y aplica alta o actualizacion consistente."""
+    nombre = _require_text_field(row, "nombre", label="nombre")
+    rut = _normalize_rut(_require_text_field(row, "rut", label="rut"))
+    email = _require_text_field(row, "email", label="email")
+    tipo = _normalize_tipo_contacto(_require_text_field(row, "tipo", label="tipo"))
 
-    email = _normalize_text(row.get("email"))
-    tipo = _normalize_tipo_contacto(row.get("tipo"))
-
-    contacto = None
-    if rut:
-        contacto = Contacto.all_objects.filter(empresa=empresa, rut=rut).first()
-
-    if not contacto and nombre and email:
-        contacto = Contacto.all_objects.filter(
-            empresa=empresa,
-            nombre__iexact=nombre,
-            email__iexact=email,
-        ).first()
+    contacto = Contacto.all_objects.filter(empresa=empresa, rut=rut).first()
 
     contacto_fields = {
         "empresa": empresa,
         "creado_por": user,
         "nombre": nombre,
         "razon_social": _normalize_text(row.get("razon_social")) or None,
-        "rut": rut or None,
+        "rut": rut,
         "tipo": tipo,
-        "email": email or None,
+        "email": email,
         "telefono": _normalize_text(row.get("telefono")) or None,
         "celular": _normalize_text(row.get("celular")) or None,
         "notas": _normalize_text(row.get("notas")) or None,
@@ -208,60 +211,64 @@ def _find_or_create_contacto(row, *, empresa, user):
     return contacto, created, updated
 
 
-def import_clientes(*, uploaded_file, user, empresa):
+def import_clientes(*, uploaded_file, user, empresa, dry_run=False):
     """Importa clientes desde CSV creando o actualizando contacto base y ficha comercial."""
     _ensure_admin_user(user, empresa)
 
     rows = parse_csv_upload(
         uploaded_file,
-        required_headers=["nombre"],
+        required_headers=["nombre", "rut", "email", "tipo"],
     )
 
     created = 0
     updated = 0
     errors = []
 
-    for line_number, row in rows:
-        try:
-            contacto, _created_contacto, _updated_contacto = _find_or_create_contacto(row, empresa=empresa, user=user)
+    with bulk_import_execution_context(dry_run=dry_run):
+        for line_number, row in rows:
+            try:
+                contacto, _created_contacto, _updated_contacto = _find_or_create_contacto(row, empresa=empresa, user=user)
 
-            cliente = Cliente.all_objects.filter(empresa=empresa, contacto=contacto).first()
-            cliente_fields = {
-                "empresa": empresa,
-                "creado_por": user,
-                "contacto": contacto,
-                "limite_credito": _to_decimal(row.get("limite_credito"), default=Decimal("0")),
-                "dias_credito": _to_int(row.get("dias_credito"), default=0),
-                "categoria_cliente": _normalize_text(row.get("categoria_cliente")) or None,
-                "segmento": _normalize_text(row.get("segmento")) or None,
-            }
-
-            if cliente:
-                for key, value in cliente_fields.items():
-                    if key in {"empresa", "creado_por", "contacto"}:
-                        continue
-                    setattr(cliente, key, value)
-                cliente.save()
-                updated += 1
-            else:
-                Cliente(**cliente_fields).save()
-                created += 1
-        except Exception as exc:  # pragma: no cover - defensive guard for row-level resilience
-            errors.append(
-                {
-                    "line": line_number,
-                    "nombre": row.get("nombre") or "",
-                    "detail": str(exc),
+                cliente = Cliente.all_objects.filter(empresa=empresa, contacto=contacto).first()
+                cliente_fields = {
+                    "empresa": empresa,
+                    "creado_por": user,
+                    "contacto": contacto,
+                    "limite_credito": _to_decimal(row.get("limite_credito"), default=Decimal("0")),
+                    "dias_credito": _to_int(row.get("dias_credito"), default=0),
+                    "categoria_cliente": _normalize_text(row.get("categoria_cliente")) or None,
+                    "segmento": _normalize_text(row.get("segmento")) or None,
                 }
-            )
 
-    result = {
-        "created": created,
-        "updated": updated,
-        "errors": errors,
-        "total_rows": len(rows),
-        "successful_rows": created + updated,
-    }
+                if cliente:
+                    for key, value in cliente_fields.items():
+                        if key in {"empresa", "creado_por", "contacto"}:
+                            continue
+                        setattr(cliente, key, value)
+                    cliente.save()
+                    updated += 1
+                else:
+                    Cliente(**cliente_fields).save()
+                    created += 1
+            except Exception as exc:  # pragma: no cover - defensive guard for row-level resilience
+                errors.append(
+                    {
+                        "line": line_number,
+                        "nombre": row.get("nombre") or "",
+                        "detail": format_bulk_import_row_error(exc),
+                    }
+                )
+
+        result = build_bulk_import_result(
+            created=created,
+            updated=updated,
+            errors=errors,
+            warnings=[],
+            total_rows=len(rows),
+            dry_run=dry_run,
+        )
+        if dry_run:
+            return result
 
     _registrar_auditoria_importacion(
         empresa=empresa,
@@ -280,59 +287,63 @@ def import_clientes(*, uploaded_file, user, empresa):
     return result
 
 
-def import_proveedores(*, uploaded_file, user, empresa):
+def import_proveedores(*, uploaded_file, user, empresa, dry_run=False):
     """Importa proveedores desde CSV creando o actualizando contacto base y ficha de compras."""
     _ensure_admin_user(user, empresa)
 
     rows = parse_csv_upload(
         uploaded_file,
-        required_headers=["nombre"],
+        required_headers=["nombre", "rut", "email", "tipo"],
     )
 
     created = 0
     updated = 0
     errors = []
 
-    for line_number, row in rows:
-        try:
-            contacto, _created_contacto, _updated_contacto = _find_or_create_contacto(row, empresa=empresa, user=user)
+    with bulk_import_execution_context(dry_run=dry_run):
+        for line_number, row in rows:
+            try:
+                contacto, _created_contacto, _updated_contacto = _find_or_create_contacto(row, empresa=empresa, user=user)
 
-            proveedor = Proveedor.all_objects.filter(empresa=empresa, contacto=contacto).first()
-            proveedor_fields = {
-                "empresa": empresa,
-                "creado_por": user,
-                "contacto": contacto,
-                "giro": _normalize_text(row.get("giro")) or None,
-                "vendedor_contacto": _normalize_text(row.get("vendedor_contacto")) or None,
-                "dias_credito": _to_int(row.get("dias_credito"), default=0),
-            }
-
-            if proveedor:
-                for key, value in proveedor_fields.items():
-                    if key in {"empresa", "creado_por", "contacto"}:
-                        continue
-                    setattr(proveedor, key, value)
-                proveedor.save()
-                updated += 1
-            else:
-                Proveedor(**proveedor_fields).save()
-                created += 1
-        except Exception as exc:  # pragma: no cover - defensive guard for row-level resilience
-            errors.append(
-                {
-                    "line": line_number,
-                    "nombre": row.get("nombre") or "",
-                    "detail": str(exc),
+                proveedor = Proveedor.all_objects.filter(empresa=empresa, contacto=contacto).first()
+                proveedor_fields = {
+                    "empresa": empresa,
+                    "creado_por": user,
+                    "contacto": contacto,
+                    "giro": _normalize_text(row.get("giro")) or None,
+                    "vendedor_contacto": _normalize_text(row.get("vendedor_contacto")) or None,
+                    "dias_credito": _to_int(row.get("dias_credito"), default=0),
                 }
-            )
 
-    result = {
-        "created": created,
-        "updated": updated,
-        "errors": errors,
-        "total_rows": len(rows),
-        "successful_rows": created + updated,
-    }
+                if proveedor:
+                    for key, value in proveedor_fields.items():
+                        if key in {"empresa", "creado_por", "contacto"}:
+                            continue
+                        setattr(proveedor, key, value)
+                    proveedor.save()
+                    updated += 1
+                else:
+                    Proveedor(**proveedor_fields).save()
+                    created += 1
+            except Exception as exc:  # pragma: no cover - defensive guard for row-level resilience
+                errors.append(
+                    {
+                        "line": line_number,
+                        "nombre": row.get("nombre") or "",
+                        "detail": format_bulk_import_row_error(exc),
+                    }
+                )
+
+        result = build_bulk_import_result(
+            created=created,
+            updated=updated,
+            errors=errors,
+            warnings=[],
+            total_rows=len(rows),
+            dry_run=dry_run,
+        )
+        if dry_run:
+            return result
 
     _registrar_auditoria_importacion(
         empresa=empresa,
@@ -380,7 +391,7 @@ def build_clientes_bulk_template(*, user, empresa):
         "22223333",
         "99998888",
         "Cliente preferente",
-        "true",
+        "SI",
         "500000",
         "30",
         "ORO",
@@ -389,12 +400,12 @@ def build_clientes_bulk_template(*, user, empresa):
 
     instructions = [
         "MODULO CLIENTES: use esta plantilla solo para clientes.",
-        "Columnas obligatorias: nombre.",
+        "Columnas obligatorias: nombre, rut, email, tipo.",
         "tipo permitido: EMPRESA o PERSONA.",
         "NO usar PRODUCTO/SERVICIO en esta plantilla.",
-        "activo: true/false.",
+        "activo: use SI o NO.",
         "Si rut existe en la empresa, se actualiza ese contacto.",
-        "Si no hay rut, se intenta match por nombre + email.",
+        "rut debe ser unico por empresa activa.",
     ]
 
     return build_xlsx_template(
@@ -402,6 +413,7 @@ def build_clientes_bulk_template(*, user, empresa):
         sample_row=sample,
         instructions=instructions,
         sheet_name="Clientes",
+        template_title="Plantilla de importacion - Clientes",
     )
 
 
@@ -433,7 +445,7 @@ def build_proveedores_bulk_template(*, user, empresa):
         "22334455",
         "98887766",
         "Despacha en 48 horas",
-        "true",
+        "SI",
         "Metalurgica",
         "Maria Lopez",
         "15",
@@ -441,12 +453,12 @@ def build_proveedores_bulk_template(*, user, empresa):
 
     instructions = [
         "MODULO PROVEEDORES: use esta plantilla solo para proveedores.",
-        "Columnas obligatorias: nombre.",
+        "Columnas obligatorias: nombre, rut, email, tipo.",
         "tipo permitido: EMPRESA o PERSONA.",
         "NO usar PRODUCTO/SERVICIO en esta plantilla.",
-        "activo: true/false.",
+        "activo: use SI o NO.",
         "Si rut existe en la empresa, se actualiza ese contacto.",
-        "Si no hay rut, se intenta match por nombre + email.",
+        "rut debe ser unico por empresa activa.",
     ]
 
     return build_xlsx_template(
@@ -454,6 +466,7 @@ def build_proveedores_bulk_template(*, user, empresa):
         sample_row=sample,
         instructions=instructions,
         sheet_name="Proveedores",
+        template_title="Plantilla de importacion - Proveedores",
     )
 
 

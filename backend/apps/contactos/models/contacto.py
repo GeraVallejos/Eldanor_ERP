@@ -16,14 +16,14 @@ class Contacto(BaseModel):
     rut = models.CharField(
         max_length=12,
         db_index=True,
-        blank=True,
-        null=True
+        blank=False,
+        null=False,
     )
 
-    tipo = models.CharField(max_length=20, choices=TipoContacto.choices, default=TipoContacto.PERSONA)
+    tipo = models.CharField(max_length=20, choices=TipoContacto.choices, default=TipoContacto.PERSONA, null=False, blank=False  )
 
     # contacto
-    email = models.EmailField(blank=True, null=True)
+    email = models.EmailField(blank=False, null=False)
     telefono = models.CharField(max_length=50, blank=True, null=True)
     celular = models.CharField(max_length=50, blank=True, null=True)
 
@@ -39,7 +39,19 @@ class Contacto(BaseModel):
             models.UniqueConstraint(
                 fields=["empresa", "rut"],
                 name="unique_contacto_rut_empresa"
-            )
+            ),
+            models.CheckConstraint(
+                condition=~models.Q(rut=""),
+                name="check_contacto_rut_not_empty",
+            ),
+            models.CheckConstraint(
+                condition=~models.Q(email=""),
+                name="check_contacto_email_not_empty",
+            ),
+            models.CheckConstraint(
+                condition=~models.Q(tipo=""),
+                name="check_contacto_tipo_not_empty",
+            ),
         ]
         ordering = ["nombre"]
 
@@ -52,11 +64,25 @@ class Contacto(BaseModel):
         super().save(*args, **kwargs)
 
     def clean(self):
-        super().clean() 
+        super().clean()
+
+        errors = {}
+
+        if not str(self.rut or "").strip():
+            errors["rut"] = "Este campo es obligatorio."
+
+        if not str(self.email or "").strip():
+            errors["email"] = "Este campo es obligatorio."
+
+        if not str(self.tipo or "").strip():
+            errors["tipo"] = "Este campo es obligatorio."
 
         if self.rut:
             self.rut = formatear_rut(self.rut)
             validar_rut_con_dv(self.rut)
+
+        if errors:
+            raise ValidationError(errors)
 
     def __str__(self):
         # Si el RUT existe, lo mostramos, si no, solo el nombre

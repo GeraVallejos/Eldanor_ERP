@@ -80,6 +80,61 @@ class TestFacturacionApi:
         assert response.status_code == status.HTTP_200_OK, response.data
         assert response.data["created"] == 1
 
+    def test_preview_rangos_folios_no_persiste_cambios(self, api_client, owner_usuario, empresa):
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
+
+        api_client.post(
+            reverse("configuracion-tributaria-list"),
+            {
+                "ambiente": "CERTIFICACION",
+                "rut_emisor": "76086428-5",
+                "razon_social": "Empresa Test SII",
+                "certificado_alias": "cert-prueba",
+                "certificado_activo": True,
+                "resolucion_numero": 80,
+                "resolucion_fecha": "2026-01-01",
+                "email_intercambio_dte": "dte@test.com",
+                "proveedor_envio": "INTERNO",
+                "activa": True,
+            },
+            format="json",
+        )
+
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.append([
+            "tipo_documento",
+            "caf_nombre",
+            "folio_desde",
+            "folio_hasta",
+            "folio_actual",
+            "fecha_autorizacion",
+            "fecha_vencimiento",
+            "activo",
+        ])
+        sheet.append(["FACTURA_VENTA", "CAF PREVIEW", 200, 250, 205, "2026-01-01", "2026-12-31", True])
+
+        buffer = BytesIO()
+        workbook.save(buffer)
+        upload = SimpleUploadedFile(
+            "rangos_preview.xlsx",
+            buffer.getvalue(),
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
+        response = api_client.post(
+            reverse("rango-folio-tributario-bulk-import"),
+            {"file": upload, "dry_run": "true"},
+            format="multipart",
+        )
+
+        assert response.status_code == status.HTTP_200_OK, response.data
+        assert response.data["dry_run"] is True
+        assert response.data["created"] == 1
+        list_resp = api_client.get(reverse("rango-folio-tributario-list"))
+        assert list_resp.status_code == status.HTTP_200_OK, list_resp.data
+        assert len(list_resp.data) == 0
+
     def test_configuracion_tributaria_y_rango_folio_por_api(self, api_client, owner_usuario, empresa):
         api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
 

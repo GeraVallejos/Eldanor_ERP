@@ -491,6 +491,52 @@ class TestTesoreriaApi:
         assert listado.status_code == status.HTTP_200_OK, listado.data
         assert len(listado.data) == 1
 
+    def test_preview_movimientos_bancarios_no_persiste_cambios(self, api_client, owner_usuario, empresa):
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
+
+        clp = Moneda.all_objects.get(empresa=empresa, codigo="CLP")
+        cuenta_resp = api_client.post(
+            reverse("cuenta-bancaria-list"),
+            {
+                "alias": "Banco Preview",
+                "banco": "Banco Estado",
+                "tipo_cuenta": "CORRIENTE",
+                "numero_cuenta": "555444333",
+                "titular": "Empresa Test",
+                "moneda": str(clp.id),
+                "saldo_referencial": "0",
+                "activa": True,
+            },
+            format="json",
+        )
+        assert cuenta_resp.status_code == status.HTTP_201_CREATED, cuenta_resp.data
+
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.append(["numero_cuenta", "alias_cuenta", "fecha", "tipo", "monto", "referencia", "descripcion"])
+        sheet.append(["555444333", "Banco Preview", "2026-03-20", "CREDITO", "75500", "DEP-PREVIEW", "Pago preview"])
+
+        buffer = BytesIO()
+        workbook.save(buffer)
+        upload = SimpleUploadedFile(
+            "movimientos_preview.xlsx",
+            buffer.getvalue(),
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
+        response = api_client.post(
+            reverse("movimiento-bancario-bulk-import"),
+            {"file": upload, "dry_run": "true"},
+            format="multipart",
+        )
+        assert response.status_code == status.HTTP_200_OK, response.data
+        assert response.data["dry_run"] is True
+        assert response.data["created"] == 1
+
+        listado = api_client.get(reverse("movimiento-bancario-list"))
+        assert listado.status_code == status.HTTP_200_OK, listado.data
+        assert len(listado.data) == 0
+
     def test_movimiento_bancario_desconciliar_sin_conciliar_retorna_400(self, api_client, owner_usuario, empresa):
         api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
 

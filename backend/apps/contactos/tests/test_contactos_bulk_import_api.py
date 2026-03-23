@@ -155,4 +155,63 @@ class TestContactosBulkImportApi:
         assert response["Content-Type"] == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         assert "attachment; filename=\"plantilla_clientes.xlsx\"" in response["Content-Disposition"]
 
+    def test_preview_clientes_no_persiste_cambios(self, api_client, admin_usuario, empresa):
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(admin_usuario)}")
+
+        csv_content = "\n".join([
+            "nombre,rut,email,tipo,limite_credito,dias_credito,categoria_cliente,segmento,activo",
+            "Cliente Preview,11111111-1,preview@test.com,EMPRESA,500000,30,ORO,RETAIL,true",
+        ])
+        file = SimpleUploadedFile("clientes.csv", csv_content.encode("utf-8"), content_type="text/csv")
+
+        response = api_client.post(
+            reverse("cliente-bulk-import"),
+            {"file": file, "dry_run": "true"},
+            format="multipart",
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["dry_run"] is True
+        assert response.data["created"] == 1
+        assert Cliente.all_objects.filter(empresa=empresa).count() == 0
+        assert Contacto.all_objects.filter(empresa=empresa).count() == 0
+
+    def test_import_clientes_rechaza_filas_sin_rut_email_o_tipo(self, api_client, admin_usuario, empresa):
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(admin_usuario)}")
+
+        csv_content = "\n".join([
+            "nombre,rut,email,tipo,activo",
+            "Cliente Sin Rut,,cliente@test.com,EMPRESA,true",
+            "Cliente Sin Email,11111111-1,,EMPRESA,true",
+            "Cliente Sin Tipo,22222222-2,cliente2@test.com,,true",
+        ])
+        file = SimpleUploadedFile("clientes_invalidos.csv", csv_content.encode("utf-8"), content_type="text/csv")
+
+        response = api_client.post(reverse("cliente-bulk-import"), {"file": file}, format="multipart")
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["created"] == 0
+        assert len(response.data["errors"]) == 3
+        assert Cliente.all_objects.filter(empresa=empresa).count() == 0
+        assert Contacto.all_objects.filter(empresa=empresa).count() == 0
+
+    def test_import_proveedores_rechaza_filas_sin_rut_email_o_tipo(self, api_client, admin_usuario, empresa):
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(admin_usuario)}")
+
+        csv_content = "\n".join([
+            "nombre,rut,email,tipo,giro,activo",
+            "Proveedor Sin Rut,,prov@test.com,EMPRESA,Servicios,true",
+            "Proveedor Sin Email,33333333-3,,EMPRESA,Servicios,true",
+            "Proveedor Sin Tipo,44444444-4,prov2@test.com,,Servicios,true",
+        ])
+        file = SimpleUploadedFile("proveedores_invalidos.csv", csv_content.encode("utf-8"), content_type="text/csv")
+
+        response = api_client.post(reverse("proveedor-bulk-import"), {"file": file}, format="multipart")
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["created"] == 0
+        assert len(response.data["errors"]) == 3
+        assert Proveedor.all_objects.filter(empresa=empresa).count() == 0
+        assert Contacto.all_objects.filter(empresa=empresa).count() == 0
+
 

@@ -9,7 +9,6 @@ import { buttonVariants } from '@/components/ui/buttonVariants'
 import { formatDateChile, getChileDateSuffix } from '@/lib/dateTimeFormat'
 import { formatCurrencyCLP } from '@/lib/numberFormat'
 import { cn } from '@/lib/utils'
-import { getProductosCatalog } from '@/modules/productos/services/productosCatalogCache'
 import { downloadExcelFile } from '@/modules/shared/exports/downloadExcelFile'
 import { downloadSimpleTablePdf } from '@/modules/shared/exports/downloadSimpleTablePdf'
 import { usePermissions } from '@/modules/shared/auth/usePermission'
@@ -52,14 +51,13 @@ function ComprasOrdenesDetailPage() {
   const [recepcionesAsociadas, setRecepcionesAsociadas] = useState([])
   const [proveedores, setProveedores] = useState([])
   const [contactos, setContactos] = useState([])
-  const [productos, setProductos] = useState([])
   const [impuestos, setImpuestos] = useState([])
   const [updatingEstado, setUpdatingEstado] = useState(false)
 
   const loadData = useCallback(async () => {
     setStatus('loading')
     try {
-      const [{ data: ordenData }, { data: itemsData }, { data: documentosData }, { data: recepcionesData }, { data: proveedoresData }, { data: contactosData }, productosData, { data: impuestosData }] =
+      const [{ data: ordenData }, { data: itemsData }, { data: documentosData }, { data: recepcionesData }, { data: proveedoresData }, { data: contactosData }, { data: impuestosData }] =
         await Promise.all([
           api.get(`/ordenes-compra/${ordenId}/`, { suppressGlobalErrorToast: true }),
           api.get('/ordenes-compra-items/', { suppressGlobalErrorToast: true }),
@@ -67,7 +65,6 @@ function ComprasOrdenesDetailPage() {
           api.get('/recepciones-compra/', { suppressGlobalErrorToast: true }),
           api.get('/proveedores/', { suppressGlobalErrorToast: true }),
           api.get('/contactos/', { suppressGlobalErrorToast: true }),
-          getProductosCatalog(),
           api.get('/impuestos/', { suppressGlobalErrorToast: true }),
         ])
 
@@ -81,7 +78,6 @@ function ComprasOrdenesDetailPage() {
       )
       setProveedores(normalizeListResponse(proveedoresData))
       setContactos(normalizeListResponse(contactosData))
-      setProductos(productosData)
       setImpuestos(normalizeListResponse(impuestosData))
       setStatus('succeeded')
     } catch (error) {
@@ -113,14 +109,6 @@ function ComprasOrdenesDetailPage() {
     })
     return map
   }, [contactos])
-
-  const productoById = useMemo(() => {
-    const map = new Map()
-    productos.forEach((producto) => {
-      map.set(String(producto.id), producto)
-    })
-    return map
-  }, [productos])
 
   const impuestoById = useMemo(() => {
     const map = new Map()
@@ -180,7 +168,7 @@ function ComprasOrdenesDetailPage() {
                 proveedor: contacto?.nombre || '-',
                 fecha_emision: formatDateChile(orden.fecha_emision),
                 fecha_entrega: formatDateChile(orden.fecha_entrega),
-                producto: productoById.get(String(item.producto))?.nombre || '-',
+                producto: item.producto_nombre || item.descripcion || '-',
                 descripcion: item.descripcion || '-',
                 cantidad,
                 precio_unitario: precioUnitario,
@@ -229,7 +217,7 @@ function ComprasOrdenesDetailPage() {
                 String(orden.numero || '-'),
                 String(orden.estado || '-'),
                 contacto?.nombre || '-',
-                productoById.get(String(item.producto))?.nombre || '-',
+                item.producto_nombre || item.descripcion || '-',
                 String(cantidad),
                 formatMoney(precioUnitario),
                 `${porcentaje}%`,
@@ -419,11 +407,10 @@ function ComprasOrdenesDetailPage() {
                 const porcentaje = Number(impuesto?.porcentaje ?? 0)
                 const subtotal = cantidad * precio_unitario
                 const total = subtotal + subtotal * (porcentaje / 100)
-                const producto = productoById.get(String(item.producto))
 
                 return (
                   <tr key={index} className="border-t border-border">
-                    <td className="px-3 py-2">{producto?.nombre || '-'}</td>
+                    <td className="px-3 py-2">{item.producto_nombre || item.descripcion || '-'}</td>
                     <td className="px-3 py-2">{item.descripcion || '-'}</td>
                     <td className="px-3 py-2 text-right">{cantidad}</td>
                     <td className="px-3 py-2 text-right">{formatMoney(precio_unitario)}</td>

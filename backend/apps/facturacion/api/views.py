@@ -45,6 +45,10 @@ class RangoFolioTributarioViewSet(TenantViewSetMixin, ModelViewSet):
         "bulk_template": Acciones.VER,
     }
 
+    @staticmethod
+    def _is_truthy(value):
+        return str(value).strip().lower() in {"1", "true", "t", "yes", "y", "si", "on"}
+
     @action(detail=False, methods=["post"], url_path="bulk_import", parser_classes=[MultiPartParser, FormParser])
     def bulk_import(self, request):
         self._set_tenant_context()
@@ -52,6 +56,7 @@ class RangoFolioTributarioViewSet(TenantViewSetMixin, ModelViewSet):
             uploaded_file=request.FILES.get("file"),
             user=request.user,
             empresa=self.get_empresa(),
+            dry_run=self._is_truthy(request.data.get("dry_run")),
         )
         return Response(payload, status=status.HTTP_200_OK)
 
@@ -65,4 +70,3 @@ class RangoFolioTributarioViewSet(TenantViewSetMixin, ModelViewSet):
         )
         response["Content-Disposition"] = 'attachment; filename="plantilla_rangos_folios_sii.xlsx"'
         return response
-

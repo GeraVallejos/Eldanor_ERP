@@ -78,6 +78,8 @@ def cliente(db, empresa):
         empresa=empresa,
         nombre="Cliente Ventas API",
         email="cliente_ventas_api@test.com",
+        rut="12.345.678-5",
+        tipo="EMPRESA",
     )
     return Cliente.objects.create(empresa=empresa, contacto=contacto, dias_credito=30)
 
