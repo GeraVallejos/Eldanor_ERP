@@ -129,7 +129,7 @@ function ProductosAnalisisPage() {
       toast.success(`Version ${data.version_restaurada} restaurada sobre el maestro.`)
       setRestoreTarget(null)
       await Promise.all([loadVersionComparison(), refreshAnalisis()])
-    } catch (error) {
+    } catch {
       toast.error('No se pudo restaurar la version seleccionada.')
     } finally {
       setRestoreLoading(false)

@@ -6,10 +6,8 @@ import {
   getSortedRowModel,
   useReactTable,
 } from '@tanstack/react-table'
-import { useDispatch, useSelector } from 'react-redux'
+import { useSelector } from 'react-redux'
 import { Link } from 'react-router-dom'
-import { toast } from 'sonner'
-import { normalizeApiError } from '@/api/errors'
 import ActiveSearchFilter from '@/components/ui/ActiveSearchFilter'
 import Button from '@/components/ui/Button'
 import BulkImportButton from '@/components/ui/BulkImportButton'
@@ -21,19 +19,11 @@ import { getChileDateSuffix } from '@/lib/dateTimeFormat'
 import { formatCurrencyCLP, formatSmartNumber } from '@/lib/numberFormat'
 import { useResponsiveTablePageSize } from '@/lib/useResponsiveTablePageSize'
 import { cn } from '@/lib/utils'
-import { invalidateProductosCatalogCache } from '@/modules/productos/services/productosCatalogCache'
 import { productosApi } from '@/modules/productos/store/api'
+import { useProductosListado } from '@/modules/productos/store/hooks'
+import { useDeleteProductoAction } from '@/modules/productos/store/mutations'
 import { downloadExcelFile } from '@/modules/shared/exports/downloadExcelFile'
 import { downloadSimpleTablePdf } from '@/modules/shared/exports/downloadSimpleTablePdf'
-import {
-  fetchCatalogosProducto,
-  fetchProductos,
-  selectCategorias,
-  selectProductos,
-  selectProductosError,
-  selectProductosStatus,
-  selectProductosTotalCount,
-} from '@/modules/productos/productosSlice'
 import { selectCurrentUser } from '@/modules/auth/authSlice'
 import { hasAnyRole } from '@/modules/shared/auth/roles'
 import { usePermissions } from '@/modules/shared/auth/usePermission'
@@ -97,20 +87,13 @@ function sortProductosForExport(productos, sorting, categoriaLabelById) {
 
 function ProductosListPage() {
   const responsivePageSize = useResponsiveTablePageSize({ mobileRows: 20, reservedHeight: 470, desktopMaxRows: 14 })
-  const dispatch = useDispatch()
-  const productos = useSelector(selectProductos)
-  const totalCount = useSelector(selectProductosTotalCount)
-  const categorias = useSelector(selectCategorias)
   const currentUser = useSelector(selectCurrentUser)
   const permissions = usePermissions(['PRODUCTOS.CREAR', 'PRODUCTOS.EDITAR', 'PRODUCTOS.BORRAR'])
-  const status = useSelector(selectProductosStatus)
-  const error = useSelector(selectProductosError)
   const [sorting, setSorting] = useState([{ id: 'creado_en', desc: true }])
   const [globalFilter, setGlobalFilter] = useState('')
   const [tipoFilter, setTipoFilter] = useState('PRODUCTO')
   const [categoryFilter, setCategoryFilter] = useState('ALL')
   const [pagination, setPagination] = useState({ pageIndex: 0, pageSize: responsivePageSize })
-  const [deletingId, setDeletingId] = useState(null)
   const [productoToDelete, setProductoToDelete] = useState(null)
   const [includeInactive, setIncludeInactive] = useState(false)
 
@@ -119,6 +102,28 @@ function ProductosListPage() {
   const canCreate = permissions['PRODUCTOS.CREAR']
   const canEdit = permissions['PRODUCTOS.EDITAR']
   const canDelete = permissions['PRODUCTOS.BORRAR']
+  const {
+    productos,
+    totalCount,
+    status,
+    error,
+    categorias,
+    reload,
+  } = useProductosListado({
+    includeInactive: canViewInactive && includeInactive,
+    query: globalFilter,
+    tipo: tipoFilter,
+    categoria: categoryFilter,
+    page: pagination.pageIndex + 1,
+    pageSize: pagination.pageSize,
+  })
+  const { deletingId, deleteProducto } = useDeleteProductoAction({
+    canDelete,
+    onSuccess: async () => {
+      setProductoToDelete(null)
+      await reload()
+    },
+  })
 
   useEffect(() => {
     setPagination((prev) => (
@@ -127,30 +132,6 @@ function ProductosListPage() {
         : { ...prev, pageIndex: 0 }
     ))
   }, [globalFilter, tipoFilter, categoryFilter, includeInactive])
-
-  useEffect(() => {
-    dispatch(fetchProductos({
-      includeInactive: canViewInactive && includeInactive,
-      query: globalFilter,
-      tipo: tipoFilter,
-      categoria: categoryFilter,
-      page: pagination.pageIndex + 1,
-      pageSize: pagination.pageSize,
-    }))
-  }, [
-    dispatch,
-    canViewInactive,
-    includeInactive,
-    globalFilter,
-    tipoFilter,
-    categoryFilter,
-    pagination.pageIndex,
-    pagination.pageSize,
-  ])
-
-  useEffect(() => {
-    dispatch(fetchCatalogosProducto())
-  }, [dispatch])
 
   useEffect(() => {
     setPagination((prev) => (
@@ -243,20 +224,7 @@ function ProductosListPage() {
     if (!producto?.id) {
       return
     }
-
-    setDeletingId(producto.id)
-
-    try {
-      await productosApi.removeOne(productosApi.endpoints.productos, producto.id)
-      invalidateProductosCatalogCache()
-      toast.success('Producto procesado correctamente.')
-      dispatch(fetchProductos(buildProductosQueryParams()))
-      setProductoToDelete(null)
-    } catch (error) {
-      toast.error(normalizeApiError(error, { fallback: 'No se pudo eliminar el producto.' }))
-    } finally {
-      setDeletingId(null)
-    }
+    await deleteProducto(producto)
   }
 
   const columns = [
@@ -435,7 +403,7 @@ function ProductosListPage() {
               previewBeforeImport
               previewTitle="Confirmar carga masiva de productos"
               onCompleted={() => {
-                dispatch(fetchProductos(buildProductosQueryParams()))
+                void reload()
               }}
             />
           ) : null}

@@ -1,13 +1,13 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
-import { normalizeApiError } from '@/api/errors'
 import Button from '@/components/ui/Button'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import { buttonVariants } from '@/components/ui/buttonVariants'
 import { normalizeUpperInput } from '@/lib/textFormat'
 import { cn } from '@/lib/utils'
-import { productosApi } from '@/modules/productos/store/api'
+import { useListasPrecioBaseData } from '@/modules/productos/store/hooks'
+import { useDeleteListaPrecioAction, useSaveListaPrecioAction } from '@/modules/productos/store/mutations'
 import { usePermissions } from '@/modules/shared/auth/usePermission'
 
 const PRIORIDAD_OPTIONS = [
@@ -83,40 +83,28 @@ function formatPriorityDisplay(lista) {
 
 function ProductosListasPrecioPage() {
   const permissions = usePermissions(['PRODUCTOS.CREAR', 'PRODUCTOS.EDITAR', 'PRODUCTOS.BORRAR'])
-  const [listas, setListas] = useState([])
-  const [monedas, setMonedas] = useState([])
-  const [clientes, setClientes] = useState([])
-  const [status, setStatus] = useState('idle')
-  const [savingLista, setSavingLista] = useState(false)
+  const { listas, monedas, clientes, status, reload } = useListasPrecioBaseData()
   const [deletingTarget, setDeletingTarget] = useState(null)
   const [formLista, setFormLista] = useState(emptyListaForm)
-
-  const loadBaseData = useCallback(async () => {
-    setStatus('loading')
-    try {
-      const [
-        listasData,
-        monedasData,
-        clientesData,
-      ] = await Promise.all([
-        productosApi.getList(productosApi.endpoints.listasPrecio),
-        productosApi.getList(productosApi.endpoints.monedas),
-        productosApi.getList(productosApi.endpoints.clientes),
-      ])
-      setListas(listasData)
-      setMonedas(monedasData)
-      setClientes(clientesData)
-      setStatus('succeeded')
-    } catch (error) {
-      setStatus('failed')
-      toast.error(normalizeApiError(error, { fallback: 'No se pudieron cargar las listas de precio.' }))
-    }
-  }, [])
-
-  useEffect(() => {
-    const id = setTimeout(() => { void loadBaseData() }, 0)
-    return () => clearTimeout(id)
-  }, [loadBaseData])
+  const resetListaForm = () => setFormLista(emptyListaForm())
+  const { savingLista, saveLista } = useSaveListaPrecioAction({
+    canCreate: permissions['PRODUCTOS.CREAR'],
+    canEdit: permissions['PRODUCTOS.EDITAR'],
+    onSuccess: async () => {
+      resetListaForm()
+      await reload()
+    },
+  })
+  const { deletingListaId, deleteLista } = useDeleteListaPrecioAction({
+    canDelete: permissions['PRODUCTOS.BORRAR'],
+    onSuccess: async (target) => {
+      if (String(formLista.id) === String(target.id)) {
+        resetListaForm()
+      }
+      setDeletingTarget(null)
+      await reload()
+    },
+  })
 
   const clienteLabelById = useMemo(() => {
     const map = new Map()
@@ -139,8 +127,6 @@ function ProductosListasPrecioPage() {
     return prioridadOptions.find((option) => option.value === String(formLista.prioridad)) || null
   }, [formLista.prioridad, prioridadOptions])
 
-  const resetListaForm = () => setFormLista(emptyListaForm())
-
   const startEditLista = (lista) => {
     setFormLista({
       id: lista.id,
@@ -156,70 +142,23 @@ function ProductosListasPrecioPage() {
 
   const submitLista = async (event) => {
     event.preventDefault()
-    if (!(formLista.id ? permissions['PRODUCTOS.EDITAR'] : permissions['PRODUCTOS.CREAR'])) {
-      toast.error('No tiene permiso para guardar listas de precio.')
-      return
-    }
-
-    const prioridad = Number(String(formLista.prioridad || '100').trim())
-    const payload = {
-      nombre: String(formLista.nombre || '').trim(),
-      moneda: formLista.moneda || null,
-      cliente: formLista.cliente || null,
-      fecha_desde: formLista.fecha_desde || null,
-      fecha_hasta: formLista.fecha_hasta || null,
-      prioridad: Number.isFinite(prioridad) ? prioridad : null,
-      activa: Boolean(formLista.activa),
-    }
-
-    if (!payload.nombre || !payload.moneda || !payload.fecha_desde) {
-      toast.error('Nombre, moneda y vigencia desde son obligatorios.')
-      return
-    }
-    if (payload.prioridad === null || payload.prioridad < 0) {
-      toast.error('La prioridad debe ser un numero positivo.')
-      return
-    }
-
-    setSavingLista(true)
-    try {
-      if (formLista.id) {
-        await productosApi.updateOne(productosApi.endpoints.listasPrecio, formLista.id, payload)
-        toast.success('Lista de precio actualizada.')
-      } else {
-        await productosApi.createOne(productosApi.endpoints.listasPrecio, payload)
-        toast.success('Lista de precio creada.')
-      }
-      resetListaForm()
-      await loadBaseData()
-    } catch (error) {
-      toast.error(normalizeApiError(error, { fallback: 'No se pudo guardar la lista.' }))
-    } finally {
-      setSavingLista(false)
-    }
+    await saveLista(formLista)
   }
 
   const confirmDelete = async () => {
     if (!deletingTarget) {
       return
     }
-    if (!permissions['PRODUCTOS.BORRAR']) {
-      toast.error('No tiene permiso para eliminar listas de precio.')
+    await deleteLista(deletingTarget)
+  }
+
+  useEffect(() => {
+    if (status !== 'failed') {
       return
     }
 
-    try {
-      await productosApi.removeOne(productosApi.endpoints.listasPrecio, deletingTarget.id)
-      toast.success('Lista de precio procesada correctamente.')
-      if (String(formLista.id) === String(deletingTarget.id)) {
-        resetListaForm()
-      }
-      setDeletingTarget(null)
-      await loadBaseData()
-    } catch (error) {
-      toast.error(normalizeApiError(error, { fallback: 'No se pudo eliminar el registro.' }))
-    }
-  }
+    toast.error('No se pudieron cargar las listas de precio.')
+  }, [status])
 
   return (
     <section className="space-y-4">
@@ -347,6 +286,7 @@ function ProductosListasPrecioPage() {
             : ''
         }
         confirmLabel="Confirmar"
+        loading={deletingListaId === deletingTarget?.id}
         onCancel={() => setDeletingTarget(null)}
         onConfirm={confirmDelete}
       />

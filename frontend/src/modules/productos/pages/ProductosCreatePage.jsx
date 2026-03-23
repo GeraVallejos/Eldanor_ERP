@@ -11,19 +11,13 @@ import { normalizeApiError } from '@/api/errors'
 import { buttonVariants } from '@/components/ui/buttonVariants'
 import { normalizeUpperInput } from '@/lib/textFormat'
 import { cn } from '@/lib/utils'
-import { invalidateProductosCatalogCache } from '@/modules/productos/services/productosCatalogCache'
-import { productosApi } from '@/modules/productos/store/api'
+import { useProductoFormData } from '@/modules/productos/store/hooks'
+import { useSaveProductoAction } from '@/modules/productos/store/mutations'
+import { usePermissions } from '@/modules/shared/auth/usePermission'
 import {
-  createProducto,
-  fetchCatalogosProducto,
-  fetchProductos,
   resetCreateProductoState,
-  selectCatalogError,
-  selectCatalogStatus,
-  selectCategorias,
   selectCreateProductoError,
   selectCreateProductoStatus,
-  selectImpuestos,
 } from '@/modules/productos/productosSlice'
 
 const tipoProductoValues = ['PRODUCTO', 'SERVICIO']
@@ -107,16 +101,23 @@ function ProductosCreatePage() {
   const { id } = useParams()
   const navigate = useNavigate()
   const dispatch = useDispatch()
-  const categorias = useSelector(selectCategorias)
-  const impuestos = useSelector(selectImpuestos)
-  const catalogStatus = useSelector(selectCatalogStatus)
-  const catalogError = useSelector(selectCatalogError)
   const createStatus = useSelector(selectCreateProductoStatus)
   const createError = useSelector(selectCreateProductoError)
-  const [pageStatus, setPageStatus] = useState('idle')
-  const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState(null)
   const isEditMode = Boolean(id)
+  const permissions = usePermissions(['PRODUCTOS.CREAR', 'PRODUCTOS.EDITAR'])
+  const {
+    categorias,
+    impuestos,
+    catalogStatus,
+    catalogError,
+    pageStatus,
+    loadProducto,
+  } = useProductoFormData(id)
+  const { submitting: savingProducto, saveProducto } = useSaveProductoAction({
+    canCreate: permissions['PRODUCTOS.CREAR'],
+    canEdit: permissions['PRODUCTOS.EDITAR'],
+  })
 
   const {
     register,
@@ -153,23 +154,15 @@ function ProductosCreatePage() {
   const permiteDecimalesSeleccionado = useWatch({ control, name: 'permite_decimales' })
 
   useEffect(() => {
-    if (catalogStatus === 'idle') {
-      dispatch(fetchCatalogosProducto())
-    }
-  }, [catalogStatus, dispatch])
-
-  useEffect(() => {
     let active = true
 
-    const loadProducto = async () => {
+    const loadProductoData = async () => {
       if (!isEditMode) {
-        setPageStatus('idle')
         return
       }
 
-      setPageStatus('loading')
       try {
-        const data = await productosApi.getOne(productosApi.endpoints.productos, id)
+        const data = await loadProducto()
         if (!active) {
           return
         }
@@ -191,22 +184,20 @@ function ProductosCreatePage() {
           usa_vencimiento: Boolean(data.usa_vencimiento),
           activo: Boolean(data.activo),
         })
-        setPageStatus('succeeded')
       } catch (error) {
         if (!active) {
           return
         }
-        setPageStatus('failed')
         toast.error(normalizeApiError(error, { fallback: 'No se pudo cargar el producto.' }))
       }
     }
 
-    void loadProducto()
+    void loadProductoData()
 
     return () => {
       active = false
     }
-  }, [id, isEditMode, reset])
+  }, [isEditMode, loadProducto, reset])
 
   useEffect(() => {
     if (tipoSeleccionado === 'SERVICIO') {
@@ -247,9 +238,7 @@ function ProductosCreatePage() {
   }, [dispatch])
 
   const onSubmit = async (values) => {
-    dispatch(resetCreateProductoState())
     setSubmitError(null)
-    setSubmitting(true)
 
     const payload = applyOperationalRules({
       ...values,
@@ -263,49 +252,38 @@ function ProductosCreatePage() {
       delete payload.precio_costo
     }
 
-    try {
+    const result = await saveProducto({ payload, productoId: id, isEditMode })
+    if (!result.ok) {
       if (isEditMode) {
-        await productosApi.updateOne(productosApi.endpoints.productos, id, payload)
-      } else {
-        await dispatch(createProducto(payload)).unwrap()
+        setSubmitError(result.contract)
       }
-      invalidateProductosCatalogCache()
-      toast.success(isEditMode ? 'Producto actualizado correctamente.' : 'Producto creado correctamente.')
-      dispatch(fetchProductos())
-      dispatch(resetCreateProductoState())
-      if (isEditMode) {
-        navigate(`/productos/${id}`)
-        return
-      }
-      reset({
-        nombre: '',
-        descripcion: '',
-        sku: '',
-        tipo: 'PRODUCTO',
-        categoria: '',
-        impuesto: '',
-        precio_referencia: 0,
-        precio_costo: 0,
-        unidad_medida: 'UN',
-        permite_decimales: true,
-        maneja_inventario: true,
-        stock_minimo: 0,
-        usa_lotes: false,
-        usa_series: false,
-        usa_vencimiento: false,
-        activo: true,
-      })
-    } catch (error) {
-      if (isEditMode) {
-        const normalizedError = normalizeApiError(error, { fallback: 'No se pudo actualizar el producto.' })
-        setSubmitError(error?.response?.data || null)
-        toast.error(normalizedError)
-        return
-      }
-      toast.error(typeof error === 'string' ? error : (error?.message || 'No se pudo crear el producto.'))
-    } finally {
-      setSubmitting(false)
+      return
     }
+
+    dispatch(resetCreateProductoState())
+    if (isEditMode) {
+      navigate(`/productos/${id}`)
+      return
+    }
+
+    reset({
+      nombre: '',
+      descripcion: '',
+      sku: '',
+      tipo: 'PRODUCTO',
+      categoria: '',
+      impuesto: '',
+      precio_referencia: 0,
+      precio_costo: 0,
+      unidad_medida: 'UN',
+      permite_decimales: true,
+      maneja_inventario: true,
+      stock_minimo: 0,
+      usa_lotes: false,
+      usa_series: false,
+      usa_vencimiento: false,
+      activo: true,
+    })
   }
 
   if (isEditMode && pageStatus === 'loading') {
@@ -506,11 +484,11 @@ function ProductosCreatePage() {
 
         <div className="mt-4">
           <Button
-            disabled={submitting || (createStatus === 'loading' && !isEditMode)}
+            disabled={savingProducto || (createStatus === 'loading' && !isEditMode)}
             size="md"
             type="submit"
           >
-            {submitting || (createStatus === 'loading' && !isEditMode)
+            {savingProducto || (createStatus === 'loading' && !isEditMode)
               ? 'Guardando...'
               : (isEditMode ? 'Guardar cambios' : 'Crear producto')}
           </Button>

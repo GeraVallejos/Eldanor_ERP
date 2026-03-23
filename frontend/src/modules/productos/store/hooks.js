@@ -1,5 +1,18 @@
 import { useCallback, useEffect, useState } from 'react'
+import { useDispatch, useSelector } from 'react-redux'
 import { productosApi } from '@/modules/productos/store/api'
+import {
+  fetchCatalogosProducto,
+  fetchProductos,
+  selectCatalogError,
+  selectCatalogStatus,
+  selectCategorias,
+  selectImpuestos,
+  selectProductos,
+  selectProductosError,
+  selectProductosStatus,
+  selectProductosTotalCount,
+} from '@/modules/productos/productosSlice'
 
 const DEFAULT_GOBERNANZA_DETAIL = {
   score: 100,
@@ -209,16 +222,197 @@ function useListaPrecioCabecera(listaId) {
   }, [listaId])
 
   useEffect(() => {
-    if (listaId) {
-      void reload().catch(() => undefined)
+    let active = true
+
+    const loadLista = async () => {
+      if (!listaId) {
+        return
+      }
+
+      setStatus('loading')
+      try {
+        const data = await productosApi.getOne(productosApi.endpoints.listasPrecio, listaId)
+        if (!active) {
+          return
+        }
+        setLista(data)
+        setStatus('succeeded')
+      } catch {
+        if (!active) {
+          return
+        }
+        setStatus('failed')
+      }
     }
-  }, [listaId, reload])
+
+    void loadLista()
+
+    return () => {
+      active = false
+    }
+  }, [listaId])
 
   return { status, lista, reload, setLista }
 }
 
+function useProductosListado({
+  includeInactive = false,
+  query = '',
+  tipo = 'PRODUCTO',
+  categoria = 'ALL',
+  page = 1,
+  pageSize = 0,
+} = {}) {
+  const dispatch = useDispatch()
+  const productos = useSelector(selectProductos)
+  const totalCount = useSelector(selectProductosTotalCount)
+  const status = useSelector(selectProductosStatus)
+  const error = useSelector(selectProductosError)
+  const categorias = useSelector(selectCategorias)
+
+  const reload = useCallback(() => {
+    return dispatch(fetchProductos({
+      includeInactive,
+      query,
+      tipo,
+      categoria,
+      page,
+      pageSize,
+    }))
+  }, [categoria, dispatch, includeInactive, page, pageSize, query, tipo])
+
+  useEffect(() => {
+    void reload()
+  }, [reload])
+
+  useEffect(() => {
+    void dispatch(fetchCatalogosProducto())
+  }, [dispatch])
+
+  return {
+    productos,
+    totalCount,
+    status,
+    error,
+    categorias,
+    reload,
+  }
+}
+
+function useListasPrecioBaseData() {
+  const [listas, setListas] = useState([])
+  const [monedas, setMonedas] = useState([])
+  const [clientes, setClientes] = useState([])
+  const [status, setStatus] = useState('idle')
+
+  const reload = useCallback(async () => {
+    setStatus('loading')
+    try {
+      const [listasData, monedasData, clientesData] = await Promise.all([
+        productosApi.getList(productosApi.endpoints.listasPrecio),
+        productosApi.getList(productosApi.endpoints.monedas),
+        productosApi.getList(productosApi.endpoints.clientes),
+      ])
+      setListas(listasData)
+      setMonedas(monedasData)
+      setClientes(clientesData)
+      setStatus('succeeded')
+      return { listas: listasData, monedas: monedasData, clientes: clientesData }
+    } catch (error) {
+      setStatus('failed')
+      throw error
+    }
+  }, [])
+
+  useEffect(() => {
+    let active = true
+
+    const loadBaseData = async () => {
+      setStatus('loading')
+      try {
+        const [listasData, monedasData, clientesData] = await Promise.all([
+          productosApi.getList(productosApi.endpoints.listasPrecio),
+          productosApi.getList(productosApi.endpoints.monedas),
+          productosApi.getList(productosApi.endpoints.clientes),
+        ])
+        if (!active) {
+          return
+        }
+        setListas(listasData)
+        setMonedas(monedasData)
+        setClientes(clientesData)
+        setStatus('succeeded')
+      } catch {
+        if (!active) {
+          return
+        }
+        setStatus('failed')
+      }
+    }
+
+    void loadBaseData()
+
+    return () => {
+      active = false
+    }
+  }, [])
+
+  return {
+    listas,
+    monedas,
+    clientes,
+    status,
+    reload,
+    setListas,
+  }
+}
+
+function useProductoFormData(productoId) {
+  const dispatch = useDispatch()
+  const categorias = useSelector(selectCategorias)
+  const impuestos = useSelector(selectImpuestos)
+  const catalogStatus = useSelector(selectCatalogStatus)
+  const catalogError = useSelector(selectCatalogError)
+  const [pageStatus, setPageStatus] = useState('idle')
+
+  useEffect(() => {
+    if (catalogStatus === 'idle') {
+      void dispatch(fetchCatalogosProducto())
+    }
+  }, [catalogStatus, dispatch])
+
+  const loadProducto = useCallback(async () => {
+    if (!productoId) {
+      setPageStatus('idle')
+      return null
+    }
+
+    setPageStatus('loading')
+    try {
+      const data = await productosApi.getOne(productosApi.endpoints.productos, productoId)
+      setPageStatus('succeeded')
+      return data
+    } catch (error) {
+      setPageStatus('failed')
+      throw error
+    }
+  }, [productoId])
+
+  return {
+    categorias,
+    impuestos,
+    catalogStatus,
+    catalogError,
+    pageStatus,
+    loadProducto,
+  }
+}
+
 export {
   useListaPrecioCabecera,
+  useListasPrecioBaseData,
+  useProductoFormData,
   useProductoAnalisis,
   useProductoDetail,
+  useProductosListado,
 }
