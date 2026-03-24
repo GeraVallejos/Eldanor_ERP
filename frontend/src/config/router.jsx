@@ -9,8 +9,11 @@ import PermissionRoute from '@/modules/shared/auth/PermissionRoute'
 const LoginPage = lazy(() => import('@/modules/auth/pages/LoginPage'))
 const HomeRedirectPage = lazy(() => import('@/modules/shared/pages/HomeRedirectPage'))
 const ClientesCreatePage = lazy(() => import('@/modules/contactos/pages/ClientesCreatePage'))
+const ClientesEditPage = lazy(() => import('@/modules/contactos/pages/ClientesEditPage'))
 const ClientesListPage = lazy(() => import('@/modules/contactos/pages/ClientesListPage'))
+const ContactoDetailPage = lazy(() => import('@/modules/contactos/pages/ContactoDetailPage'))
 const ProveedoresCreatePage = lazy(() => import('@/modules/contactos/pages/ProveedoresCreatePage'))
+const ProveedoresEditPage = lazy(() => import('@/modules/contactos/pages/ProveedoresEditPage'))
 const ProveedoresListPage = lazy(() => import('@/modules/contactos/pages/ProveedoresListPage'))
 const PresupuestosCreatePage = lazy(() => import('@/modules/presupuestos/pages/PresupuestosCreatePage'))
 const PresupuestosEditPage = lazy(() => import('@/modules/presupuestos/pages/PresupuestosEditPage'))
@@ -95,8 +98,11 @@ const router = createBrowserRouter([
           { path: 'contactos', element: guardedPage(ClientesListPage, 'CONTACTOS.VER', 'No tiene permiso para revisar contactos.') },
           { path: 'contactos/clientes', element: guardedPage(ClientesListPage, 'CONTACTOS.VER', 'No tiene permiso para revisar clientes.') },
           { path: 'contactos/clientes/nuevo', element: guardedPage(ClientesCreatePage, 'CONTACTOS.CREAR', 'No tiene permiso para crear clientes.') },
+          { path: 'contactos/clientes/:id/editar', element: guardedPage(ClientesEditPage, 'CONTACTOS.EDITAR', 'No tiene permiso para editar clientes.') },
+          { path: 'contactos/terceros/:id', element: guardedPage(ContactoDetailPage, 'CONTACTOS.VER', 'No tiene permiso para revisar la ficha del contacto.') },
           { path: 'contactos/proveedores', element: guardedPage(ProveedoresListPage, 'CONTACTOS.VER', 'No tiene permiso para revisar proveedores.') },
           { path: 'contactos/proveedores/nuevo', element: guardedPage(ProveedoresCreatePage, 'CONTACTOS.CREAR', 'No tiene permiso para crear proveedores.') },
+          { path: 'contactos/proveedores/:id/editar', element: guardedPage(ProveedoresEditPage, 'CONTACTOS.EDITAR', 'No tiene permiso para editar proveedores.') },
           { path: 'presupuestos', element: guardedPage(PresupuestosListPage, 'PRESUPUESTOS.VER', 'No tiene permiso para revisar presupuestos.') },
           { path: 'presupuestos/nuevo', element: guardedPage(PresupuestosCreatePage, 'PRESUPUESTOS.CREAR', 'No tiene permiso para crear presupuestos.') },
           { path: 'presupuestos/:id/editar', element: guardedPage(PresupuestosEditPage, 'PRESUPUESTOS.EDITAR', 'No tiene permiso para editar presupuestos.') },

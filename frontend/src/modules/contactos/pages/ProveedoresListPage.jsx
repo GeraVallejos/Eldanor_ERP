@@ -1,8 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useSelector } from 'react-redux'
 import { toast } from 'sonner'
-import { api } from '@/api/client'
 import { normalizeApiError } from '@/api/errors'
 import ActiveSearchFilter from '@/components/ui/ActiveSearchFilter'
 import Button from '@/components/ui/Button'
@@ -18,87 +17,40 @@ import { cn } from '@/lib/utils'
 import { downloadExcelFile } from '@/modules/shared/exports/downloadExcelFile'
 import { downloadSimpleTablePdf } from '@/modules/shared/exports/downloadSimpleTablePdf'
 import { selectCurrentUser } from '@/modules/auth/authSlice'
-
-function normalizeListResponse(data) {
-  if (Array.isArray(data)) {
-    return data
-  }
-
-  if (Array.isArray(data?.results)) {
-    return data.results
-  }
-
-  return []
-}
+import { contactosApi } from '@/modules/contactos/store/api'
+import { useContactosListado } from '@/modules/contactos/store/hooks'
+import { hasAnyRole } from '@/modules/shared/auth/roles'
+import { usePermissions } from '@/modules/shared/auth/usePermission'
 
 function ProveedoresListPage() {
   const pageSize = useResponsiveTablePageSize({ reservedHeight: 450 })
   const currentUser = useSelector(selectCurrentUser)
-  const [proveedores, setProveedores] = useState([])
-  const [contactos, setContactos] = useState([])
-  const [status, setStatus] = useState('idle')
+  const permissions = usePermissions(['CONTACTOS.CREAR', 'CONTACTOS.EDITAR', 'CONTACTOS.BORRAR'])
   const [search, setSearch] = useState('')
   const [includeInactive, setIncludeInactive] = useState(false)
-  const [editModalOpen, setEditModalOpen] = useState(false)
-  const [savingEdit, setSavingEdit] = useState(false)
   const [deletingId, setDeletingId] = useState(null)
   const [proveedorToDelete, setProveedorToDelete] = useState(null)
-  const [editForm, setEditForm] = useState({
-    proveedorId: null,
-    contactoId: null,
-    nombre: '',
-    razon_social: '',
-    rut: '',
-    tipo: 'EMPRESA',
-    email: '',
-    telefono: '',
-    celular: '',
-    notas: '',
-    activo: true,
-    giro: '',
-    vendedor_contacto: '',
-    dias_credito: 0,
+
+  const canViewInactive = hasAnyRole(currentUser, ['OWNER', 'ADMIN'])
+  const canBulkImport = permissions['CONTACTOS.CREAR'] && hasAnyRole(currentUser, ['ADMIN'])
+  const canCreate = permissions['CONTACTOS.CREAR']
+  const canEdit = permissions['CONTACTOS.EDITAR']
+  const canDelete = permissions['CONTACTOS.BORRAR']
+  const {
+    rows: proveedores,
+    status,
+    error,
+    reload: loadData,
+  } = useContactosListado({
+    resource: 'proveedores',
+    includeInactive: canViewInactive && includeInactive,
   })
 
-  const userRole = String(currentUser?.rol || '').toUpperCase()
-  const canViewInactive = userRole === 'OWNER' || userRole === 'ADMIN'
-  const canBulkImport = userRole === 'ADMIN'
-
-  const loadData = useCallback(async () => {
-    setStatus('loading')
-
-    const params = canViewInactive && includeInactive ? { include_inactive: '1' } : undefined
-
-    try {
-      const [{ data: proveedoresData }, { data: contactosData }] = await Promise.all([
-        api.get('/proveedores/', { params, suppressGlobalErrorToast: true }),
-        api.get('/contactos/', { params, suppressGlobalErrorToast: true }),
-      ])
-
-      setProveedores(normalizeListResponse(proveedoresData))
-      setContactos(normalizeListResponse(contactosData))
-      setStatus('succeeded')
-    } catch (error) {
-      setStatus('failed')
+  useEffect(() => {
+    if (status === 'failed' && error) {
       toast.error(normalizeApiError(error, { fallback: 'No se pudieron cargar los proveedores.' }))
     }
-  }, [canViewInactive, includeInactive])
-
-  useEffect(() => {
-    const timeoutId = setTimeout(() => {
-      void loadData()
-    }, 0)
-
-    return () => clearTimeout(timeoutId)
-  }, [loadData])
-
-  const contactoById = useMemo(() => {
-    const map = new Map()
-    contactos.forEach((contacto) => {
-      map.set(String(contacto.id), contacto)
-    })
-    return map
-  }, [contactos])
+  }, [error, status])
 
   const filteredProveedores = useMemo(() => {
     const query = search.trim().toLowerCase()
@@ -108,23 +60,23 @@ function ProveedoresListPage() {
     }
 
     return proveedores.filter((proveedor) => {
-      const contacto = contactoById.get(String(proveedor.contacto))
+      const contacto = proveedor?.contacto_resumen
       const nombre = String(contacto?.nombre || '').toLowerCase()
       const rut = String(contacto?.rut || '').toLowerCase()
       const email = String(contacto?.email || '').toLowerCase()
       return nombre.includes(query) || rut.includes(query) || email.includes(query)
     })
-  }, [proveedores, contactoById, search])
+  }, [proveedores, search])
 
   const { paginatedRows: paginatedProveedores, toggleSort, getSortIndicator, currentPage, totalPages, totalRows, nextPage, prevPage } = useTableSorting(filteredProveedores, {
     accessors: {
       creado_en: (proveedor) => proveedor.creado_en,
-      nombre: (proveedor) => contactoById.get(String(proveedor.contacto))?.nombre || '',
-      rut: (proveedor) => contactoById.get(String(proveedor.contacto))?.rut || '',
-      email: (proveedor) => contactoById.get(String(proveedor.contacto))?.email || '',
-      estado: (proveedor) => (contactoById.get(String(proveedor.contacto))?.activo ? 'Activo' : 'Inactivo'),
+      nombre: (proveedor) => proveedor?.contacto_resumen?.nombre || '',
+      rut: (proveedor) => proveedor?.contacto_resumen?.rut || '',
+      email: (proveedor) => proveedor?.contacto_resumen?.email || '',
+      estado: (proveedor) => (proveedor?.contacto_resumen?.activo ? 'Activo' : 'Inactivo'),
       telefono: (proveedor) => {
-        const contacto = contactoById.get(String(proveedor.contacto))
+        const contacto = proveedor?.contacto_resumen
         return contacto?.telefono || contacto?.celular || ''
       },
       giro: (proveedor) => proveedor?.giro || '',
@@ -135,110 +87,20 @@ function ProveedoresListPage() {
     pageSize,
   })
 
-  const openEditModal = (proveedor) => {
-    const contacto = contactoById.get(String(proveedor.contacto))
-
-    setEditForm({
-      proveedorId: proveedor.id,
-      contactoId: contacto?.id || null,
-      nombre: contacto?.nombre || '',
-      razon_social: contacto?.razon_social || '',
-      rut: contacto?.rut || '',
-      tipo: contacto?.tipo || 'EMPRESA',
-      email: contacto?.email || '',
-      telefono: contacto?.telefono || '',
-      celular: contacto?.celular || '',
-      notas: contacto?.notas || '',
-      activo: Boolean(contacto?.activo ?? true),
-      giro: proveedor?.giro || '',
-      vendedor_contacto: proveedor?.vendedor_contacto || '',
-      dias_credito: proveedor?.dias_credito ?? 0,
-    })
-    setEditModalOpen(true)
-  }
-
-  const updateEditField = (key, value) => {
-    setEditForm((prev) => ({ ...prev, [key]: value }))
-  }
-
-  const closeEditModal = () => {
-    setEditModalOpen(false)
-    setSavingEdit(false)
-  }
-
-  const handleEditSubmit = async (event) => {
-    event.preventDefault()
-    if (!editForm.proveedorId || !editForm.contactoId) {
-      return
-    }
-
-    setSavingEdit(true)
-
-    try {
-      await api.patch(
-        `/contactos/${editForm.contactoId}/`,
-        {
-          nombre: editForm.nombre,
-          razon_social: editForm.razon_social || null,
-          rut: editForm.rut || null,
-          tipo: editForm.tipo,
-          email: editForm.email || null,
-          telefono: editForm.telefono || null,
-          celular: editForm.celular || null,
-          notas: editForm.notas || null,
-          activo: Boolean(editForm.activo),
-        },
-        { suppressGlobalErrorToast: true },
-      )
-
-      await api.patch(
-        `/proveedores/${editForm.proveedorId}/`,
-        {
-          contacto: editForm.contactoId,
-          giro: editForm.giro || null,
-          vendedor_contacto: editForm.vendedor_contacto || null,
-          dias_credito: Number(editForm.dias_credito) || 0,
-          activo: Boolean(editForm.activo),
-        },
-        { suppressGlobalErrorToast: true },
-      )
-
-      toast.success('Proveedor actualizado correctamente.')
-      closeEditModal()
-      await loadData()
-    } catch (error) {
-      toast.error(normalizeApiError(error, { fallback: 'No se pudo actualizar el proveedor.' }))
-      setSavingEdit(false)
-    }
-  }
-
   const requestDeleteProveedor = (proveedor) => {
     setProveedorToDelete(proveedor)
   }
 
   const confirmDeleteProveedor = async () => {
     const proveedor = proveedorToDelete
-    const contactoId = proveedor?.contacto
-    if (!proveedor?.id || !contactoId) {
+    if (!proveedor?.id) {
       return
     }
 
     setDeletingId(proveedor.id)
 
     try {
-      await api.delete(`/proveedores/${proveedor.id}/`, { suppressGlobalErrorToast: true })
-
-      const { data: clientesData } = await api.get('/clientes/', {
-        suppressGlobalErrorToast: true,
-      })
-      const clientes = normalizeListResponse(clientesData)
-      const contactoEnCliente = clientes.some(
-        (cliente) => String(cliente.contacto) === String(contactoId),
-      )
-
-      if (!contactoEnCliente) {
-        await api.delete(`/contactos/${contactoId}/`, { suppressGlobalErrorToast: true })
-      }
+      await contactosApi.removeOne(contactosApi.endpoints.proveedores, proveedor.id)
 
       toast.success('Proveedor eliminado correctamente.')
       setProveedorToDelete(null)
@@ -269,7 +131,7 @@ function ProveedoresListPage() {
         { header: 'Dias credito', key: 'dias_credito', width: 14 },
       ],
       rows: filteredProveedores.map((proveedor) => {
-        const contacto = contactoById.get(String(proveedor.contacto))
+        const contacto = proveedor?.contacto_resumen
         return {
           nombre: contacto?.nombre || '-',
           rut: contacto?.rut || '-',
@@ -292,7 +154,7 @@ function ProveedoresListPage() {
       fileName: `proveedores_${getTodaySuffix()}.pdf`,
       headers: ['Nombre', 'RUT', 'Email', 'Telefono', 'Giro', 'Dias credito'],
       rows: filteredProveedores.map((proveedor) => {
-        const contacto = contactoById.get(String(proveedor.contacto))
+        const contacto = proveedor?.contacto_resumen
         return [
           contacto?.nombre || '-',
           contacto?.rut || '-',
@@ -330,12 +192,14 @@ function ProveedoresListPage() {
             onExportPdf={handleExportPdf}
             disabled={filteredProveedores.length === 0}
           />
-          <Link
-            to="/contactos/proveedores/nuevo"
-            className={cn(buttonVariants({ variant: 'default', size: 'md', fullWidth: true }), 'sm:w-auto')}
-          >
-            Nuevo proveedor
-          </Link>
+          {canCreate ? (
+            <Link
+              to="/contactos/proveedores/nuevo"
+              className={cn(buttonVariants({ variant: 'default', size: 'md', fullWidth: true }), 'sm:w-auto')}
+            >
+              Nuevo proveedor
+            </Link>
+          ) : null}
         </div>
       </div>
 
@@ -414,7 +278,7 @@ function ProveedoresListPage() {
                 </tr>
               ) : (
                 paginatedProveedores.map((proveedor) => {
-                  const contacto = contactoById.get(String(proveedor.contacto))
+                  const contacto = proveedor?.contacto_resumen
 
                   return (
                     <tr key={proveedor.id} className="border-t border-border">
@@ -427,23 +291,31 @@ function ProveedoresListPage() {
                       <td className="px-3 py-2">{proveedor?.dias_credito ?? 0}</td>
                       <td className="w-px whitespace-nowrap px-2 py-2">
                         <div className="flex items-center gap-1">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => openEditModal(proveedor)}
-                            className="h-7 px-2 text-xs"
+                          <Link
+                            to={`/contactos/terceros/${proveedor.contacto}`}
+                            className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'h-7 px-2 text-xs')}
                           >
-                            Editar
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            disabled={deletingId === proveedor.id}
-                            onClick={() => requestDeleteProveedor(proveedor)}
-                            className="h-7 border-destructive/40 px-2 text-xs text-destructive hover:bg-destructive/10"
-                          >
-                            {deletingId === proveedor.id ? 'Eliminando...' : 'Eliminar'}
-                          </Button>
+                            Ver
+                          </Link>
+                          {canEdit ? (
+                            <Link
+                              to={`/contactos/proveedores/${proveedor.id}/editar`}
+                              className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'h-7 px-2 text-xs')}
+                            >
+                              Editar
+                            </Link>
+                          ) : null}
+                          {canDelete ? (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              disabled={deletingId === proveedor.id}
+                              onClick={() => requestDeleteProveedor(proveedor)}
+                              className="h-7 border-destructive/40 px-2 text-xs text-destructive hover:bg-destructive/10"
+                            >
+                              {deletingId === proveedor.id ? 'Eliminando...' : 'Eliminar'}
+                            </Button>
+                          ) : null}
                         </div>
                       </td>
                     </tr>
@@ -464,152 +336,10 @@ function ProveedoresListPage() {
         onNext={nextPage}
       />
 
-      {editModalOpen && (
-        <div className="fixed inset-0 z-90 flex items-center justify-center bg-foreground/40 p-4">
-          <div className="w-full max-w-3xl rounded-xl border border-border bg-card p-4 shadow-xl">
-            <div className="mb-3 flex items-center justify-between gap-3">
-              <h3 className="text-lg font-semibold">Editar proveedor</h3>
-              <Button variant="outline" size="sm" onClick={closeEditModal} disabled={savingEdit}>
-                Cerrar
-              </Button>
-            </div>
-
-            <form className="space-y-3" onSubmit={handleEditSubmit}>
-              <div className="grid gap-3 md:grid-cols-2">
-                <label className="text-sm">
-                  Nombre
-                  <input
-                    className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
-                    value={editForm.nombre}
-                    onChange={(event) => updateEditField('nombre', event.target.value)}
-                    required
-                  />
-                </label>
-
-                <label className="text-sm">
-                  Razon social
-                  <input
-                    className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
-                    value={editForm.razon_social}
-                    onChange={(event) => updateEditField('razon_social', event.target.value)}
-                  />
-                </label>
-
-                <label className="text-sm">
-                  RUT
-                  <input
-                    className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
-                    value={editForm.rut}
-                    onChange={(event) => updateEditField('rut', event.target.value)}
-                  />
-                </label>
-
-                <label className="text-sm">
-                  Tipo
-                  <select
-                    className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
-                    value={editForm.tipo}
-                    onChange={(event) => updateEditField('tipo', event.target.value)}
-                  >
-                    <option value="PERSONA">Persona</option>
-                    <option value="EMPRESA">Empresa</option>
-                  </select>
-                </label>
-
-                <label className="text-sm">
-                  Email
-                  <input
-                    type="email"
-                    className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
-                    value={editForm.email}
-                    onChange={(event) => updateEditField('email', event.target.value)}
-                  />
-                </label>
-
-                <label className="text-sm">
-                  Telefono
-                  <input
-                    className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
-                    value={editForm.telefono}
-                    onChange={(event) => updateEditField('telefono', event.target.value)}
-                  />
-                </label>
-
-                <label className="text-sm">
-                  Celular
-                  <input
-                    className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
-                    value={editForm.celular}
-                    onChange={(event) => updateEditField('celular', event.target.value)}
-                  />
-                </label>
-
-                <label className="text-sm">
-                  Giro
-                  <input
-                    className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
-                    value={editForm.giro}
-                    onChange={(event) => updateEditField('giro', event.target.value)}
-                  />
-                </label>
-
-                <label className="text-sm">
-                  Contacto vendedor
-                  <input
-                    className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
-                    value={editForm.vendedor_contacto}
-                    onChange={(event) => updateEditField('vendedor_contacto', event.target.value)}
-                  />
-                </label>
-
-                <label className="text-sm">
-                  Dias credito
-                  <input
-                    type="number"
-                    min="0"
-                    className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
-                    value={editForm.dias_credito}
-                    onChange={(event) => updateEditField('dias_credito', event.target.value)}
-                  />
-                </label>
-
-                <label className="text-sm md:col-span-2">
-                  Notas
-                  <textarea
-                    rows={3}
-                    className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
-                    value={editForm.notas}
-                    onChange={(event) => updateEditField('notas', event.target.value)}
-                  />
-                </label>
-
-                <label className="flex items-center gap-2 text-sm md:col-span-2">
-                  <input
-                    type="checkbox"
-                    checked={editForm.activo}
-                    onChange={(event) => updateEditField('activo', event.target.checked)}
-                  />
-                  Activo
-                </label>
-              </div>
-
-              <div className="flex items-center justify-end gap-2 pt-2">
-                <Button type="button" variant="outline" onClick={closeEditModal} disabled={savingEdit}>
-                  Cancelar
-                </Button>
-                <Button type="submit" disabled={savingEdit}>
-                  {savingEdit ? 'Guardando...' : 'Guardar cambios'}
-                </Button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
       <ConfirmDialog
         open={Boolean(proveedorToDelete)}
         title="Eliminar proveedor"
-        description="Se eliminara este proveedor. Si el contacto no esta asociado a cliente tambien se eliminara."
+        description="Se eliminara la ficha del proveedor. Si el contacto queda sin relacion comercial, el backend tambien lo limpiara."
         confirmLabel="Eliminar"
         loading={deletingId === proveedorToDelete?.id}
         onCancel={() => {

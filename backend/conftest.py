@@ -19,6 +19,11 @@ def limpiar_tenant_contexto():
     set_current_user(None)
 
 
+@pytest.fixture(autouse=True)
+def desactivar_redirect_ssl(settings):
+    settings.SECURE_SSL_REDIRECT = False
+
+
 def _build_test_rut(prefix: str) -> str:
     base = f"{prefix}{uuid.uuid4().int % 1000000:06d}"
     cuerpo = str(int(base))

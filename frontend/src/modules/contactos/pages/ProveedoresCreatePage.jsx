@@ -1,44 +1,14 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
-import { api } from '@/api/client'
-import { normalizeApiError } from '@/api/errors'
 import Button from '@/components/ui/Button'
 import { buttonVariants } from '@/components/ui/buttonVariants'
 import { cn } from '@/lib/utils'
-
-function normalizeListResponse(data) {
-  if (Array.isArray(data)) {
-    return data
-  }
-
-  if (Array.isArray(data?.results)) {
-    return data.results
-  }
-
-  return []
-}
-
-function normalizeRut(value) {
-  return String(value || '')
-    .replace(/\./g, '')
-    .replace(/-/g, '')
-    .replace(/\s+/g, '')
-    .toUpperCase()
-}
-
-function findExistingContacto(contactos, form) {
-  const rut = normalizeRut(form.rut)
-  if (!rut) {
-    return null
-  }
-
-  return contactos.find((contacto) => normalizeRut(contacto?.rut) === rut) || null
-}
+import ContactoBaseFields from '@/modules/contactos/components/ContactoBaseFields'
+import { useCreateTerceroAction } from '@/modules/contactos/store/mutations'
 
 function ProveedoresCreatePage() {
   const navigate = useNavigate()
-  const [status, setStatus] = useState('idle')
   const [form, setForm] = useState({
     nombre: '',
     razon_social: '',
@@ -58,6 +28,21 @@ function ProveedoresCreatePage() {
     setForm((prev) => ({ ...prev, [key]: value }))
   }
 
+  const { status, saveTercero } = useCreateTerceroAction({
+    kind: 'proveedor',
+    successMessage: 'Proveedor creado correctamente.',
+    errorMessage: 'No se pudo crear el proveedor.',
+    buildPayload: (currentForm, contactoId) => ({
+      contacto: contactoId,
+      giro: currentForm.giro || null,
+      vendedor_contacto: currentForm.vendedor_contacto || null,
+      dias_credito: Number(currentForm.dias_credito) || 0,
+    }),
+    onSuccess: async () => {
+      navigate('/contactos/proveedores')
+    },
+  })
+
   const onSubmit = async (event) => {
     event.preventDefault()
 
@@ -74,59 +59,7 @@ function ProveedoresCreatePage() {
       return
     }
 
-    setStatus('loading')
-
-    try {
-      const { data: contactosData } = await api.get('/contactos/', {
-        suppressGlobalErrorToast: true,
-      })
-
-      const contactos = normalizeListResponse(contactosData)
-      const contactoExistente = findExistingContacto(contactos, form)
-
-      let contactoId = contactoExistente?.id
-
-      if (!contactoId) {
-        const { data: contacto } = await api.post(
-          '/contactos/',
-          {
-            nombre: form.nombre,
-            razon_social: form.razon_social || null,
-            rut: form.rut || null,
-            tipo: form.tipo,
-            email: form.email || null,
-            telefono: form.telefono || null,
-            celular: form.celular || null,
-            notas: form.notas || null,
-            activo: form.activo,
-          },
-          { suppressGlobalErrorToast: true },
-        )
-
-        contactoId = contacto.id
-      } else {
-        toast.info('Se reutilizo un contacto existente para crear el proveedor.')
-      }
-
-      await api.post(
-        '/proveedores/',
-        {
-          contacto: contactoId,
-          giro: form.giro || null,
-          vendedor_contacto: form.vendedor_contacto || null,
-          dias_credito: Number(form.dias_credito) || 0,
-          activo: form.activo,
-        },
-        { suppressGlobalErrorToast: true },
-      )
-
-      toast.success('Proveedor creado correctamente.')
-      navigate('/contactos/proveedores')
-    } catch (error) {
-      toast.error(normalizeApiError(error, { fallback: 'No se pudo crear el proveedor.' }))
-    } finally {
-      setStatus('idle')
-    }
+    await saveTercero(form)
   }
 
   return (
@@ -146,75 +79,7 @@ function ProveedoresCreatePage() {
 
       <form className="rounded-md border border-border bg-card p-4" onSubmit={onSubmit}>
         <div className="grid gap-3 md:grid-cols-2">
-          <label className="text-sm">
-            Nombre
-            <input
-              className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
-              value={form.nombre}
-              onChange={(event) => updateField('nombre', event.target.value)}
-              required
-            />
-          </label>
-
-          <label className="text-sm">
-            Razon social
-            <input
-              className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
-              value={form.razon_social}
-              onChange={(event) => updateField('razon_social', event.target.value)}
-            />
-          </label>
-
-          <label className="text-sm">
-            RUT
-            <input
-              className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
-              value={form.rut}
-              onChange={(event) => updateField('rut', event.target.value)}
-              required
-            />
-          </label>
-
-          <label className="text-sm">
-            Tipo
-            <select
-              className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
-              value={form.tipo}
-              onChange={(event) => updateField('tipo', event.target.value)}
-            >
-              <option value="PERSONA">Persona</option>
-              <option value="EMPRESA">Empresa</option>
-            </select>
-          </label>
-
-          <label className="text-sm">
-            Email
-            <input
-              type="email"
-              className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
-              value={form.email}
-              onChange={(event) => updateField('email', event.target.value)}
-              required
-            />
-          </label>
-
-          <label className="text-sm">
-            Telefono
-            <input
-              className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
-              value={form.telefono}
-              onChange={(event) => updateField('telefono', event.target.value)}
-            />
-          </label>
-
-          <label className="text-sm">
-            Celular
-            <input
-              className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
-              value={form.celular}
-              onChange={(event) => updateField('celular', event.target.value)}
-            />
-          </label>
+          <ContactoBaseFields form={form} updateField={updateField} />
 
           <label className="text-sm">
             Giro
@@ -243,25 +108,6 @@ function ProveedoresCreatePage() {
               value={form.dias_credito}
               onChange={(event) => updateField('dias_credito', event.target.value)}
             />
-          </label>
-
-          <label className="text-sm md:col-span-2">
-            Notas
-            <textarea
-              rows={3}
-              className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
-              value={form.notas}
-              onChange={(event) => updateField('notas', event.target.value)}
-            />
-          </label>
-
-          <label className="flex items-center gap-2 text-sm md:col-span-2">
-            <input
-              type="checkbox"
-              checked={form.activo}
-              onChange={(event) => updateField('activo', event.target.checked)}
-            />
-            Activo
           </label>
         </div>
 
