@@ -136,12 +136,14 @@ function ContactoDetailPage() {
   }, [id])
 
   useEffect(() => {
+    const contactoId = contacto?.id
+
     if (!canViewAudit || activeSection !== 'auditoria') {
       setAuditStatus('idle')
       return
     }
 
-    if (status !== 'succeeded' || !contacto) {
+    if (status !== 'succeeded' || !contactoId) {
       setAuditRows([])
       setAuditStatus('idle')
       return
@@ -152,7 +154,7 @@ function ContactoDetailPage() {
     const loadAuditTrail = async () => {
       setAuditStatus('loading')
       try {
-        const data = await contactosApi.getTerceroAudit(contacto.id, { limit: 8 })
+        const data = await contactosApi.getTerceroAudit(contactoId, { limit: 8 })
 
         if (!active) {
           return
@@ -211,6 +213,9 @@ function ContactoDetailPage() {
     hasCliente ? 'Cliente' : null,
     hasProveedor ? 'Proveedor' : null,
   ].filter(Boolean).join(' + ') || 'Contacto'
+  const statusTone = contacto.activo
+    ? 'border-emerald-200 bg-emerald-50 text-emerald-900'
+    : 'border-slate-200 bg-slate-100 text-slate-700'
 
   const updateDireccionField = (field, value) => {
     setDireccionForm((prev) => ({ ...prev, [field]: value }))
@@ -398,9 +403,17 @@ function ContactoDetailPage() {
         <div>
           <p className="text-xs uppercase tracking-[0.24em] text-muted-foreground">Maestro de terceros</p>
           <h2 className="mt-1 text-3xl font-semibold">{contacto.nombre || 'Contacto sin nombre'}</h2>
-          <p className="mt-2 text-sm text-muted-foreground">
-            {roleLabel} | {contacto.rut || 'Sin RUT'} | {contacto.activo ? 'Activo' : 'Inactivo'}
-          </p>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <span className="rounded-full border border-border bg-background px-3 py-1 text-xs font-medium text-foreground">
+              {roleLabel}
+            </span>
+            <span className="rounded-full border border-border bg-background px-3 py-1 text-xs font-medium text-foreground">
+              {contacto.rut || 'Sin RUT'}
+            </span>
+            <span className={cn('rounded-full border px-3 py-1 text-xs font-medium', statusTone)}>
+              {contacto.activo ? 'Activo' : 'Inactivo'}
+            </span>
+          </div>
         </div>
         <div className="flex flex-wrap gap-2">
           <Link to={hasCliente ? '/contactos/clientes' : '/contactos/proveedores'} className={cn(buttonVariants({ variant: 'outline', size: 'md' }))}>
@@ -419,7 +432,7 @@ function ContactoDetailPage() {
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap gap-2 rounded-2xl border border-border bg-muted/20 p-2">
         <SectionTabButton active={activeSection === 'resumen'} label="Resumen" onClick={() => setActiveSection('resumen')} />
         <SectionTabButton active={activeSection === 'operacion'} label="Operacion" onClick={() => setActiveSection('operacion')} />
         <SectionTabButton active={activeSection === 'finanzas'} label="Finanzas" onClick={() => setActiveSection('finanzas')} />
@@ -428,73 +441,66 @@ function ContactoDetailPage() {
         ) : null}
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(320px,0.85fr)]">
-        <div className={cn('space-y-4', activeSection !== 'finanzas' ? '' : 'lg:col-span-2')}>
-          <div className={cn(activeSection === 'resumen' ? 'block' : 'hidden')}>
-            <ContactoResumenSection contacto={contacto} />
-          </div>
-
-          <div className={cn(activeSection === 'operacion' ? 'block' : 'hidden')}>
-            <ContactoDireccionesSection
-              canDelete={canDelete}
-              canEdit={canEdit}
-              deletingDireccionId={deletingDireccionId}
-              direccionForm={direccionForm}
-              direcciones={direcciones}
-              editingDireccionForm={editingDireccionForm}
-              editingDireccionId={editingDireccionId}
-              onCancelEdit={cancelDireccionEdit}
-              onChangeCreateField={updateDireccionField}
-              onChangeEditField={updateEditingDireccionField}
-              onDelete={requestDeleteDireccion}
-              onStartEdit={startDireccionEdit}
-              onSubmitCreate={submitDireccion}
-              onSubmitEdit={submitDireccionEdit}
-              savingDireccion={savingDireccion}
-              updatingDireccion={updatingDireccion}
-            />
-          </div>
+      <div className="mx-auto max-w-5xl space-y-4">
+        <div className={cn('space-y-4', activeSection === 'resumen' ? 'block' : 'hidden')}>
+          <ContactoResumenSection contacto={contacto} />
+          <ContactoCommercialSection cliente={cliente} proveedor={proveedor} />
         </div>
 
-        <div className="space-y-4">
-          <div className={cn(activeSection === 'resumen' ? 'block' : 'hidden')}>
-            <ContactoCommercialSection cliente={cliente} proveedor={proveedor} />
-          </div>
+        <div className={cn(activeSection === 'operacion' ? 'block' : 'hidden')}>
+          <ContactoDireccionesSection
+            canDelete={canDelete}
+            canEdit={canEdit}
+            deletingDireccionId={deletingDireccionId}
+            direccionForm={direccionForm}
+            direcciones={direcciones}
+            editingDireccionForm={editingDireccionForm}
+            editingDireccionId={editingDireccionId}
+            onCancelEdit={cancelDireccionEdit}
+            onChangeCreateField={updateDireccionField}
+            onChangeEditField={updateEditingDireccionField}
+            onDelete={requestDeleteDireccion}
+            onStartEdit={startDireccionEdit}
+            onSubmitCreate={submitDireccion}
+            onSubmitEdit={submitDireccionEdit}
+            savingDireccion={savingDireccion}
+            updatingDireccion={updatingDireccion}
+          />
+        </div>
 
-          <div className={cn(activeSection === 'finanzas' ? 'block' : 'hidden')}>
-            <ContactoCuentasSection
-              canDelete={canDelete}
-              canEdit={canEdit}
-              cuentasBancarias={cuentasBancarias}
-              cuentaForm={cuentaForm}
-              deletingCuentaId={deletingCuentaId}
-              editingCuentaForm={editingCuentaForm}
-              editingCuentaId={editingCuentaId}
-              onCancelEdit={cancelCuentaEdit}
-              onChangeCreateField={updateCuentaField}
-              onChangeEditField={updateEditingCuentaField}
-              onDelete={requestDeleteCuenta}
-              onStartEdit={startCuentaEdit}
-              onSubmitCreate={submitCuenta}
-              onSubmitEdit={submitCuentaEdit}
-              savingCuenta={savingCuenta}
-              updatingCuenta={updatingCuenta}
+        <div className={cn(activeSection === 'finanzas' ? 'block' : 'hidden')}>
+          <ContactoCuentasSection
+            canDelete={canDelete}
+            canEdit={canEdit}
+            cuentasBancarias={cuentasBancarias}
+            cuentaForm={cuentaForm}
+            deletingCuentaId={deletingCuentaId}
+            editingCuentaForm={editingCuentaForm}
+            editingCuentaId={editingCuentaId}
+            onCancelEdit={cancelCuentaEdit}
+            onChangeCreateField={updateCuentaField}
+            onChangeEditField={updateEditingCuentaField}
+            onDelete={requestDeleteCuenta}
+            onStartEdit={startCuentaEdit}
+            onSubmitCreate={submitCuenta}
+            onSubmitEdit={submitCuentaEdit}
+            savingCuenta={savingCuenta}
+            updatingCuenta={updatingCuenta}
+          />
+        </div>
+
+        {canViewAudit ? (
+          <div className={cn(activeSection === 'auditoria' ? 'block' : 'hidden')}>
+            <ContactoAuditSection
+              auditFilters={AUDIT_FILTERS}
+              auditFilter={auditFilter}
+              auditRows={auditRows}
+              auditStatus={auditStatus}
+              filteredAuditRows={filteredAuditRows}
+              onFilterChange={setAuditFilter}
             />
           </div>
-
-          {canViewAudit ? (
-            <div className={cn(activeSection === 'auditoria' ? 'block' : 'hidden')}>
-              <ContactoAuditSection
-                auditFilters={AUDIT_FILTERS}
-                auditFilter={auditFilter}
-                auditRows={auditRows}
-                auditStatus={auditStatus}
-                filteredAuditRows={filteredAuditRows}
-                onFilterChange={setAuditFilter}
-              />
-            </div>
-          ) : null}
-        </div>
+        ) : null}
       </div>
 
       <ConfirmDialog

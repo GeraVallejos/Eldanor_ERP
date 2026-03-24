@@ -80,7 +80,7 @@ function ProveedoresEditPage() {
           activo: Boolean(contacto.activo ?? true),
         })
         setPageStatus('succeeded')
-      } catch (_error) {
+      } catch {
         if (!active) {
           return
         }

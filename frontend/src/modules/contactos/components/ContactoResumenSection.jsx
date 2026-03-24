@@ -13,6 +13,7 @@ function ContactoResumenSection({ contacto }) {
         <DetailRow label="Celular" value={contacto.celular || '-'} />
         <DetailRow label="Estado" value={contacto.activo ? 'Activo' : 'Inactivo'} />
       </div>
+
       <div className="mt-4 rounded-lg border border-dashed border-border px-4 py-3">
         <p className="text-xs uppercase tracking-wide text-muted-foreground">Notas</p>
         <p className="mt-2 text-sm text-foreground">{contacto.notas || 'Sin notas registradas.'}</p>
