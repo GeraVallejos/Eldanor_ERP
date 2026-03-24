@@ -148,6 +148,47 @@ class AuditoriaService:
         return queryset.order_by("-occurred_at", "-id")
 
     @staticmethod
+    def consultar_eventos_por_entidades(
+        *,
+        empresa,
+        entities,
+        limit=None,
+    ):
+        """Consulta eventos de auditoria para multiples entidades relacionadas en una sola operacion."""
+        queryset = AuditEvent.all_objects.filter(empresa=empresa)
+
+        normalized_entities = [
+            (
+                str(entity_type or "").strip().upper(),
+                str(entity_id or "").strip(),
+            )
+            for entity_type, entity_id in (entities or [])
+            if str(entity_type or "").strip() and str(entity_id or "").strip()
+        ]
+
+        if not normalized_entities:
+            return queryset.none()
+
+        entity_filter = Q()
+        for entity_type, entity_id in normalized_entities:
+            entity_filter |= Q(entity_type=entity_type, entity_id=entity_id)
+
+        queryset = queryset.filter(entity_filter).order_by("-occurred_at", "-id")
+
+        if limit is None:
+            return queryset
+
+        try:
+            normalized_limit = int(limit)
+        except (TypeError, ValueError) as exc:
+            raise BusinessRuleError("limit debe ser un entero positivo.") from exc
+
+        if normalized_limit <= 0:
+            raise BusinessRuleError("limit debe ser mayor que cero.")
+
+        return queryset[:normalized_limit]
+
+    @staticmethod
     def verificar_cadena_integridad(*, empresa, limit=None):
         return AuditoriaService.verificar_cadena_integridad_avanzada(
             empresa=empresa,

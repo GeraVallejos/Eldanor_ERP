@@ -21,19 +21,13 @@ describe('contactos/ClientesCreatePage', () => {
     vi.clearAllMocks()
   })
 
-  it('crea contacto+cliente cuando no existe contacto previo (contrato frontend-backend)', async () => {
-    let contactoPayload = null
-    let clientePayload = null
+  it('crea contacto+cliente confiando en la deduplicacion backend', async () => {
+    let requestPayload = null
 
     server.use(
-      http.get('*/contactos/', async () => HttpResponse.json([])),
-      http.post('*/contactos/', async ({ request }) => {
-        contactoPayload = await request.json()
-        return HttpResponse.json({ id: 301, ...contactoPayload }, { status: 201 })
-      }),
-      http.post('*/clientes/', async ({ request }) => {
-        clientePayload = await request.json()
-        return HttpResponse.json({ id: 401, ...clientePayload }, { status: 201 })
+      http.post('*/clientes/crear-con-contacto/', async ({ request }) => {
+        requestPayload = await request.json()
+        return HttpResponse.json({ id: 401, contacto: 301 }, { status: 201 })
       }),
     )
 
@@ -51,40 +45,29 @@ describe('contactos/ClientesCreatePage', () => {
       expect(toast.success).toHaveBeenCalledWith('Cliente creado correctamente.')
     })
 
-    expect(contactoPayload).toMatchObject({
+    expect(requestPayload).toMatchObject({
       nombre: 'Cliente Nuevo',
       rut: '12.345.678-5',
       email: 'cliente@eldanor.cl',
-    })
-    expect(clientePayload).toMatchObject({
-      contacto: 301,
       limite_credito: 90000,
       dias_credito: 30,
     })
+    expect(requestPayload).toHaveProperty('activo', true)
   })
 
-  it('reutiliza contacto existente por RUT y evita crear contacto duplicado', async () => {
-    let contactoPostCalled = false
-    let clientePayload = null
+  it('usa el contacto devuelto por backend aunque el RUT ya exista y haya sido reutilizado', async () => {
+    let requestPayload = null
 
     server.use(
-      http.get('*/contactos/', async () =>
-        HttpResponse.json([
+      http.post('*/clientes/crear-con-contacto/', async ({ request }) => {
+        requestPayload = await request.json()
+        return HttpResponse.json(
           {
             id: 77,
-            nombre: 'Cliente Existente',
-            rut: '123456785',
-            email: 'existente@eldanor.cl',
+            contacto: 77,
           },
-        ]),
-      ),
-      http.post('*/contactos/', async () => {
-        contactoPostCalled = true
-        return HttpResponse.json({ id: 999 }, { status: 201 })
-      }),
-      http.post('*/clientes/', async ({ request }) => {
-        clientePayload = await request.json()
-        return HttpResponse.json({ id: 1001 }, { status: 201 })
+          { status: 201 },
+        )
       }),
     )
 
@@ -97,11 +80,18 @@ describe('contactos/ClientesCreatePage', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Crear cliente' }))
 
     await waitFor(() => {
-      expect(toast.info).toHaveBeenCalledWith('Se reutilizo un contacto existente para crear el cliente.')
       expect(toast.success).toHaveBeenCalledWith('Cliente creado correctamente.')
     })
 
-    expect(contactoPostCalled).toBe(false)
-    expect(clientePayload?.contacto).toBe(77)
+    expect(requestPayload).toMatchObject({
+      nombre: 'Cliente Existente',
+      rut: '12.345.678-5',
+      email: 'existente@eldanor.cl',
+      activo: true,
+    })
+    expect(requestPayload).toMatchObject({
+      categoria_cliente: null,
+      segmento: null,
+    })
   })
 })

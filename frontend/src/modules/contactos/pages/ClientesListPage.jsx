@@ -1,8 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useSelector } from 'react-redux'
 import { toast } from 'sonner'
-import { api } from '@/api/client'
 import { normalizeApiError } from '@/api/errors'
 import ActiveSearchFilter from '@/components/ui/ActiveSearchFilter'
 import Button from '@/components/ui/Button'
@@ -12,32 +11,20 @@ import { buttonVariants } from '@/components/ui/buttonVariants'
 import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import TablePagination from '@/components/ui/TablePagination'
 import { getChileDateSuffix } from '@/lib/dateTimeFormat'
-import { formatCurrencyCLP, formatSmartNumber } from '@/lib/numberFormat'
+import { formatCurrencyCLP } from '@/lib/numberFormat'
 import { useTableSorting } from '@/lib/tableSorting'
 import { useResponsiveTablePageSize } from '@/lib/useResponsiveTablePageSize'
 import { cn } from '@/lib/utils'
 import { downloadExcelFile } from '@/modules/shared/exports/downloadExcelFile'
 import { downloadSimpleTablePdf } from '@/modules/shared/exports/downloadSimpleTablePdf'
 import { selectCurrentUser } from '@/modules/auth/authSlice'
-
-function normalizeListResponse(data) {
-  if (Array.isArray(data)) {
-    return data
-  }
-
-  if (Array.isArray(data?.results)) {
-    return data.results
-  }
-
-  return []
-}
+import { contactosApi } from '@/modules/contactos/store/api'
+import { useContactosListado } from '@/modules/contactos/store/hooks'
+import { hasAnyRole } from '@/modules/shared/auth/roles'
+import { usePermissions } from '@/modules/shared/auth/usePermission'
 
 function formatMoney(value) {
   return formatCurrencyCLP(value)
-}
-
-function toIntegerString(value) {
-  return formatSmartNumber(value, { maximumFractionDigits: 0 })
 }
 
 function getTodaySuffix() {
@@ -47,72 +34,32 @@ function getTodaySuffix() {
 function ClientesListPage() {
   const pageSize = useResponsiveTablePageSize({ reservedHeight: 450 })
   const currentUser = useSelector(selectCurrentUser)
-  const [clientes, setClientes] = useState([])
-  const [contactos, setContactos] = useState([])
-  const [status, setStatus] = useState('idle')
+  const permissions = usePermissions(['CONTACTOS.CREAR', 'CONTACTOS.EDITAR', 'CONTACTOS.BORRAR'])
   const [search, setSearch] = useState('')
   const [includeInactive, setIncludeInactive] = useState(false)
-  const [editModalOpen, setEditModalOpen] = useState(false)
-  const [savingEdit, setSavingEdit] = useState(false)
   const [deletingId, setDeletingId] = useState(null)
   const [clienteToDelete, setClienteToDelete] = useState(null)
-  const [editForm, setEditForm] = useState({
-    clienteId: null,
-    contactoId: null,
-    nombre: '',
-    razon_social: '',
-    rut: '',
-    tipo: 'EMPRESA',
-    email: '',
-    telefono: '',
-    celular: '',
-    notas: '',
-    activo: true,
-    limite_credito: 0,
-    dias_credito: 0,
-    categoria_cliente: '',
-    segmento: '',
+
+  const canViewInactive = hasAnyRole(currentUser, ['OWNER', 'ADMIN'])
+  const canBulkImport = permissions['CONTACTOS.CREAR'] && hasAnyRole(currentUser, ['ADMIN'])
+  const canCreate = permissions['CONTACTOS.CREAR']
+  const canEdit = permissions['CONTACTOS.EDITAR']
+  const canDelete = permissions['CONTACTOS.BORRAR']
+  const {
+    rows: clientes,
+    status,
+    error,
+    reload: loadData,
+  } = useContactosListado({
+    resource: 'clientes',
+    includeInactive: canViewInactive && includeInactive,
   })
 
-  const userRole = String(currentUser?.rol || '').toUpperCase()
-  const canViewInactive = userRole === 'OWNER' || userRole === 'ADMIN'
-  const canBulkImport = userRole === 'ADMIN'
-
-  const loadData = useCallback(async () => {
-    setStatus('loading')
-
-    const params = canViewInactive && includeInactive ? { include_inactive: '1' } : undefined
-
-    try {
-      const [{ data: clientesData }, { data: contactosData }] = await Promise.all([
-        api.get('/clientes/', { params, suppressGlobalErrorToast: true }),
-        api.get('/contactos/', { params, suppressGlobalErrorToast: true }),
-      ])
-
-      setClientes(normalizeListResponse(clientesData))
-      setContactos(normalizeListResponse(contactosData))
-      setStatus('succeeded')
-    } catch (error) {
-      setStatus('failed')
+  useEffect(() => {
+    if (status === 'failed' && error) {
       toast.error(normalizeApiError(error, { fallback: 'No se pudieron cargar los clientes.' }))
     }
-  }, [canViewInactive, includeInactive])
-
-  useEffect(() => {
-    const timeoutId = setTimeout(() => {
-      void loadData()
-    }, 0)
-
-    return () => clearTimeout(timeoutId)
-  }, [loadData])
-
-  const contactoById = useMemo(() => {
-    const map = new Map()
-    contactos.forEach((contacto) => {
-      map.set(String(contacto.id), contacto)
-    })
-    return map
-  }, [contactos])
+  }, [error, status])
 
   const filteredClientes = useMemo(() => {
     const query = search.trim().toLowerCase()
@@ -122,23 +69,23 @@ function ClientesListPage() {
     }
 
     return clientes.filter((cliente) => {
-      const contacto = contactoById.get(String(cliente.contacto))
+      const contacto = cliente?.contacto_resumen
       const nombre = String(contacto?.nombre || '').toLowerCase()
       const rut = String(contacto?.rut || '').toLowerCase()
       const email = String(contacto?.email || '').toLowerCase()
       return nombre.includes(query) || rut.includes(query) || email.includes(query)
     })
-  }, [clientes, contactoById, search])
+  }, [clientes, search])
 
   const { paginatedRows: paginatedClientes, toggleSort, getSortIndicator, currentPage, totalPages, totalRows, nextPage, prevPage } = useTableSorting(filteredClientes, {
     accessors: {
       creado_en: (cliente) => cliente.creado_en,
-      nombre: (cliente) => contactoById.get(String(cliente.contacto))?.nombre || '',
-      rut: (cliente) => contactoById.get(String(cliente.contacto))?.rut || '',
-      email: (cliente) => contactoById.get(String(cliente.contacto))?.email || '',
-      estado: (cliente) => (contactoById.get(String(cliente.contacto))?.activo ? 'Activo' : 'Inactivo'),
+      nombre: (cliente) => cliente?.contacto_resumen?.nombre || '',
+      rut: (cliente) => cliente?.contacto_resumen?.rut || '',
+      email: (cliente) => cliente?.contacto_resumen?.email || '',
+      estado: (cliente) => (cliente?.contacto_resumen?.activo ? 'Activo' : 'Inactivo'),
       telefono: (cliente) => {
-        const contacto = contactoById.get(String(cliente.contacto))
+        const contacto = cliente?.contacto_resumen
         return contacto?.telefono || contacto?.celular || ''
       },
       limite_credito: (cliente) => Number(cliente?.limite_credito ?? 0),
@@ -149,112 +96,20 @@ function ClientesListPage() {
     pageSize,
   })
 
-  const openEditModal = (cliente) => {
-    const contacto = contactoById.get(String(cliente.contacto))
-
-    setEditForm({
-      clienteId: cliente.id,
-      contactoId: contacto?.id || null,
-      nombre: contacto?.nombre || '',
-      razon_social: contacto?.razon_social || '',
-      rut: contacto?.rut || '',
-      tipo: contacto?.tipo || 'EMPRESA',
-      email: contacto?.email || '',
-      telefono: contacto?.telefono || '',
-      celular: contacto?.celular || '',
-      notas: contacto?.notas || '',
-      activo: Boolean(contacto?.activo ?? true),
-      limite_credito: toIntegerString(cliente?.limite_credito ?? 0),
-      dias_credito: cliente?.dias_credito ?? 0,
-      categoria_cliente: cliente?.categoria_cliente || '',
-      segmento: cliente?.segmento || '',
-    })
-    setEditModalOpen(true)
-  }
-
-  const updateEditField = (key, value) => {
-    setEditForm((prev) => ({ ...prev, [key]: value }))
-  }
-
-  const closeEditModal = () => {
-    setEditModalOpen(false)
-    setSavingEdit(false)
-  }
-
-  const handleEditSubmit = async (event) => {
-    event.preventDefault()
-    if (!editForm.clienteId || !editForm.contactoId) {
-      return
-    }
-
-    setSavingEdit(true)
-
-    try {
-      await api.patch(
-        `/contactos/${editForm.contactoId}/`,
-        {
-          nombre: editForm.nombre,
-          razon_social: editForm.razon_social || null,
-          rut: editForm.rut || null,
-          tipo: editForm.tipo,
-          email: editForm.email || null,
-          telefono: editForm.telefono || null,
-          celular: editForm.celular || null,
-          notas: editForm.notas || null,
-          activo: Boolean(editForm.activo),
-        },
-        { suppressGlobalErrorToast: true },
-      )
-
-      await api.patch(
-        `/clientes/${editForm.clienteId}/`,
-        {
-          contacto: editForm.contactoId,
-          limite_credito: Number(editForm.limite_credito) || 0,
-          dias_credito: Number(editForm.dias_credito) || 0,
-          categoria_cliente: editForm.categoria_cliente || null,
-          segmento: editForm.segmento || null,
-          activo: Boolean(editForm.activo),
-        },
-        { suppressGlobalErrorToast: true },
-      )
-
-      toast.success('Cliente actualizado correctamente.')
-      closeEditModal()
-      await loadData()
-    } catch (error) {
-      toast.error(normalizeApiError(error, { fallback: 'No se pudo actualizar el cliente.' }))
-      setSavingEdit(false)
-    }
-  }
-
   const requestDeleteCliente = (cliente) => {
     setClienteToDelete(cliente)
   }
 
   const confirmDeleteCliente = async () => {
     const cliente = clienteToDelete
-    const contactoId = cliente?.contacto
-    if (!cliente?.id || !contactoId) {
+    if (!cliente?.id) {
       return
     }
 
     setDeletingId(cliente.id)
 
     try {
-      await api.delete(`/clientes/${cliente.id}/`, { suppressGlobalErrorToast: true })
-
-      const { data: proveedoresData } = await api.get('/proveedores/', {
-        suppressGlobalErrorToast: true,
-      })
-      const proveedores = normalizeListResponse(proveedoresData)
-      const contactoEnProveedor = proveedores.some(
-        (proveedor) => String(proveedor.contacto) === String(contactoId),
-      )
-
-      if (!contactoEnProveedor) {
-        await api.delete(`/contactos/${contactoId}/`, { suppressGlobalErrorToast: true })
-      }
+      await contactosApi.removeOne(contactosApi.endpoints.clientes, cliente.id)
 
       toast.success('Cliente eliminado correctamente.')
       setClienteToDelete(null)
@@ -283,7 +138,7 @@ function ClientesListPage() {
         { header: 'Dias credito', key: 'dias_credito', width: 14 },
       ],
       rows: filteredClientes.map((cliente) => {
-        const contacto = contactoById.get(String(cliente.contacto))
+        const contacto = cliente?.contacto_resumen
         return {
           nombre: contacto?.nombre || '-',
           rut: contacto?.rut || '-',
@@ -306,7 +161,7 @@ function ClientesListPage() {
       fileName: `clientes_${getTodaySuffix()}.pdf`,
       headers: ['Nombre', 'RUT', 'Email', 'Telefono', 'Limite credito', 'Dias credito'],
       rows: filteredClientes.map((cliente) => {
-        const contacto = contactoById.get(String(cliente.contacto))
+        const contacto = cliente?.contacto_resumen
         return [
           contacto?.nombre || '-',
           contacto?.rut || '-',
@@ -344,12 +199,14 @@ function ClientesListPage() {
             onExportPdf={handleExportPdf}
             disabled={filteredClientes.length === 0}
           />
-          <Link
-            to="/contactos/clientes/nuevo"
-            className={cn(buttonVariants({ variant: 'default', size: 'md', fullWidth: true }), 'sm:w-auto')}
-          >
-            Nuevo cliente
-          </Link>
+          {canCreate ? (
+            <Link
+              to="/contactos/clientes/nuevo"
+              className={cn(buttonVariants({ variant: 'default', size: 'md', fullWidth: true }), 'sm:w-auto')}
+            >
+              Nuevo cliente
+            </Link>
+          ) : null}
         </div>
       </div>
 
@@ -428,7 +285,7 @@ function ClientesListPage() {
                 </tr>
               ) : (
                 paginatedClientes.map((cliente) => {
-                  const contacto = contactoById.get(String(cliente.contacto))
+                  const contacto = cliente?.contacto_resumen
 
                   return (
                     <tr key={cliente.id} className="border-t border-border">
@@ -441,23 +298,31 @@ function ClientesListPage() {
                       <td className="px-3 py-2">{cliente?.dias_credito ?? 0}</td>
                       <td className="w-px whitespace-nowrap px-2 py-2">
                         <div className="flex items-center gap-1">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => openEditModal(cliente)}
-                            className="h-7 px-2 text-xs"
+                          <Link
+                            to={`/contactos/terceros/${cliente.contacto}`}
+                            className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'h-7 px-2 text-xs')}
                           >
-                            Editar
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            disabled={deletingId === cliente.id}
-                            onClick={() => requestDeleteCliente(cliente)}
-                            className="h-7 border-destructive/40 px-2 text-xs text-destructive hover:bg-destructive/10"
-                          >
-                            {deletingId === cliente.id ? 'Eliminando...' : 'Eliminar'}
-                          </Button>
+                            Ver
+                          </Link>
+                          {canEdit ? (
+                            <Link
+                              to={`/contactos/clientes/${cliente.id}/editar`}
+                              className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'h-7 px-2 text-xs')}
+                            >
+                              Editar
+                            </Link>
+                          ) : null}
+                          {canDelete ? (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              disabled={deletingId === cliente.id}
+                              onClick={() => requestDeleteCliente(cliente)}
+                              className="h-7 border-destructive/40 px-2 text-xs text-destructive hover:bg-destructive/10"
+                            >
+                              {deletingId === cliente.id ? 'Eliminando...' : 'Eliminar'}
+                            </Button>
+                          ) : null}
                         </div>
                       </td>
                     </tr>
@@ -478,164 +343,10 @@ function ClientesListPage() {
         onNext={nextPage}
       />
 
-      {editModalOpen && (
-        <div className="fixed inset-0 z-90 flex items-center justify-center bg-foreground/40 p-4">
-          <div className="w-full max-w-3xl rounded-xl border border-border bg-card p-4 shadow-xl">
-            <div className="mb-3 flex items-center justify-between gap-3">
-              <h3 className="text-lg font-semibold">Editar cliente</h3>
-              <Button variant="outline" size="sm" onClick={closeEditModal} disabled={savingEdit}>
-                Cerrar
-              </Button>
-            </div>
-
-            <form className="space-y-3" onSubmit={handleEditSubmit}>
-              <div className="grid gap-3 md:grid-cols-2">
-                <label className="text-sm">
-                  Nombre
-                  <input
-                    className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
-                    value={editForm.nombre}
-                    onChange={(event) => updateEditField('nombre', event.target.value)}
-                    required
-                  />
-                </label>
-
-                <label className="text-sm">
-                  Razon social
-                  <input
-                    className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
-                    value={editForm.razon_social}
-                    onChange={(event) => updateEditField('razon_social', event.target.value)}
-                  />
-                </label>
-
-                <label className="text-sm">
-                  RUT
-                  <input
-                    className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
-                    value={editForm.rut}
-                    onChange={(event) => updateEditField('rut', event.target.value)}
-                  />
-                </label>
-
-                <label className="text-sm">
-                  Tipo
-                  <select
-                    className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
-                    value={editForm.tipo}
-                    onChange={(event) => updateEditField('tipo', event.target.value)}
-                  >
-                    <option value="PERSONA">Persona</option>
-                    <option value="EMPRESA">Empresa</option>
-                  </select>
-                </label>
-
-                <label className="text-sm">
-                  Email
-                  <input
-                    type="email"
-                    className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
-                    value={editForm.email}
-                    onChange={(event) => updateEditField('email', event.target.value)}
-                  />
-                </label>
-
-                <label className="text-sm">
-                  Telefono
-                  <input
-                    className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
-                    value={editForm.telefono}
-                    onChange={(event) => updateEditField('telefono', event.target.value)}
-                  />
-                </label>
-
-                <label className="text-sm">
-                  Celular
-                  <input
-                    className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
-                    value={editForm.celular}
-                    onChange={(event) => updateEditField('celular', event.target.value)}
-                  />
-                </label>
-
-                <label className="text-sm">
-                  Limite credito
-                  <input
-                    type="number"
-                    min="0"
-                    step="1"
-                    className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
-                    value={editForm.limite_credito}
-                    onChange={(event) => updateEditField('limite_credito', event.target.value)}
-                  />
-                </label>
-
-                <label className="text-sm">
-                  Dias credito
-                  <input
-                    type="number"
-                    min="0"
-                    className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
-                    value={editForm.dias_credito}
-                    onChange={(event) => updateEditField('dias_credito', event.target.value)}
-                  />
-                </label>
-
-                <label className="text-sm">
-                  Categoria cliente
-                  <input
-                    className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
-                    value={editForm.categoria_cliente}
-                    onChange={(event) => updateEditField('categoria_cliente', event.target.value)}
-                  />
-                </label>
-
-                <label className="text-sm">
-                  Segmento
-                  <input
-                    className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
-                    value={editForm.segmento}
-                    onChange={(event) => updateEditField('segmento', event.target.value)}
-                  />
-                </label>
-
-                <label className="text-sm md:col-span-2">
-                  Notas
-                  <textarea
-                    rows={3}
-                    className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
-                    value={editForm.notas}
-                    onChange={(event) => updateEditField('notas', event.target.value)}
-                  />
-                </label>
-
-                <label className="flex items-center gap-2 text-sm md:col-span-2">
-                  <input
-                    type="checkbox"
-                    checked={editForm.activo}
-                    onChange={(event) => updateEditField('activo', event.target.checked)}
-                  />
-                  Activo
-                </label>
-              </div>
-
-              <div className="flex items-center justify-end gap-2 pt-2">
-                <Button type="button" variant="outline" onClick={closeEditModal} disabled={savingEdit}>
-                  Cancelar
-                </Button>
-                <Button type="submit" disabled={savingEdit}>
-                  {savingEdit ? 'Guardando...' : 'Guardar cambios'}
-                </Button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
       <ConfirmDialog
         open={Boolean(clienteToDelete)}
         title="Eliminar cliente"
-        description="Se eliminara este cliente. Si el contacto no esta asociado a proveedor tambien se eliminara."
+        description="Se eliminara la ficha comercial del cliente. Si el contacto queda sin relacion comercial, el backend tambien lo limpiara."
         confirmLabel="Eliminar"
         loading={deletingId === clienteToDelete?.id}
         onCancel={() => {
