@@ -112,7 +112,9 @@ function VentasNotasFormPage() {
     }
   }
 
-  const updateItem = (index, key, value) => {
+  const updateItem = async (index, key, value) => {
+    let productoSeleccionado = null
+
     setItems((prev) => {
       const next = [...prev]
       const row = { ...next[index], [key]: value }
@@ -130,11 +132,39 @@ function VentasNotasFormPage() {
       if (key === 'producto') {
         const product = productos.find((item) => String(item.id) === String(value))
         if (product) {
+          productoSeleccionado = product
           row.descripcion = row.descripcion || product.nombre || ''
           row.precio_unitario = toIntegerString(product.precio_referencia || 0)
+          row.impuesto = product.impuesto ? String(product.impuesto) : row.impuesto
         }
       }
       next[index] = row
+      return next
+    })
+
+    if (key !== 'producto' || !productoSeleccionado) {
+      return
+    }
+
+    const precioResuelto = await ventasApi.resolveProductoPrecio(value, {
+      cliente_id: form.cliente || undefined,
+      fecha: form.fecha_emision || undefined,
+    })
+
+    if (!precioResuelto?.precio) {
+      return
+    }
+
+    setItems((prev) => {
+      const next = [...prev]
+      const current = next[index]
+      if (!current || String(current.producto) !== String(value)) {
+        return prev
+      }
+      next[index] = {
+        ...current,
+        precio_unitario: toIntegerString(precioResuelto.precio || productoSeleccionado.precio_referencia || 0),
+      }
       return next
     })
   }
@@ -259,7 +289,7 @@ function VentasNotasFormPage() {
               </select>
               <SearchableSelect
                 value={row.producto}
-                onChange={(v) => updateItem(index, 'producto', v)}
+                onChange={(v) => { void updateItem(index, 'producto', v) }}
                 options={productoOptions}
                 placeholder="Buscar producto..."
                 ariaLabel={`Producto item ${index + 1}`}

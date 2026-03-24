@@ -51,6 +51,7 @@ describe('ventas/forms integration', () => {
     server.use(
       http.get('*/clientes/', async () => HttpResponse.json([{ id: 'cli-1', nombre: 'Cliente 1', contacto_nombre: 'Cliente 1' }])),
       http.get('*/productos/', async () => HttpResponse.json([{ id: 'prod-1', nombre: 'Producto 1', precio_referencia: 1000, impuesto: 1 }])),
+      http.get('*/productos/prod-1/precio/', async () => HttpResponse.json({ precio: 1000, origen: 'PRECIO_REFERENCIA' })),
       http.get('*/impuestos/', async () => HttpResponse.json([{ id: 1, nombre: 'IVA', porcentaje: 19 }])),
       http.get('*/pedidos-venta/siguiente_numero/', async () => HttpResponse.json({ numero: 'PV-100' })),
       http.post('*/pedidos-venta/', async ({ request }) => {
@@ -98,6 +99,53 @@ describe('ventas/forms integration', () => {
       precio_unitario: 1000,
       subtotal: 1000,
       total: 1000,
+    })
+  })
+
+  it('usa precio comercial de productos cuando existe lista vigente para el cliente', async () => {
+    let itemPayload = null
+
+    server.use(
+      http.get('*/clientes/', async () => HttpResponse.json([{ id: 'cli-1', nombre: 'Cliente 1', contacto_nombre: 'Cliente 1' }])),
+      http.get('*/productos/', async () => HttpResponse.json([{ id: 'prod-1', nombre: 'Producto 1', precio_referencia: 1000, impuesto: 1 }])),
+      http.get('*/impuestos/', async () => HttpResponse.json([{ id: 1, nombre: 'IVA', porcentaje: 19 }])),
+      http.get('*/pedidos-venta/siguiente_numero/', async () => HttpResponse.json({ numero: 'PV-101' })),
+      http.get('*/productos/prod-1/precio/', async () => HttpResponse.json({ precio: 2500, origen: 'LISTA_PRECIO' })),
+      http.post('*/pedidos-venta/', async () => HttpResponse.json({ id: 'ped-2' }, { status: 201 })),
+      http.post('*/pedidos-venta-items/', async ({ request }) => {
+        itemPayload = await request.json()
+        return HttpResponse.json({ id: 'pi-2' }, { status: 201 })
+      }),
+    )
+
+    renderWithProviders(<VentasPedidosFormPage />, {
+      preloadedState: authState(['VENTAS.VER', 'VENTAS.CREAR']),
+      initialEntries: ['/ventas/pedidos/nuevo'],
+    })
+
+    expect(await screen.findByText('Nuevo pedido de venta')).toBeInTheDocument()
+
+    const combos = await screen.findAllByRole('combobox')
+    await userEvent.type(combos[0], 'Cliente')
+    await userEvent.click(await screen.findByRole('button', { name: 'Cliente 1' }))
+
+    await userEvent.type(combos[1], 'Producto')
+    await userEvent.click(await screen.findByRole('button', { name: 'Producto 1' }))
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('2500')).toBeInTheDocument()
+    })
+
+    await userEvent.click(screen.getByRole('button', { name: 'Crear pedido' }))
+
+    await waitFor(() => {
+      expect(itemPayload).toMatchObject({
+        pedido_venta: 'ped-2',
+        producto: 'prod-1',
+        precio_unitario: 2500,
+        subtotal: 2500,
+        total: 2500,
+      })
     })
   })
 
@@ -156,6 +204,7 @@ describe('ventas/forms integration', () => {
       http.get('*/pedidos-venta/', async () => HttpResponse.json([{ id: 'ped-1', numero: 'PV-001' }])),
       http.get('*/guias-despacho/', async () => HttpResponse.json([{ id: 'g-1', numero: 'GD-001' }])),
       http.get('*/productos/', async () => HttpResponse.json([{ id: 'prod-1', nombre: 'Producto 1', precio_referencia: 1000, impuesto: 1 }])),
+      http.get('*/productos/prod-1/precio/', async () => HttpResponse.json({ precio: 1000, origen: 'PRECIO_REFERENCIA' })),
       http.get('*/impuestos/', async () => HttpResponse.json([{ id: 1, nombre: 'IVA', porcentaje: 19 }])),
       http.get('*/facturas-venta/siguiente_numero/', async () => HttpResponse.json({ numero: 'FV-100' })),
       http.post('*/facturas-venta/', async ({ request }) => {

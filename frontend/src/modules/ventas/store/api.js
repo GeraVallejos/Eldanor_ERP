@@ -32,6 +32,22 @@ async function executeAction(endpoint, id, action, payload = {}) {
   return data
 }
 
+async function resolveProductoPrecio(productoId, params) {
+  if (!productoId) {
+    return null
+  }
+
+  try {
+    const { data } = await api.get(`/productos/${productoId}/precio/`, {
+      params,
+      suppressGlobalErrorToast: true,
+    })
+    return data
+  } catch {
+    return null
+  }
+}
+
 function useListResource(endpoint, params) {
   const [data, setData] = useState([])
   const [status, setStatus] = useState('idle')
@@ -85,5 +101,6 @@ export const ventasApi = {
   updateOne,
   removeOne,
   executeAction,
+  resolveProductoPrecio,
   endpoints: VENTAS_ENDPOINTS,
 }
