@@ -3,7 +3,7 @@ import { DetailRow, InfoCard } from '@/modules/contactos/components/ContactoDeta
 function ContactoResumenSection({ contacto }) {
   return (
     <InfoCard title="Resumen maestro" description="Datos generales y de contacto del tercero dentro del ERP.">
-      <div className="grid gap-3 md:grid-cols-2">
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
         <DetailRow label="Nombre" value={contacto.nombre || '-'} />
         <DetailRow label="Razon social" value={contacto.razon_social || '-'} />
         <DetailRow label="RUT" value={contacto.rut || '-'} />

@@ -12,18 +12,21 @@ function useContactosListado({
   includeInactive = false,
 } = {}) {
   const [rows, setRows] = useState([])
-  const [status, setStatus] = useState('idle')
+  const [status, setStatus] = useState('loading')
   const [error, setError] = useState(null)
+
+  const loadRows = useCallback(async () => {
+    const params = includeInactive ? { include_inactive: '1' } : undefined
+    const endpoint = contactosApi.endpoints[resource]
+    return contactosApi.getList(endpoint, params)
+  }, [includeInactive, resource])
 
   const reload = useCallback(async () => {
     setStatus('loading')
     setError(null)
 
-    const params = includeInactive ? { include_inactive: '1' } : undefined
-
     try {
-      const endpoint = contactosApi.endpoints[resource]
-      const resourceRows = await contactosApi.getList(endpoint, params)
+      const resourceRows = await loadRows()
 
       setRows(sortByCreatedDesc(resourceRows))
       setStatus('succeeded')
@@ -34,11 +37,36 @@ function useContactosListado({
       setError(loadError)
       throw loadError
     }
-  }, [includeInactive, resource])
+  }, [loadRows])
 
   useEffect(() => {
-    void reload()
-  }, [reload])
+    let active = true
+
+    const bootstrapRows = async () => {
+      try {
+        const resourceRows = await loadRows()
+        if (!active) {
+          return
+        }
+        setRows(sortByCreatedDesc(resourceRows))
+        setStatus('succeeded')
+        setError(null)
+      } catch (loadError) {
+        if (!active) {
+          return
+        }
+        setRows([])
+        setStatus('failed')
+        setError(loadError)
+      }
+    }
+
+    void bootstrapRows()
+
+    return () => {
+      active = false
+    }
+  }, [loadRows])
 
   return {
     rows,
@@ -49,12 +77,20 @@ function useContactosListado({
 }
 
 function useTerceroDetail(contactoId) {
-  const [status, setStatus] = useState('idle')
+  const [status, setStatus] = useState(contactoId ? 'loading' : 'idle')
   const [contacto, setContacto] = useState(null)
   const [cliente, setCliente] = useState(null)
   const [proveedor, setProveedor] = useState(null)
   const [direcciones, setDirecciones] = useState([])
   const [cuentasBancarias, setCuentasBancarias] = useState([])
+
+  const loadTerceroDetail = useCallback(async () => {
+    if (!contactoId) {
+      return null
+    }
+
+    return contactosApi.getTerceroDetail(contactoId)
+  }, [contactoId])
 
   const reload = useCallback(async () => {
     if (!contactoId) {
@@ -64,7 +100,7 @@ function useTerceroDetail(contactoId) {
     setStatus('loading')
 
     try {
-      const terceroDetail = await contactosApi.getTerceroDetail(contactoId)
+      const terceroDetail = await loadTerceroDetail()
 
       setContacto({
         id: terceroDetail.id,
@@ -106,11 +142,53 @@ function useTerceroDetail(contactoId) {
       setStatus('failed')
       throw error
     }
-  }, [contactoId])
+  }, [contactoId, loadTerceroDetail])
 
   useEffect(() => {
-    void reload()
-  }, [reload])
+    if (!contactoId) {
+      return
+    }
+
+    let active = true
+
+    const bootstrapDetail = async () => {
+      try {
+        const terceroDetail = await loadTerceroDetail()
+        if (!active || !terceroDetail) {
+          return
+        }
+
+        setContacto({
+          id: terceroDetail.id,
+          nombre: terceroDetail.nombre,
+          razon_social: terceroDetail.razon_social,
+          rut: terceroDetail.rut,
+          tipo: terceroDetail.tipo,
+          email: terceroDetail.email,
+          telefono: terceroDetail.telefono,
+          celular: terceroDetail.celular,
+          activo: terceroDetail.activo,
+          notas: terceroDetail.notas,
+        })
+        setCliente(terceroDetail.cliente || null)
+        setProveedor(terceroDetail.proveedor || null)
+        setDirecciones(terceroDetail.direcciones || [])
+        setCuentasBancarias(terceroDetail.cuentas_bancarias || [])
+        setStatus('succeeded')
+      } catch {
+        if (!active) {
+          return
+        }
+        setStatus('failed')
+      }
+    }
+
+    void bootstrapDetail()
+
+    return () => {
+      active = false
+    }
+  }, [contactoId, loadTerceroDetail])
 
   return {
     status,
