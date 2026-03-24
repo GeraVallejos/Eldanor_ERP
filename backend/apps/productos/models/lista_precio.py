@@ -4,6 +4,7 @@ from django.core.exceptions import ValidationError
 from django.db import models
 
 from apps.core.models import BaseModel
+from apps.core.validators import normalizar_texto
 
 
 class ListaPrecio(BaseModel):
@@ -41,6 +42,10 @@ class ListaPrecio(BaseModel):
             raise ValidationError({"moneda": "La moneda no pertenece a la empresa activa."})
         if self.cliente and self.cliente.empresa_id != self.empresa_id:
             raise ValidationError({"cliente": "El cliente no pertenece a la empresa activa."})
+
+    def save(self, *args, **kwargs):
+        self.nombre = normalizar_texto(self.nombre)
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return self.nombre

@@ -10,7 +10,7 @@ from rest_framework import status
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from apps.core.models import UserEmpresa
-from apps.productos.models import Producto
+from apps.productos.models import Categoria, Impuesto, Producto
 
 
 def _token(user):
@@ -129,3 +129,29 @@ class TestProductoBulkImportApi:
 
         assert response.status_code == status.HTTP_400_BAD_REQUEST
         assert response.data["error_code"] == "BULK_IMPORT_STOCK_ACTUAL_NO_SOPORTADO"
+
+    def test_admin_puede_previsualizar_importacion_sin_persistir(self, api_client, admin_usuario, empresa):
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(admin_usuario)}")
+
+        Categoria.all_objects.create(empresa=empresa, creado_por=admin_usuario, nombre="GENERAL")
+        Impuesto.all_objects.create(empresa=empresa, creado_por=admin_usuario, nombre="IVA 19", porcentaje="19")
+
+        csv_content = "\n".join([
+            "nombre,sku,tipo,categoria,impuesto,precio_referencia,precio_costo,maneja_inventario,activo",
+            "Producto Preview,SKU-PREVIEW-API-001,PRODUCTO,GENERAL,IVA 19,1200,800,true,true",
+        ])
+
+        file = SimpleUploadedFile("productos.csv", csv_content.encode("utf-8"), content_type="text/csv")
+        response = api_client.post(
+            reverse("producto-bulk-import"),
+            {"file": file, "dry_run": "true"},
+            format="multipart",
+        )
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response.data["dry_run"] is True
+        assert response.data["created"] == 1
+        assert response.data["updated"] == 0
+        assert response.data["errors"] == []
+        assert response.data["warnings"] == []
+        assert not Producto.all_objects.filter(empresa=empresa, sku="SKU-PREVIEW-API-001").exists()

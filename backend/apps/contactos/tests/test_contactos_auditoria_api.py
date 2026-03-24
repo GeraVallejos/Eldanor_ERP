@@ -73,6 +73,7 @@ class TestContactosAuditoriaApi:
             nombre="Contacto Base",
             rut="22222222-2",
             tipo="EMPRESA",
+            email="contacto.base@test.com",
         )
 
         cliente_response = api_client.post(
@@ -99,3 +100,22 @@ class TestContactosAuditoriaApi:
 
         assert AuditEvent.all_objects.filter(empresa=empresa, event_type="CLIENTE_CREADO").exists()
         assert AuditEvent.all_objects.filter(empresa=empresa, event_type="PROVEEDOR_CREADO").exists()
+
+    def test_contacto_api_rechaza_campos_maestros_faltantes(self, api_client, admin_usuario):
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(admin_usuario)}")
+
+        response = api_client.post(
+            reverse("contacto-list"),
+            {
+                "nombre": "Contacto incompleto",
+                "rut": "",
+                "tipo": "",
+                "email": "",
+            },
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "rut" in response.data["detail"]
+        assert "email" in response.data["detail"]
+        assert "tipo" in response.data["detail"]

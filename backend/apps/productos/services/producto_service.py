@@ -8,6 +8,7 @@ from apps.core.exceptions import BusinessRuleError, ConflictError, ResourceNotFo
 from apps.core.permisos.constantes_permisos import Acciones, Modulos
 from apps.core.services import DomainEventService, OutboxService
 from apps.productos.models import Producto
+from apps.productos.services.producto_snapshot_service import ProductoSnapshotService
 
 
 class ProductoService:
@@ -143,6 +144,30 @@ class ProductoService:
         )
 
     @staticmethod
+    def _record_snapshot(
+        *,
+        empresa,
+        usuario,
+        producto,
+        event_name,
+        snapshot,
+        changes=None,
+        producto_id_ref=None,
+        attach_producto=True,
+    ):
+        """Registra una version inmutable del maestro luego de cada cambio funcional."""
+        ProductoSnapshotService.registrar_snapshot(
+            empresa=empresa,
+            usuario=usuario,
+            producto=producto,
+            event_type=event_name,
+            snapshot=snapshot,
+            changes=changes or {},
+            producto_id_ref=producto_id_ref,
+            attach_producto=attach_producto,
+        )
+
+    @staticmethod
     @transaction.atomic
     def crear_producto(*, empresa, usuario, data):
         """Crea un producto del catalogo y registra trazabilidad funcional completa."""
@@ -158,6 +183,14 @@ class ProductoService:
             action_code=Acciones.CREAR,
             changes={field: [None, value] for field, value in snapshot.items() if value is not None},
             extra_payload={"changes_count": len(snapshot)},
+        )
+        ProductoService._record_snapshot(
+            empresa=empresa,
+            usuario=usuario,
+            producto=producto,
+            event_name="producto.creado",
+            snapshot=snapshot,
+            changes={field: [None, value] for field, value in snapshot.items() if value is not None},
         )
         return producto
 
@@ -191,6 +224,14 @@ class ProductoService:
             changes=changes,
             extra_payload={"changed_fields": sorted(changes.keys())},
         )
+        ProductoService._record_snapshot(
+            empresa=empresa,
+            usuario=usuario,
+            producto=producto,
+            event_name="producto.actualizado",
+            snapshot=after,
+            changes=changes,
+        )
         return producto
 
     @staticmethod
@@ -221,6 +262,14 @@ class ProductoService:
                 changes=changes,
                 extra_payload={"deletion_mode": "SOFT"},
             )
+            ProductoService._record_snapshot(
+                empresa=empresa,
+                usuario=usuario,
+                producto=producto,
+                event_name="producto.anulado",
+                snapshot=after,
+                changes=changes,
+            )
             return {"deleted": False, "producto": producto}
 
         producto.id = producto_id
@@ -232,5 +281,15 @@ class ProductoService:
             action_code=Acciones.BORRAR,
             changes={field: [value, None] for field, value in before.items() if value is not None},
             extra_payload={"deletion_mode": "HARD"},
+        )
+        ProductoService._record_snapshot(
+            empresa=empresa,
+            usuario=usuario,
+            producto=producto,
+            event_name="producto.eliminado",
+            snapshot={},
+            changes={field: [value, None] for field, value in before.items() if value is not None},
+            producto_id_ref=producto_id,
+            attach_producto=False,
         )
         return {"deleted": True, "producto": None}

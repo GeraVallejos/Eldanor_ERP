@@ -7,13 +7,14 @@ from django.urls import reverse
 from rest_framework import status
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from apps.compras.models import DocumentoCompraProveedor, DocumentoCompraProveedorItem
+from apps.auditoria.services import AuditoriaService
+from apps.compras.models import DocumentoCompraProveedor, DocumentoCompraProveedorItem, EstadoDocumentoCompra
 from apps.contactos.models import Cliente, Contacto, Proveedor
 from apps.core.models import UserEmpresa
 from apps.inventario.models import StockProducto
-from apps.productos.models import ListaPrecio, ListaPrecioItem, Producto
+from apps.productos.models import ListaPrecio, ListaPrecioItem, Producto, ProductoSnapshot
 from apps.tesoreria.models import Moneda
-from apps.ventas.models import PedidoVenta, PedidoVentaItem
+from apps.ventas.models import EstadoPedidoVenta, PedidoVenta, PedidoVentaItem
 
 
 def _token(user):
@@ -266,6 +267,30 @@ class TestProductoApi:
         producto.refresh_from_db()
         assert producto.activo is True
 
+    def test_no_permite_editar_precio_costo_desde_crud_normal(self, api_client, owner_usuario, empresa):
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
+
+        producto = Producto.objects.create(
+            empresa=empresa,
+            creado_por=owner_usuario,
+            nombre="Producto Sin Edicion De Costo",
+            sku="PSEC-001",
+            precio_referencia=Decimal("2200"),
+            precio_costo=Decimal("1500"),
+            activo=True,
+        )
+
+        resp = api_client.patch(
+            reverse("producto-detail", args=[producto.id]),
+            {"precio_costo": "1800"},
+            format="json",
+        )
+
+        assert resp.status_code == status.HTTP_400_BAD_REQUEST, resp.data
+        producto.refresh_from_db()
+        assert Decimal(str(producto.precio_costo)) == Decimal("1500")
+        assert "precio_costo" in resp.data["detail"]
+
     def test_trazabilidad_producto_resume_listas_documentos_y_alertas(
         self,
         api_client,
@@ -348,6 +373,7 @@ class TestProductoApi:
             impuestos=Decimal("0"),
             total=Decimal("7500"),
             moneda=moneda_base,
+            estado=EstadoDocumentoCompra.CONFIRMADO,
         )
         DocumentoCompraProveedorItem.objects.create(
             empresa=empresa,
@@ -366,7 +392,7 @@ class TestProductoApi:
         assert resp.data["resumen"]["listas_activas_vigentes"] == 1
         assert resp.data["resumen"]["pedidos_venta"] == 1
         assert resp.data["resumen"]["documentos_compra"] == 1
-        assert resp.data["listas_precio"][0]["nombre"] == "Lista Cliente Norte"
+        assert resp.data["listas_precio"][0]["nombre"] == "LISTA CLIENTE NORTE"
         assert resp.data["listas_precio"][0]["cliente_nombre"] == "CLIENTE TRAZABILIDAD"
         assert resp.data["uso_documentos"]["pedidos_venta"]["ultimos"][0]["numero"] == "PV-TRAZA-001"
         assert resp.data["uso_documentos"]["documentos_compra"]["ultimos"][0]["folio"] == "FAC-TRAZA-001"
@@ -374,5 +400,314 @@ class TestProductoApi:
         assert "SIN_CATEGORIA" in alert_codes
         assert "SIN_IMPUESTO" in alert_codes
         assert "SIN_STOCK_MINIMO" in alert_codes
+
+    def test_historial_producto_expone_eventos_de_auditoria_propios(self, api_client, owner_usuario, empresa):
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
+
+        producto = Producto.objects.create(
+            empresa=empresa,
+            creado_por=owner_usuario,
+            nombre="Producto Con Historial API",
+            sku="PHA-001",
+            precio_referencia=Decimal("3200"),
+        )
+
+        AuditoriaService.registrar_evento(
+            empresa=empresa,
+            usuario=owner_usuario,
+            module_code="PRODUCTOS",
+            action_code="EDITAR",
+            event_type="PRODUCTO_AUDITADO",
+            entity_type="PRODUCTO",
+            entity_id=producto.id,
+            summary="Producto auditado manualmente.",
+            changes={"precio_referencia": ["3000", "3200"]},
+            payload={"producto_id": str(producto.id)},
+            source="productos.tests",
+        )
+
+        resp = api_client.get(reverse("producto-historial", args=[producto.id]))
+
+        assert resp.status_code == status.HTTP_200_OK, resp.data
+        assert resp.data["count"] >= 1
+        summaries = {item["summary"] for item in resp.data["results"]}
+        event_types = {item["event_type"] for item in resp.data["results"]}
+        assert "Producto auditado manualmente." in summaries
+        assert "PRODUCTO_AUDITADO" in event_types
+
+    def test_gobernanza_producto_expone_score_y_hallazgos(self, api_client, owner_usuario, empresa):
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
+
+        producto = Producto.objects.create(
+            empresa=empresa,
+            creado_por=owner_usuario,
+            nombre="Producto Gobernanza API",
+            sku="PGA-001",
+            precio_referencia=Decimal("3200"),
+            maneja_inventario=True,
+            stock_minimo=Decimal("0"),
+        )
+
+        resp = api_client.get(reverse("producto-gobernanza", args=[producto.id]))
+
+        assert resp.status_code == status.HTTP_200_OK, resp.data
+        assert resp.data["estado"] in {"OBSERVADO", "RIESGO"}
+        hallazgos = {item["codigo"] for item in resp.data["hallazgos"]}
+        assert "GOB_SIN_CATEGORIA" in hallazgos
+        assert "GOB_SIN_IMPUESTO" in hallazgos
+        assert "GOB_STOCK_MINIMO_NO_DEFINIDO" in hallazgos
+
+    def test_trazabilidad_excluye_documentos_borrador_y_anulado(self, api_client, owner_usuario, empresa, proveedor):
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
+        cliente_contacto = Contacto.objects.create(
+            empresa=empresa,
+            nombre="Cliente Estados",
+            rut="12121212-9",
+            email="cliente_estados@test.com",
+        )
+        cliente = Cliente.objects.create(empresa=empresa, contacto=cliente_contacto)
+        producto = Producto.objects.create(
+            empresa=empresa,
+            nombre="Producto Estados",
+            sku="P-EST-001",
+            precio_referencia=Decimal("4900"),
+            maneja_inventario=True,
+            stock_minimo=Decimal("1"),
+        )
+
+        pedido_borrador = PedidoVenta.objects.create(
+            empresa=empresa,
+            creado_por=owner_usuario,
+            cliente=cliente,
+            numero="PV-BORR-001",
+            fecha_emision=date.today(),
+            estado=EstadoPedidoVenta.BORRADOR,
+            subtotal=Decimal("4900"),
+            impuestos=Decimal("0"),
+            total=Decimal("4900"),
+        )
+        PedidoVentaItem.objects.create(
+            empresa=empresa,
+            creado_por=owner_usuario,
+            pedido_venta=pedido_borrador,
+            producto=producto,
+            descripcion="Producto borrador",
+            cantidad=Decimal("1"),
+            precio_unitario=Decimal("4900"),
+            subtotal=Decimal("4900"),
+            total=Decimal("4900"),
+        )
+
+        documento_borrador = DocumentoCompraProveedor.objects.create(
+            empresa=empresa,
+            creado_por=owner_usuario,
+            tipo_documento="FACTURA_COMPRA",
+            proveedor=proveedor,
+            folio="FAC-BORR-001",
+            fecha_emision=date.today(),
+            fecha_recepcion=date.today(),
+            subtotal_neto=Decimal("4900"),
+            impuestos=Decimal("0"),
+            total=Decimal("4900"),
+            estado=EstadoDocumentoCompra.BORRADOR,
+        )
+        DocumentoCompraProveedorItem.objects.create(
+            empresa=empresa,
+            creado_por=owner_usuario,
+            documento=documento_borrador,
+            producto=producto,
+            cantidad=Decimal("1"),
+            precio_unitario=Decimal("4900"),
+            subtotal=Decimal("4900"),
+        )
+
+        resp = api_client.get(reverse("producto-trazabilidad", args=[producto.id]))
+
+        assert resp.status_code == status.HTTP_200_OK, resp.data
+        assert resp.data["resumen"]["pedidos_venta"] == 0
+        assert resp.data["resumen"]["documentos_compra"] == 0
+
+    def test_gobernanza_no_penaliza_uso_en_borrador_sin_lista_vigente(self, api_client, owner_usuario, empresa):
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
+        cliente_contacto = Contacto.objects.create(
+            empresa=empresa,
+            nombre="Cliente Gobernanza Estados",
+            rut="13131313-6",
+            email="cliente_gob_estados@test.com",
+        )
+        cliente = Cliente.objects.create(empresa=empresa, contacto=cliente_contacto)
+        producto = Producto.objects.create(
+            empresa=empresa,
+            creado_por=owner_usuario,
+            nombre="Producto Gobernanza Estados",
+            sku="PGE-001",
+            precio_referencia=Decimal("3200"),
+            maneja_inventario=True,
+            stock_minimo=Decimal("1"),
+            impuesto=None,
+        )
+
+        pedido_borrador = PedidoVenta.objects.create(
+            empresa=empresa,
+            creado_por=owner_usuario,
+            cliente=cliente,
+            numero="PV-GOB-001",
+            fecha_emision=date.today(),
+            estado=EstadoPedidoVenta.BORRADOR,
+            subtotal=Decimal("3200"),
+            impuestos=Decimal("0"),
+            total=Decimal("3200"),
+        )
+        PedidoVentaItem.objects.create(
+            empresa=empresa,
+            creado_por=owner_usuario,
+            pedido_venta=pedido_borrador,
+            producto=producto,
+            descripcion="Producto gobernanza borrador",
+            cantidad=Decimal("1"),
+            precio_unitario=Decimal("3200"),
+            subtotal=Decimal("3200"),
+            total=Decimal("3200"),
+        )
+
+        resp = api_client.get(reverse("producto-gobernanza", args=[producto.id]))
+
+        assert resp.status_code == status.HTTP_200_OK, resp.data
+        hallazgos = {item["codigo"] for item in resp.data["hallazgos"]}
+        assert "GOB_SIN_PRECIO_VIGENTE" not in hallazgos
+
+    def test_versiones_producto_expone_snapshots_ordenados(self, api_client, owner_usuario, empresa):
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
+
+        producto = Producto.objects.create(
+            empresa=empresa,
+            creado_por=owner_usuario,
+            nombre="Producto Versionado API",
+            sku="PVA-001",
+            precio_referencia=Decimal("2000"),
+        )
+        ProductoSnapshot.all_objects.create(
+            empresa=empresa,
+            creado_por=owner_usuario,
+            producto=producto,
+            producto_id_ref=producto.id,
+            version=1,
+            event_type="producto.creado",
+            changes={"nombre": [None, "PRODUCTO VERSIONADO API"]},
+            snapshot={"nombre": "PRODUCTO VERSIONADO API", "activo": "True"},
+        )
+        ProductoSnapshot.all_objects.create(
+            empresa=empresa,
+            creado_por=owner_usuario,
+            producto=producto,
+            producto_id_ref=producto.id,
+            version=2,
+            event_type="producto.actualizado",
+            changes={"precio_referencia": ["2000.00", "3500.00"]},
+            snapshot={"nombre": "PRODUCTO VERSIONADO API", "precio_referencia": "3500.00", "activo": "True"},
+        )
+
+        resp = api_client.get(reverse("producto-versiones", args=[producto.id]))
+
+        assert resp.status_code == status.HTTP_200_OK, resp.data
+        assert resp.data["count"] == 2
+        assert resp.data["results"][0]["version"] == 2
+        assert resp.data["results"][0]["event_type"] == "producto.actualizado"
+
+    def test_comparar_versiones_producto_expone_diferencias(self, api_client, owner_usuario, empresa):
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
+
+        producto = Producto.objects.create(
+            empresa=empresa,
+            creado_por=owner_usuario,
+            nombre="Producto Compare API",
+            sku="PCA-001",
+            precio_referencia=Decimal("2000"),
+        )
+        ProductoSnapshot.all_objects.create(
+            empresa=empresa,
+            creado_por=owner_usuario,
+            producto=producto,
+            producto_id_ref=producto.id,
+            version=1,
+            event_type="producto.creado",
+            changes={},
+            snapshot={"nombre": "PRODUCTO COMPARE API", "precio_referencia": "2000.00", "activo": "True"},
+        )
+        ProductoSnapshot.all_objects.create(
+            empresa=empresa,
+            creado_por=owner_usuario,
+            producto=producto,
+            producto_id_ref=producto.id,
+            version=2,
+            event_type="producto.actualizado",
+            changes={},
+            snapshot={"nombre": "PRODUCTO COMPARE API", "precio_referencia": "3500.00", "activo": "False"},
+        )
+
+        resp = api_client.get(
+            reverse("producto-comparar-versiones", args=[producto.id]),
+            {"version_desde": 1, "version_hasta": 2},
+        )
+
+        assert resp.status_code == status.HTTP_200_OK, resp.data
+        assert resp.data["total_changes"] == 2
+        assert resp.data["changes"]["precio_referencia"] == ["2000.00", "3500.00"]
+        assert resp.data["changes"]["activo"] == ["True", "False"]
+
+    def test_restaurar_version_producto_aplica_snapshot_y_genera_nueva_version(self, api_client, owner_usuario, empresa):
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
+
+        producto = Producto.objects.create(
+            empresa=empresa,
+            creado_por=owner_usuario,
+            nombre="Producto Restore API",
+            sku="PRA-001",
+            precio_referencia=Decimal("5000"),
+            activo=False,
+        )
+        ProductoSnapshot.all_objects.create(
+            empresa=empresa,
+            creado_por=owner_usuario,
+            producto=producto,
+            producto_id_ref=producto.id,
+            version=1,
+            event_type="producto.creado",
+            changes={},
+            snapshot={
+                "nombre": "PRODUCTO RESTORE API",
+                "descripcion": "",
+                "sku": "PRA-001",
+                "tipo": "PRODUCTO",
+                "precio_referencia": "2500.00",
+                "precio_costo": "1000.00",
+                "unidad_medida": "UN",
+                "permite_decimales": "True",
+                "maneja_inventario": "True",
+                "stock_minimo": "1.00",
+                "usa_lotes": "False",
+                "usa_series": "False",
+                "usa_vencimiento": "False",
+                "activo": "True",
+            },
+        )
+
+        resp = api_client.post(
+            reverse("producto-restaurar-version", args=[producto.id]),
+            {"version": 1},
+            format="json",
+        )
+
+        assert resp.status_code == status.HTTP_200_OK, resp.data
+        producto.refresh_from_db()
+        assert Decimal(str(producto.precio_referencia)) == Decimal("2500.00")
+        assert producto.activo is True
+        assert resp.data["version_restaurada"] == 1
+        assert ProductoSnapshot.all_objects.filter(
+            empresa=empresa,
+            producto_id_ref=producto.id,
+            version=2,
+            event_type="producto.actualizado",
+        ).exists()
 
 

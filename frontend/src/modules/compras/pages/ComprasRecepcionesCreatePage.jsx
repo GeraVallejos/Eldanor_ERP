@@ -8,7 +8,7 @@ import SearchableSelect from '@/components/ui/SearchableSelect'
 import { getChileDateSuffix } from '@/lib/dateTimeFormat'
 import { formatCurrencyCLP, formatSmartNumber, toIntegerString } from '@/lib/numberFormat'
 import { useNormalizedFormItems } from '@/hooks/useNormalizedFormItems'
-import { getProductosCatalog } from '@/modules/productos/services/productosCatalogCache'
+import { mergeProductosCatalog, searchProductosCatalog } from '@/modules/productos/services/productosCatalogCache'
 import { usePermissions } from '@/modules/shared/auth/usePermission'
 
 function normalizeListResponse(data) {
@@ -56,6 +56,7 @@ function ComprasRecepcionesCreatePage() {
   const [proveedores, setProveedores] = useState([])
   const [contactos, setContactos] = useState([])
   const [productos, setProductos] = useState([])
+  const [loadingProductos, setLoadingProductos] = useState(false)
   const [bodegas, setBodegas] = useState([])
   const [ocItems, setOcItems] = useState([])
 
@@ -86,7 +87,7 @@ function ComprasRecepcionesCreatePage() {
         api.get('/ordenes-compra/', { suppressGlobalErrorToast: true }),
         api.get('/proveedores/', { suppressGlobalErrorToast: true }),
         api.get('/contactos/', { suppressGlobalErrorToast: true }),
-        getProductosCatalog(),
+        searchProductosCatalog({ tipo: 'PRODUCTO' }),
         api.get('/bodegas/', { suppressGlobalErrorToast: true }),
       ])
 
@@ -157,6 +158,18 @@ function ComprasRecepcionesCreatePage() {
     return () => clearTimeout(id)
   }, [loadInitialData])
 
+  const searchProductos = async (query) => {
+    setLoadingProductos(true)
+    try {
+      const results = await searchProductosCatalog({ query, tipo: 'PRODUCTO' })
+      setProductos((prev) => mergeProductosCatalog(prev, results))
+    } catch (error) {
+      toast.error(normalizeApiError(error, { fallback: 'No se pudieron buscar productos.' }))
+    } finally {
+      setLoadingProductos(false)
+    }
+  }
+
   const contactoById = useMemo(() => {
     const map = new Map()
     contactos.forEach((c) => map.set(String(c.id), c))
@@ -188,14 +201,28 @@ function ComprasRecepcionesCreatePage() {
     [ordenes, proveedorById, contactoById],
   )
 
-  const productoOptions = useMemo(() =>
-    productos.map((p) => ({
+  const productoOptions = useMemo(() => {
+    const options = productos.map((p) => ({
       value: String(p.id),
       label: p.nombre || `Producto ${p.id}`,
       keywords: `${p.sku || ''} ${p.tipo || ''}`,
-    })),
-    [productos],
-  )
+    }))
+
+    items.forEach((item) => {
+      if (!item.producto || options.some((option) => option.value === String(item.producto))) {
+        return
+      }
+      const ocItem = ocItems.find((row) => String(row.id) === String(item.orden_item))
+      const productoNombre = ocItem ? productoById.get(String(ocItem.producto))?.nombre : null
+      options.unshift({
+        value: String(item.producto),
+        label: productoNombre || `Producto ${item.producto}`,
+        keywords: productoNombre || '',
+      })
+    })
+
+    return options
+  }, [items, ocItems, productoById, productos])
 
   const ocItemOptions = useMemo(() => {
     if (!ocItems.length) return []
@@ -454,14 +481,16 @@ function ComprasRecepcionesCreatePage() {
                         {isReadOnly ? (
                           <span>{prod?.nombre || '-'}</span>
                         ) : (
-                          <SearchableSelect
-                            value={item.producto}
-                            onChange={(v) => handleItemChange(index, 'producto', v)}
-                            options={productoOptions}
-                            ariaLabel="Producto"
-                            placeholder="Seleccionar producto..."
-                            emptyText="Sin productos"
-                          />
+                        <SearchableSelect
+                          value={item.producto}
+                          onChange={(v) => handleItemChange(index, 'producto', v)}
+                          onSearchChange={(next) => { void searchProductos(next) }}
+                          options={productoOptions}
+                          ariaLabel="Producto"
+                          placeholder="Seleccionar producto..."
+                          emptyText="Sin productos"
+                          loading={loadingProductos}
+                        />
                         )}
                       </td>
                       <td className="px-3 py-1 text-right">

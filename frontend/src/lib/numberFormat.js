@@ -18,7 +18,10 @@ export function formatCurrencyCLP(value) {
     return '$ 0'
   }
 
-  return `$ ${Math.round(num).toLocaleString('es-CL')}`
+  return `$ ${num.toLocaleString('es-CL', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  })}`
 }
 
 export function toIntegerString(value) {

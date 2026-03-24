@@ -7,22 +7,17 @@ import { toast } from 'sonner'
 import { z } from 'zod'
 import ApiContractError from '@/components/ui/ApiContractError'
 import Button from '@/components/ui/Button'
-import { api } from '@/api/client'
 import { normalizeApiError } from '@/api/errors'
 import { buttonVariants } from '@/components/ui/buttonVariants'
+import { normalizeUpperInput } from '@/lib/textFormat'
 import { cn } from '@/lib/utils'
-import { invalidateProductosCatalogCache } from '@/modules/productos/services/productosCatalogCache'
+import { useProductoFormData } from '@/modules/productos/store/hooks'
+import { useSaveProductoAction } from '@/modules/productos/store/mutations'
+import { usePermissions } from '@/modules/shared/auth/usePermission'
 import {
-  createProducto,
-  fetchCatalogosProducto,
-  fetchProductos,
   resetCreateProductoState,
-  selectCatalogError,
-  selectCatalogStatus,
-  selectCategorias,
   selectCreateProductoError,
   selectCreateProductoStatus,
-  selectImpuestos,
 } from '@/modules/productos/productosSlice'
 
 const tipoProductoValues = ['PRODUCTO', 'SERVICIO']
@@ -106,16 +101,23 @@ function ProductosCreatePage() {
   const { id } = useParams()
   const navigate = useNavigate()
   const dispatch = useDispatch()
-  const categorias = useSelector(selectCategorias)
-  const impuestos = useSelector(selectImpuestos)
-  const catalogStatus = useSelector(selectCatalogStatus)
-  const catalogError = useSelector(selectCatalogError)
   const createStatus = useSelector(selectCreateProductoStatus)
   const createError = useSelector(selectCreateProductoError)
-  const [pageStatus, setPageStatus] = useState('idle')
-  const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState(null)
   const isEditMode = Boolean(id)
+  const permissions = usePermissions(['PRODUCTOS.CREAR', 'PRODUCTOS.EDITAR'])
+  const {
+    categorias,
+    impuestos,
+    catalogStatus,
+    catalogError,
+    pageStatus,
+    loadProducto,
+  } = useProductoFormData(id)
+  const { submitting: savingProducto, saveProducto } = useSaveProductoAction({
+    canCreate: permissions['PRODUCTOS.CREAR'],
+    canEdit: permissions['PRODUCTOS.EDITAR'],
+  })
 
   const {
     register,
@@ -149,25 +151,18 @@ function ProductosCreatePage() {
   const tipoSeleccionado = useWatch({ control, name: 'tipo' })
   const manejaInventarioSeleccionado = useWatch({ control, name: 'maneja_inventario' })
   const usaSeriesSeleccionado = useWatch({ control, name: 'usa_series' })
-
-  useEffect(() => {
-    if (catalogStatus === 'idle') {
-      dispatch(fetchCatalogosProducto())
-    }
-  }, [catalogStatus, dispatch])
+  const permiteDecimalesSeleccionado = useWatch({ control, name: 'permite_decimales' })
 
   useEffect(() => {
     let active = true
 
-    const loadProducto = async () => {
+    const loadProductoData = async () => {
       if (!isEditMode) {
-        setPageStatus('idle')
         return
       }
 
-      setPageStatus('loading')
       try {
-        const { data } = await api.get(`/productos/${id}/`, { suppressGlobalErrorToast: true })
+        const data = await loadProducto()
         if (!active) {
           return
         }
@@ -189,22 +184,20 @@ function ProductosCreatePage() {
           usa_vencimiento: Boolean(data.usa_vencimiento),
           activo: Boolean(data.activo),
         })
-        setPageStatus('succeeded')
       } catch (error) {
         if (!active) {
           return
         }
-        setPageStatus('failed')
         toast.error(normalizeApiError(error, { fallback: 'No se pudo cargar el producto.' }))
       }
     }
 
-    void loadProducto()
+    void loadProductoData()
 
     return () => {
       active = false
     }
-  }, [id, isEditMode, reset])
+  }, [isEditMode, loadProducto, reset])
 
   useEffect(() => {
     if (tipoSeleccionado === 'SERVICIO') {
@@ -213,11 +206,6 @@ function ProductosCreatePage() {
       setValue('usa_lotes', false, { shouldValidate: true })
       setValue('usa_series', false, { shouldValidate: true })
       setValue('usa_vencimiento', false, { shouldValidate: true })
-      return
-    }
-
-    if (tipoSeleccionado === 'PRODUCTO') {
-      setValue('maneja_inventario', true, { shouldValidate: true })
     }
   }, [setValue, tipoSeleccionado])
 
@@ -250,9 +238,7 @@ function ProductosCreatePage() {
   }, [dispatch])
 
   const onSubmit = async (values) => {
-    dispatch(resetCreateProductoState())
     setSubmitError(null)
-    setSubmitting(true)
 
     const payload = applyOperationalRules({
       ...values,
@@ -262,49 +248,42 @@ function ProductosCreatePage() {
       maneja_inventario: values.tipo === 'SERVICIO' ? false : values.maneja_inventario,
     })
 
-    try {
-      if (isEditMode) {
-        await api.patch(`/productos/${id}/`, payload, { suppressGlobalErrorToast: true })
-      } else {
-        await dispatch(createProducto(payload)).unwrap()
-      }
-      invalidateProductosCatalogCache()
-      toast.success(isEditMode ? 'Producto actualizado correctamente.' : 'Producto creado correctamente.')
-      dispatch(fetchProductos())
-      dispatch(resetCreateProductoState())
-      if (isEditMode) {
-        navigate(`/productos/${id}`)
-        return
-      }
-      reset({
-        nombre: '',
-        descripcion: '',
-        sku: '',
-        tipo: 'PRODUCTO',
-        categoria: '',
-        impuesto: '',
-        precio_referencia: 0,
-        precio_costo: 0,
-        unidad_medida: 'UN',
-        permite_decimales: true,
-        maneja_inventario: true,
-        stock_minimo: 0,
-        usa_lotes: false,
-        usa_series: false,
-        usa_vencimiento: false,
-        activo: true,
-      })
-    } catch (error) {
-      if (isEditMode) {
-        const normalizedError = normalizeApiError(error, { fallback: 'No se pudo actualizar el producto.' })
-        setSubmitError(error?.response?.data || null)
-        toast.error(normalizedError)
-        return
-      }
-      toast.error(typeof error === 'string' ? error : (error?.message || 'No se pudo crear el producto.'))
-    } finally {
-      setSubmitting(false)
+    if (isEditMode) {
+      delete payload.precio_costo
     }
+
+    const result = await saveProducto({ payload, productoId: id, isEditMode })
+    if (!result.ok) {
+      if (isEditMode) {
+        setSubmitError(result.contract)
+      }
+      return
+    }
+
+    dispatch(resetCreateProductoState())
+    if (isEditMode) {
+      navigate(`/productos/${id}`)
+      return
+    }
+
+    reset({
+      nombre: '',
+      descripcion: '',
+      sku: '',
+      tipo: 'PRODUCTO',
+      categoria: '',
+      impuesto: '',
+      precio_referencia: 0,
+      precio_costo: 0,
+      unidad_medida: 'UN',
+      permite_decimales: true,
+      maneja_inventario: true,
+      stock_minimo: 0,
+      usa_lotes: false,
+      usa_series: false,
+      usa_vencimiento: false,
+      activo: true,
+    })
   }
 
   if (isEditMode && pageStatus === 'loading') {
@@ -355,19 +334,41 @@ function ProductosCreatePage() {
         <div className="grid gap-3 md:grid-cols-2">
           <label className="text-sm">
             Nombre
-            <input className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2" {...register('nombre')} />
+            <input
+              className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
+              {...register('nombre', {
+                onChange: (event) => {
+                  event.target.value = normalizeUpperInput(event.target.value)
+                },
+              })}
+            />
             {errors.nombre && <span className="mt-1 block text-xs text-destructive">{errors.nombre.message}</span>}
           </label>
 
           <label className="text-sm">
             SKU
-            <input className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2" {...register('sku')} />
+            <input
+              className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
+              {...register('sku', {
+                onChange: (event) => {
+                  event.target.value = normalizeUpperInput(event.target.value)
+                },
+              })}
+            />
             {errors.sku && <span className="mt-1 block text-xs text-destructive">{errors.sku.message}</span>}
           </label>
 
           <label className="text-sm md:col-span-2">
             Descripcion
-            <textarea className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2" rows={3} {...register('descripcion')} />
+            <textarea
+              className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
+              rows={3}
+              {...register('descripcion', {
+                onChange: (event) => {
+                  event.target.value = normalizeUpperInput(event.target.value)
+                },
+              })}
+            />
             {errors.descripcion && <span className="mt-1 block text-xs text-destructive">{errors.descripcion.message}</span>}
           </label>
 
@@ -401,14 +402,26 @@ function ProductosCreatePage() {
 
           <label className="text-sm">
             Precio referencia
-            <input type="number" step="1" min="0" className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2" {...register('precio_referencia', { valueAsNumber: true })} />
+            <input type="number" step="0.01" min="0" className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2" {...register('precio_referencia', { valueAsNumber: true })} />
             {errors.precio_referencia && <span className="mt-1 block text-xs text-destructive">{errors.precio_referencia.message}</span>}
           </label>
 
           <label className="text-sm">
             Precio costo
-            <input type="number" step="1" min="0" className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2" {...register('precio_costo', { valueAsNumber: true })} />
+            <input
+              type="number"
+              step="0.01"
+              min="0"
+              disabled={isEditMode}
+              className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 disabled:cursor-not-allowed disabled:opacity-70"
+              {...register('precio_costo', { valueAsNumber: true })}
+            />
             {errors.precio_costo && <span className="mt-1 block text-xs text-destructive">{errors.precio_costo.message}</span>}
+            {isEditMode ? (
+              <span className="mt-1 block text-xs text-muted-foreground">
+                El costo se actualiza desde documentos, recepciones o ajustes autorizados; no desde el maestro.
+              </span>
+            ) : null}
           </label>
 
           <label className="text-sm">
@@ -425,7 +438,7 @@ function ProductosCreatePage() {
             Stock minimo
             <input
               type="number"
-              step="1"
+              step={permiteDecimalesSeleccionado ? '0.01' : '1'}
               min="0"
               disabled={!manejaInventarioSeleccionado || tipoSeleccionado === 'SERVICIO'}
               className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
@@ -471,11 +484,11 @@ function ProductosCreatePage() {
 
         <div className="mt-4">
           <Button
-            disabled={submitting || (createStatus === 'loading' && !isEditMode)}
+            disabled={savingProducto || (createStatus === 'loading' && !isEditMode)}
             size="md"
             type="submit"
           >
-            {submitting || (createStatus === 'loading' && !isEditMode)
+            {savingProducto || (createStatus === 'loading' && !isEditMode)
               ? 'Guardando...'
               : (isEditMode ? 'Guardar cambios' : 'Crear producto')}
           </Button>

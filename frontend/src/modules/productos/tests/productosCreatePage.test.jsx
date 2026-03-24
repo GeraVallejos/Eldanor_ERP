@@ -35,7 +35,25 @@ describe('productos/ProductosCreatePage', () => {
       ),
     )
 
-    renderWithProviders(<ProductosCreatePage />)
+    renderWithProviders(<ProductosCreatePage />, {
+      preloadedState: {
+        auth: {
+          user: {
+            id: 10,
+            email: 'catalogo@erp.test',
+            permissions: ['PRODUCTOS.CREAR'],
+          },
+          empresas: [],
+          empresasStatus: 'idle',
+          empresasError: null,
+          changingEmpresaId: null,
+          isAuthenticated: true,
+          status: 'succeeded',
+          bootstrapStatus: 'succeeded',
+          error: null,
+        },
+      },
+    })
 
     await userEvent.type(await screen.findByLabelText('Nombre'), 'Vacuna antirrabica')
     await userEvent.type(screen.getByLabelText('SKU'), 'VAC-001')

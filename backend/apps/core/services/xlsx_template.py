@@ -4,8 +4,9 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill
 
 
-def build_xlsx_template(*, headers, sample_row=None, instructions=None, sheet_name="Plantilla"):
+def build_xlsx_template(*, headers, sample_row=None, instructions=None, sheet_name="Plantilla", template_title=None):
     workbook = Workbook()
+    workbook.properties.title = str(template_title or sheet_name or "Plantilla de importacion")
     sheet = workbook.active
     sheet.title = sheet_name
 
@@ -28,8 +29,13 @@ def build_xlsx_template(*, headers, sample_row=None, instructions=None, sheet_na
 
     if instructions:
         help_sheet = workbook.create_sheet(title="Instrucciones")
+        if template_title:
+            help_sheet.append(["Plantilla"])
+            help_sheet["A1"].font = Font(bold=True)
+            help_sheet.append([str(template_title)])
+            help_sheet.append([""])
         help_sheet.append(["Indicacion"])
-        help_sheet["A1"].font = Font(bold=True)
+        help_sheet[f"A{help_sheet.max_row}"].font = Font(bold=True)
         help_sheet.column_dimensions["A"].width = 120
         for item in instructions:
             help_sheet.append([str(item or "")])

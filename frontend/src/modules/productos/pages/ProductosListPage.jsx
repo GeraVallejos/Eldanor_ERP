@@ -3,16 +3,12 @@ import {
   createColumnHelper,
   flexRender,
   getCoreRowModel,
-  getFilteredRowModel,
-  getPaginationRowModel,
   getSortedRowModel,
   useReactTable,
 } from '@tanstack/react-table'
-import { useDispatch, useSelector } from 'react-redux'
+import { useSelector } from 'react-redux'
 import { Link } from 'react-router-dom'
-import { toast } from 'sonner'
-import { api } from '@/api/client'
-import { normalizeApiError } from '@/api/errors'
+import ActiveSearchFilter from '@/components/ui/ActiveSearchFilter'
 import Button from '@/components/ui/Button'
 import BulkImportButton from '@/components/ui/BulkImportButton'
 import MenuButton from '@/components/ui/MenuButton'
@@ -23,17 +19,11 @@ import { getChileDateSuffix } from '@/lib/dateTimeFormat'
 import { formatCurrencyCLP, formatSmartNumber } from '@/lib/numberFormat'
 import { useResponsiveTablePageSize } from '@/lib/useResponsiveTablePageSize'
 import { cn } from '@/lib/utils'
-import { invalidateProductosCatalogCache } from '@/modules/productos/services/productosCatalogCache'
+import { productosApi } from '@/modules/productos/store/api'
+import { useProductosListado } from '@/modules/productos/store/hooks'
+import { useDeleteProductoAction } from '@/modules/productos/store/mutations'
 import { downloadExcelFile } from '@/modules/shared/exports/downloadExcelFile'
 import { downloadSimpleTablePdf } from '@/modules/shared/exports/downloadSimpleTablePdf'
-import {
-  fetchCatalogosProducto,
-  fetchProductos,
-  selectCategorias,
-  selectProductos,
-  selectProductosError,
-  selectProductosStatus,
-} from '@/modules/productos/productosSlice'
 import { selectCurrentUser } from '@/modules/auth/authSlice'
 import { hasAnyRole } from '@/modules/shared/auth/roles'
 import { usePermissions } from '@/modules/shared/auth/usePermission'
@@ -62,21 +52,48 @@ function getTipoFilterLabel(tipoFilter) {
   return 'productos'
 }
 
+function sortProductosForExport(productos, sorting, categoriaLabelById) {
+  const rows = Array.isArray(productos) ? [...productos] : []
+  const activeSort = Array.isArray(sorting) ? sorting[0] : null
+  if (!activeSort?.id) {
+    return rows
+  }
+
+  const direction = activeSort.desc ? -1 : 1
+  const resolveValue = (item) => {
+    if (activeSort.id === 'categoria') {
+      return categoriaLabelById.get(String(item?.categoria || '')) || '-'
+    }
+    return item?.[activeSort.id]
+  }
+
+  rows.sort((left, right) => {
+    const leftValue = resolveValue(left)
+    const rightValue = resolveValue(right)
+
+    if (leftValue == null && rightValue == null) return 0
+    if (leftValue == null) return 1
+    if (rightValue == null) return -1
+
+    if (typeof leftValue === 'number' && typeof rightValue === 'number') {
+      return (leftValue - rightValue) * direction
+    }
+
+    return String(leftValue).localeCompare(String(rightValue), 'es', { sensitivity: 'base', numeric: true }) * direction
+  })
+
+  return rows
+}
+
 function ProductosListPage() {
   const responsivePageSize = useResponsiveTablePageSize({ mobileRows: 20, reservedHeight: 470, desktopMaxRows: 14 })
-  const dispatch = useDispatch()
-  const productos = useSelector(selectProductos)
-  const categorias = useSelector(selectCategorias)
   const currentUser = useSelector(selectCurrentUser)
   const permissions = usePermissions(['PRODUCTOS.CREAR', 'PRODUCTOS.EDITAR', 'PRODUCTOS.BORRAR'])
-  const status = useSelector(selectProductosStatus)
-  const error = useSelector(selectProductosError)
   const [sorting, setSorting] = useState([{ id: 'creado_en', desc: true }])
   const [globalFilter, setGlobalFilter] = useState('')
   const [tipoFilter, setTipoFilter] = useState('PRODUCTO')
   const [categoryFilter, setCategoryFilter] = useState('ALL')
   const [pagination, setPagination] = useState({ pageIndex: 0, pageSize: responsivePageSize })
-  const [deletingId, setDeletingId] = useState(null)
   const [productoToDelete, setProductoToDelete] = useState(null)
   const [includeInactive, setIncludeInactive] = useState(false)
 
@@ -85,14 +102,36 @@ function ProductosListPage() {
   const canCreate = permissions['PRODUCTOS.CREAR']
   const canEdit = permissions['PRODUCTOS.EDITAR']
   const canDelete = permissions['PRODUCTOS.BORRAR']
+  const {
+    productos,
+    totalCount,
+    status,
+    error,
+    categorias,
+    reload,
+  } = useProductosListado({
+    includeInactive: canViewInactive && includeInactive,
+    query: globalFilter,
+    tipo: tipoFilter,
+    categoria: categoryFilter,
+    page: pagination.pageIndex + 1,
+    pageSize: pagination.pageSize,
+  })
+  const { deletingId, deleteProducto } = useDeleteProductoAction({
+    canDelete,
+    onSuccess: async () => {
+      setProductoToDelete(null)
+      await reload()
+    },
+  })
 
   useEffect(() => {
-    dispatch(fetchProductos({ includeInactive: canViewInactive && includeInactive }))
-  }, [dispatch, canViewInactive, includeInactive])
-
-  useEffect(() => {
-    dispatch(fetchCatalogosProducto())
-  }, [dispatch])
+    setPagination((prev) => (
+      prev.pageIndex === 0
+        ? prev
+        : { ...prev, pageIndex: 0 }
+    ))
+  }, [globalFilter, tipoFilter, categoryFilter, includeInactive])
 
   useEffect(() => {
     setPagination((prev) => (
@@ -101,6 +140,17 @@ function ProductosListPage() {
         : { ...prev, pageIndex: 0, pageSize: responsivePageSize }
     ))
   }, [responsivePageSize])
+
+  useEffect(() => {
+    setPagination((prev) => {
+      const totalPages = Math.max(1, Math.ceil(totalCount / prev.pageSize))
+      const maxPageIndex = Math.max(0, totalPages - 1)
+      if (prev.pageIndex <= maxPageIndex) {
+        return prev
+      }
+      return { ...prev, pageIndex: maxPageIndex }
+    })
+  }, [totalCount])
 
   const categoriaLabelById = useMemo(() => {
     const map = new Map()
@@ -119,26 +169,54 @@ function ProductosListPage() {
       .sort((a, b) => String(a.nombre).localeCompare(String(b.nombre), 'es', { sensitivity: 'base' }))
   }, [categorias])
 
-  const filteredByType = useMemo(() => {
-    if (tipoFilter === 'ALL') {
-      return productos
-    }
-
-    return productos.filter((item) => item?.tipo === tipoFilter)
-  }, [productos, tipoFilter])
-
-  const filteredByCategory = useMemo(() => {
-    if (categoryFilter === 'ALL') {
-      return filteredByType
-    }
-    if (categoryFilter === 'SIN_CATEGORIA') {
-      return filteredByType.filter((item) => !item?.categoria)
-    }
-    return filteredByType.filter((item) => String(item?.categoria || '') === categoryFilter)
-  }, [filteredByType, categoryFilter])
-
   const requestDeleteProducto = (producto) => {
     setProductoToDelete(producto)
+  }
+
+  const buildProductosQueryParams = (overrides = {}) => {
+    const params = {
+      includeInactive: canViewInactive && includeInactive,
+      query: globalFilter,
+      tipo: tipoFilter,
+      categoria: categoryFilter,
+      page: pagination.pageIndex + 1,
+      pageSize: pagination.pageSize,
+      ...overrides,
+    }
+
+    if (!params.query) delete params.query
+    if (!params.tipo || params.tipo === 'ALL') delete params.tipo
+    if (!params.categoria || params.categoria === 'ALL') delete params.categoria
+
+    return params
+  }
+
+  const fetchAllFilteredProductos = async () => {
+    const pageSize = 100
+    const allRows = []
+    let currentPage = 1
+    let totalPages = 1
+
+    while (currentPage <= totalPages) {
+      const requestOptions = buildProductosQueryParams({ page: currentPage, pageSize })
+      const params = {
+        page: requestOptions.page,
+        page_size: requestOptions.pageSize,
+      }
+      if (requestOptions.includeInactive) params.include_inactive = 1
+      if (requestOptions.query) params.q = requestOptions.query
+      if (requestOptions.tipo) params.tipo = requestOptions.tipo
+      if (requestOptions.categoria) params.categoria = requestOptions.categoria
+
+      const data = await productosApi.getListWithCount(productosApi.endpoints.productos, params)
+      const results = data.results
+      const count = data.count
+      totalPages = Math.max(1, Math.ceil(count / pageSize))
+      allRows.push(...results)
+      currentPage += 1
+    }
+
+    return sortProductosForExport(allRows, sorting, categoriaLabelById)
   }
 
   const confirmDeleteProducto = async () => {
@@ -146,20 +224,7 @@ function ProductosListPage() {
     if (!producto?.id) {
       return
     }
-
-    setDeletingId(producto.id)
-
-    try {
-      await api.delete(`/productos/${producto.id}/`, { suppressGlobalErrorToast: true })
-      invalidateProductosCatalogCache()
-      toast.success('Producto procesado correctamente.')
-      dispatch(fetchProductos({ includeInactive: canViewInactive && includeInactive }))
-      setProductoToDelete(null)
-    } catch (error) {
-      toast.error(normalizeApiError(error, { fallback: 'No se pudo eliminar el producto.' }))
-    } finally {
-      setDeletingId(null)
-    }
+    await deleteProducto(producto)
   }
 
   const columns = [
@@ -234,34 +299,30 @@ function ProductosListPage() {
       }),
     ]
 
+  // TanStack Table expone callbacks no compatibles con la regla del React Compiler.
+  // Aqui se usa de forma local y no se propaga a hooks memoizados.
+  // eslint-disable-next-line react-hooks/incompatible-library
   const table = useReactTable({
-    data: filteredByCategory,
+    data: productos,
     columns,
     initialState: {
       columnVisibility: { creado_en: false },
     },
     state: {
       sorting,
-      globalFilter,
-      pagination,
     },
     onSortingChange: setSorting,
-    onGlobalFilterChange: setGlobalFilter,
-    onPaginationChange: setPagination,
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
-    getFilteredRowModel: getFilteredRowModel(),
-    getPaginationRowModel: getPaginationRowModel(),
   })
 
   const handleExportExcel = async () => {
-    const rows = table.getSortedRowModel().rows
-
-    if (rows.length === 0) {
+    if (totalCount === 0) {
       return
     }
 
     const today = getChileDateSuffix()
+    const rows = await fetchAllFilteredProductos()
 
     await downloadExcelFile({
       sheetName: 'Productos',
@@ -271,21 +332,20 @@ function ProductosListPage() {
         { header: 'SKU', key: 'sku', width: 20 },
         { header: 'Tipo', key: 'tipo', width: 18 },
         { header: 'Categoria', key: 'categoria', width: 22 },
-        { header: 'Precio referencia', key: 'precio_referencia', width: 18 },
-        { header: 'Precio costo', key: 'precio_costo', width: 18 },
-        { header: 'Stock actual', key: 'stock_actual', width: 16 },
+        { header: 'Precio referencia', key: 'precio_referencia', width: 18, numFmt: '#,##0.##' },
+        { header: 'Precio costo', key: 'precio_costo', width: 18, numFmt: '#,##0.##' },
+        { header: 'Stock actual', key: 'stock_actual', width: 16, numFmt: '#,##0.##' },
         { header: 'Activo', key: 'activo', width: 12 },
       ],
-      rows: rows.map((row) => {
-        const item = row.original
+      rows: rows.map((item) => {
         return {
           nombre: item?.nombre || '',
           sku: item?.sku || '',
           tipo: item?.tipo || '',
           categoria: categoriaLabelById.get(String(item?.categoria || '')) || '-',
-          precio_referencia: item?.precio_referencia ?? 0,
-          precio_costo: item?.precio_costo ?? 0,
-          stock_actual: item?.stock_actual ?? 0,
+          precio_referencia: Number(item?.precio_referencia ?? 0),
+          precio_costo: Number(item?.precio_costo ?? 0),
+          stock_actual: Number(item?.stock_actual ?? 0),
           activo: item?.activo ? 'Si' : 'No',
         }
       }),
@@ -293,26 +353,24 @@ function ProductosListPage() {
   }
 
   const handleExportPdf = async () => {
-    const rows = table.getSortedRowModel().rows
-
-    if (rows.length === 0) {
+    if (totalCount === 0) {
       return
     }
 
     const today = getChileDateSuffix()
+    const rows = await fetchAllFilteredProductos()
     await downloadSimpleTablePdf({
       title: 'Listado de productos',
       fileName: `productos_${today}.pdf`,
       headers: ['Nombre', 'SKU', 'Tipo', 'Categoria', 'Precio ref.', 'Stock actual', 'Activo'],
-      rows: rows.map((row) => {
-        const item = row.original
+      rows: rows.map((item) => {
         return [
           item?.nombre || '-',
           item?.sku || '-',
           item?.tipo || '-',
           categoriaLabelById.get(String(item?.categoria || '')) || '-',
           formatMoney(item?.precio_referencia ?? 0),
-          Math.round(Number(item?.stock_actual ?? 0)).toLocaleString('es-CL'),
+          formatSmartNumber(item?.stock_actual ?? 0, { maximumFractionDigits: 2 }),
           item?.activo ? 'Si' : 'No',
         ]
       }),
@@ -345,8 +403,10 @@ function ProductosListPage() {
             <BulkImportButton
               endpoint="/productos/bulk_import/"
               templateEndpoint="/productos/bulk_template/"
+              previewBeforeImport
+              previewTitle="Confirmar carga masiva de productos"
               onCompleted={() => {
-                dispatch(fetchProductos({ includeInactive: canViewInactive && includeInactive }))
+                void reload()
               }}
             />
           ) : null}
@@ -438,19 +498,29 @@ function ProductosListPage() {
               </select>
             </div>
           </div>
+          <ActiveSearchFilter
+            query={globalFilter}
+            filteredCount={productos.length}
+            totalCount={totalCount}
+            noun={tipoFilterLabel}
+            onClear={() => setGlobalFilter('')}
+          />
           {canViewInactive ? (
-            <label className="inline-flex items-center gap-2 text-xs text-muted-foreground">
+            <div className="inline-flex items-center gap-2 text-xs text-muted-foreground">
               <input
+                id="productos-include-inactive"
                 type="checkbox"
                 checked={includeInactive}
                 onChange={(event) => setIncludeInactive(event.target.checked)}
               />
-              Mostrar tambien productos no activos (solo admin)
-            </label>
+              <label htmlFor="productos-include-inactive" className="cursor-pointer">
+                Mostrar tambien productos no activos (solo admin)
+              </label>
+            </div>
           ) : null}
         </div>
         <p className="text-xs text-muted-foreground">
-          Mostrando {table.getFilteredRowModel().rows.length} de {filteredByCategory.length} {tipoFilterLabel}
+          Mostrando {productos.length} de {totalCount} {tipoFilterLabel}
         </p>
       </div>
 
@@ -524,12 +594,15 @@ function ProductosListPage() {
       )}
 
       <TablePagination
-        currentPage={table.getState().pagination.pageIndex + 1}
-        totalPages={Math.max(1, table.getPageCount())}
-        totalRows={table.getFilteredRowModel().rows.length}
-        pageSize={table.getState().pagination.pageSize}
-        onPrev={() => table.previousPage()}
-        onNext={() => table.nextPage()}
+        currentPage={pagination.pageIndex + 1}
+        totalPages={Math.max(1, Math.ceil(totalCount / pagination.pageSize))}
+        totalRows={totalCount}
+        pageSize={pagination.pageSize}
+        onPrev={() => setPagination((prev) => ({ ...prev, pageIndex: Math.max(0, prev.pageIndex - 1) }))}
+        onNext={() => setPagination((prev) => ({
+          ...prev,
+          pageIndex: Math.min(Math.max(0, Math.ceil(totalCount / prev.pageSize) - 1), prev.pageIndex + 1),
+        }))}
       />
 
       <ConfirmDialog

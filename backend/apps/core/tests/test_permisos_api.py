@@ -42,7 +42,8 @@ def cliente_empresa_a(empresa):
         empresa=empresa,
         nombre="Cliente A",
         rut="33333333-3",
-        email="clienteA@test.com"
+        email="clienteA@test.com",
+        tipo="EMPRESA",
     )
 
     return Cliente.objects.create(
@@ -57,7 +58,8 @@ def cliente_empresa_b(empresa_b):
         empresa=empresa_b,
         nombre="Cliente B",
         rut="44444444-4",
-        email="clienteB@test.com"
+        email="clienteB@test.com",
+        tipo="EMPRESA",
     )
 
     return Cliente.objects.create(

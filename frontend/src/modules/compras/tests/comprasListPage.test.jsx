@@ -363,8 +363,12 @@ describe('compras/ListPage', () => {
     expect(screen.getByText('Top productos comprados')).toBeInTheDocument()
     expect(screen.getByText('Tendencia mensual de ordenes')).toBeInTheDocument()
     expect(screen.getByText('Reporte documental')).toBeInTheDocument()
-    expect(screen.getAllByText('Proveedor Norte').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('Proveedor Sur').length).toBeGreaterThan(0)
+    expect(
+      screen.getAllByText((_, element) => String(element?.textContent || '').includes('Proveedor Norte')).length,
+    ).toBeGreaterThan(0)
+    expect(
+      screen.getAllByText((_, element) => String(element?.textContent || '').includes('Proveedor Sur')).length,
+    ).toBeGreaterThan(0)
 
     await userEvent.selectOptions(screen.getByLabelText('Estado de orden'), 'RECIBIDA')
     await userEvent.selectOptions(screen.getByLabelText('Agrupacion temporal'), 'semanal')
@@ -373,7 +377,9 @@ describe('compras/ListPage', () => {
       expect(screen.getByText('Tendencia semanal de ordenes')).toBeInTheDocument()
     })
     expect(screen.queryByText('OC-001')).not.toBeInTheDocument()
-    expect(screen.getAllByText('Proveedor Sur').length).toBeGreaterThan(0)
+    expect(
+      screen.getAllByText((_, element) => String(element?.textContent || '').includes('Proveedor Sur')).length,
+    ).toBeGreaterThan(0)
     expect(screen.getAllByText(/\$?\s*500\.000/).length).toBeGreaterThan(0)
   })
 })

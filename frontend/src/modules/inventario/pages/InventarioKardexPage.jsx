@@ -6,7 +6,7 @@ import Button from '@/components/ui/Button'
 import SearchableSelect from '@/components/ui/SearchableSelect'
 import { formatDateTimeChile, getChileDateSuffix } from '@/lib/dateTimeFormat'
 import { formatCurrencyCLP, formatSmartNumber } from '@/lib/numberFormat'
-import { getProductosCatalog } from '@/modules/productos/services/productosCatalogCache'
+import { mergeProductosCatalog, searchProductosCatalog } from '@/modules/productos/services/productosCatalogCache'
 import { downloadExcelFile } from '@/modules/shared/exports/downloadExcelFile'
 import { downloadSimpleTablePdf } from '@/modules/shared/exports/downloadSimpleTablePdf'
 
@@ -91,11 +91,12 @@ function InventarioKardexPage() {
   })
   const [submittedFilters, setSubmittedFilters] = useState(null)
   const [exportMenuOpen, setExportMenuOpen] = useState(false)
+  const [loadingProductos, setLoadingProductos] = useState(false)
 
   const loadCatalogs = async () => {
     try {
       const [productosData, { data: bodegasData }] = await Promise.all([
-        getProductosCatalog(),
+        searchProductosCatalog({ tipo: 'PRODUCTO' }),
         api.get('/bodegas/', { suppressGlobalErrorToast: true }),
       ])
 
@@ -105,6 +106,18 @@ function InventarioKardexPage() {
       toast.error(normalizeApiError(error, { fallback: 'No se pudieron cargar los catalogos de inventario.' }))
     }
   }
+
+  const searchProductos = useCallback(async (query) => {
+    setLoadingProductos(true)
+    try {
+      const results = await searchProductosCatalog({ query, tipo: 'PRODUCTO' })
+      setProductos((prev) => mergeProductosCatalog(prev, results))
+    } catch (error) {
+      toast.error(normalizeApiError(error, { fallback: 'No se pudieron buscar productos.' }))
+    } finally {
+      setLoadingProductos(false)
+    }
+  }, [])
 
   const fetchKardex = useCallback(async (customFilters) => {
     if (!customFilters.producto_id) {
@@ -307,10 +320,12 @@ function InventarioKardexPage() {
             className="mt-2"
             value={filters.producto_id}
             onChange={(next) => updateFilter('producto_id', next)}
+            onSearchChange={(next) => { void searchProductos(next) }}
             options={productoOptions}
             ariaLabel="Producto"
             placeholder="Buscar producto..."
             emptyText="No hay productos coincidentes"
+            loading={loadingProductos}
           />
         </label>
 

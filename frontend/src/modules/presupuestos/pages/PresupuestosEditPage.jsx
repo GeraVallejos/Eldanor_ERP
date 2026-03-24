@@ -4,7 +4,7 @@ import { toast } from 'sonner'
 import { api } from '@/api/client'
 import { normalizeApiError } from '@/api/errors'
 import Button from '@/components/ui/Button'
-import { getProductosCatalog } from '@/modules/productos/services/productosCatalogCache'
+import { mergeProductosCatalog, searchProductosCatalog } from '@/modules/productos/services/productosCatalogCache'
 import { buttonVariants } from '@/components/ui/buttonVariants'
 import { cn } from '@/lib/utils'
 
@@ -104,6 +104,7 @@ function PresupuestosEditPage() {
     itemIndex: null,
     optionIndex: -1,
   })
+  const [loadingProductos, setLoadingProductos] = useState(false)
   const [form, setForm] = useState({
     cliente: '',
     fecha: '',
@@ -135,20 +136,22 @@ function PresupuestosEditPage() {
             { data: itemsData },
             { data: clientesData },
             { data: contactosData },
-            productosData,
+            productosProductoData,
+            productosServicioData,
             { data: impuestosData },
           ] = await Promise.all([
             api.get(`/presupuestos/${id}/`, { suppressGlobalErrorToast: true }),
             api.get('/presupuesto-items/', { suppressGlobalErrorToast: true }),
             api.get('/clientes/', { suppressGlobalErrorToast: true }),
             api.get('/contactos/', { suppressGlobalErrorToast: true }),
-            getProductosCatalog(),
+            searchProductosCatalog({ tipo: 'PRODUCTO' }),
+            searchProductosCatalog({ tipo: 'SERVICIO' }),
             api.get('/impuestos/', { suppressGlobalErrorToast: true }),
           ])
 
           const clientesList = normalizeListResponse(clientesData)
           const contactosList = normalizeListResponse(contactosData)
-          const productosList = productosData
+          const productosList = mergeProductosCatalog(productosProductoData, productosServicioData)
           const impuestosList = normalizeListResponse(impuestosData)
           const allItems = normalizeListResponse(itemsData)
           const scopedItems = allItems.filter((item) => String(item.presupuesto) === String(id))
@@ -216,6 +219,18 @@ function PresupuestosEditPage() {
 
     return () => clearTimeout(timeoutId)
   }, [id, navigate])
+
+  const searchProductos = async (query, tipo = '') => {
+    setLoadingProductos(true)
+    try {
+      const results = await searchProductosCatalog({ query, tipo })
+      setProductos((prev) => mergeProductosCatalog(prev, results))
+    } catch (error) {
+      toast.error(normalizeApiError(error, { fallback: 'No se pudieron buscar productos.' }))
+    } finally {
+      setLoadingProductos(false)
+    }
+  }
 
   const contactoById = useMemo(() => {
     const map = new Map()
@@ -575,6 +590,9 @@ function PresupuestosEditPage() {
   }
 
   const handleProductoSearchChange = (index, value) => {
+    const itemType = String(items[index]?.tipo || 'PRODUCTO').toUpperCase()
+    void searchProductos(value, itemType)
+
     setItems((prev) => {
       const next = [...prev]
       const current = { ...next[index] }
@@ -1221,7 +1239,7 @@ function PresupuestosEditPage() {
                         <div className="absolute z-50 mt-1 max-h-56 w-full overflow-auto rounded-md border border-border bg-popover p-1 shadow-lg">
                           {getFilteredProductosForItem(item).length === 0 ? (
                             <p className="px-2 py-2 text-xs text-muted-foreground">
-                              No hay coincidencias para "{item.producto_search}".
+                              {loadingProductos ? 'Buscando productos...' : `No hay coincidencias para "${item.producto_search}".`}
                             </p>
                           ) : (
                             getFilteredProductosForItem(item).slice(0, 30).map((producto) => (

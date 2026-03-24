@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
 import { normalizeApiError } from '@/api/errors'
+import ActiveSearchFilter from '@/components/ui/ActiveSearchFilter'
 import Button from '@/components/ui/Button'
 import { buttonVariants } from '@/components/ui/buttonVariants'
 import { formatDateChile } from '@/lib/dateTimeFormat'
@@ -72,14 +73,41 @@ function VentasNotasListPage() {
       </div>
 
       <div className="flex gap-2">
-        <input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Buscar nota..."
-          className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
-        />
+        <div className="relative w-full">
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') {
+                setSearch('')
+              }
+            }}
+            placeholder="Buscar nota..."
+            className="w-full rounded-md border border-border bg-background px-3 py-2 pr-9 text-sm"
+          />
+          {search ? (
+            <button
+              type="button"
+              onClick={() => setSearch('')}
+              className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-muted-foreground transition hover:bg-muted hover:text-foreground"
+              aria-label="Limpiar busqueda"
+            >
+              x
+            </button>
+          ) : null}
+        </div>
         <Button variant="outline" onClick={() => reload()}>Recargar</Button>
       </div>
+
+      {search.trim() ? (
+        <ActiveSearchFilter
+          query={search}
+          filteredCount={filtered.length}
+          totalCount={notas.length}
+          noun="notas"
+          onClear={() => setSearch('')}
+        />
+      ) : null}
 
       {status === 'loading' ? <p className="text-sm text-muted-foreground">Cargando notas...</p> : null}
 

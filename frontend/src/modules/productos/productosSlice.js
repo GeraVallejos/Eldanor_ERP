@@ -1,35 +1,34 @@
 import { createAsyncThunk, createSlice } from '@reduxjs/toolkit'
-import { api } from '@/api/client'
 import { extractApiErrorContract, normalizeApiError } from '@/api/errors'
 import { login, logout } from '@/modules/auth/authSlice'
 import { invalidateProductosCatalogCache } from '@/modules/productos/services/productosCatalogCache'
+import { productosApi } from '@/modules/productos/store/api'
 
-function normalizeProductsResponse(data) {
-  if (Array.isArray(data)) {
-    return data
-  }
-
-  if (Array.isArray(data?.results)) {
-    return data.results
-  }
-
-  return []
-}
-
-function normalizeCatalogResponse(data) {
-  if (Array.isArray(data)) {
-    return data
-  }
+function normalizeProductsPayload(data, options = {}) {
+  const items = productosApi.normalizeListResponse(data)
+  const pageSize = Number(options?.pageSize || 0)
+  const currentPage = Number(options?.page || 1)
 
   if (Array.isArray(data?.results)) {
-    return data.results
+    return {
+      items,
+      totalCount: Number(data?.count ?? items.length),
+      currentPage,
+      pageSize,
+    }
   }
 
-  return []
+  return {
+    items,
+    totalCount: items.length,
+    currentPage,
+    pageSize,
+  }
 }
 
 const initialState = {
   items: [],
+  totalCount: 0,
   status: 'idle',
   error: null,
   createStatus: 'idle',
@@ -45,11 +44,37 @@ export const fetchProductos = createAsyncThunk(
   async (options = {}, { rejectWithValue }) => {
     try {
       const includeInactive = Boolean(options?.includeInactive)
-      const { data } = await api.get('/productos/', {
-        params: includeInactive ? { include_inactive: 1 } : undefined,
-        suppressGlobalErrorToast: true,
-      })
-      return normalizeProductsResponse(data)
+      const query = String(options?.query || '').trim()
+      const tipo = String(options?.tipo || '').trim().toUpperCase()
+      const categoria = String(options?.categoria || '').trim()
+      const page = Number(options?.page || 0)
+      const pageSize = Number(options?.pageSize || 0)
+      const params = {}
+
+      if (includeInactive) {
+        params.include_inactive = 1
+      }
+      if (query) {
+        params.q = query
+      }
+      if (tipo && tipo !== 'ALL') {
+        params.tipo = tipo
+      }
+      if (categoria && categoria !== 'ALL') {
+        params.categoria = categoria
+      }
+      if (page > 0) {
+        params.page = page
+      }
+      if (pageSize > 0) {
+        params.page_size = pageSize
+      }
+
+      const data = await productosApi.getListWithCount(
+        productosApi.endpoints.productos,
+        Object.keys(params).length > 0 ? params : undefined,
+      )
+      return normalizeProductsPayload(data, { page, pageSize })
     } catch (error) {
       return rejectWithValue(
         normalizeApiError(error, { fallback: 'No se pudo cargar productos.' }),
@@ -62,14 +87,14 @@ export const fetchCatalogosProducto = createAsyncThunk(
   'productos/fetchCatalogosProducto',
   async (_, { rejectWithValue }) => {
     try {
-      const [{ data: categoriasData }, { data: impuestosData }] = await Promise.all([
-        api.get('/categorias/', { suppressGlobalErrorToast: true }),
-        api.get('/impuestos/', { suppressGlobalErrorToast: true }),
+      const [categoriasData, impuestosData] = await Promise.all([
+        productosApi.getList(productosApi.endpoints.categorias),
+        productosApi.getList(productosApi.endpoints.impuestos),
       ])
 
       return {
-        categorias: normalizeCatalogResponse(categoriasData),
-        impuestos: normalizeCatalogResponse(impuestosData),
+        categorias: categoriasData,
+        impuestos: impuestosData,
       }
     } catch (error) {
       return rejectWithValue(
@@ -83,9 +108,7 @@ export const createProducto = createAsyncThunk(
   'productos/createProducto',
   async (payload, { rejectWithValue }) => {
     try {
-      const { data } = await api.post('/productos/', payload, {
-        suppressGlobalErrorToast: true,
-      })
+      const data = await productosApi.createOne(productosApi.endpoints.productos, payload)
       invalidateProductosCatalogCache()
       return data
     } catch (error) {
@@ -102,6 +125,7 @@ const productosSlice = createSlice({
   reducers: {
     clearProductosState: (state) => {
       state.items = []
+      state.totalCount = 0
       state.status = 'idle'
       state.error = null
       state.createStatus = 'idle'
@@ -120,10 +144,12 @@ const productosSlice = createSlice({
       })
       .addCase(fetchProductos.fulfilled, (state, action) => {
         state.status = 'succeeded'
-        state.items = action.payload
+        state.items = action.payload.items
+        state.totalCount = action.payload.totalCount
       })
       .addCase(fetchProductos.rejected, (state, action) => {
         state.items = []
+        state.totalCount = 0
         state.status = 'failed'
         state.error = action.payload || 'Error al cargar productos.'
       })
@@ -149,6 +175,7 @@ const productosSlice = createSlice({
         state.createStatus = 'succeeded'
         state.createError = null
         state.items = [action.payload, ...state.items]
+        state.totalCount += 1
       })
       .addCase(createProducto.rejected, (state, action) => {
         state.createStatus = 'failed'
@@ -156,6 +183,7 @@ const productosSlice = createSlice({
       })
       .addCase(login.fulfilled, (state) => {
         state.items = []
+        state.totalCount = 0
         state.status = 'idle'
         state.error = null
         state.createStatus = 'idle'
@@ -167,6 +195,7 @@ const productosSlice = createSlice({
       })
       .addCase(logout, (state) => {
         state.items = []
+        state.totalCount = 0
         state.status = 'idle'
         state.error = null
         state.createStatus = 'idle'
@@ -182,6 +211,7 @@ const productosSlice = createSlice({
 export const { clearProductosState, resetCreateProductoState } = productosSlice.actions
 
 export const selectProductos = (state) => state.productos.items
+export const selectProductosTotalCount = (state) => state.productos.totalCount
 export const selectProductosStatus = (state) => state.productos.status
 export const selectProductosError = (state) => state.productos.error
 export const selectCreateProductoStatus = (state) => state.productos.createStatus

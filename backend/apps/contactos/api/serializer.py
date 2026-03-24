@@ -7,10 +7,36 @@ from apps.contactos.models.proveedor import Proveedor
 
 
 class ContactoSerializer(serializers.ModelSerializer):
+    """Serializer de contactos con contrato estricto para datos maestros obligatorios."""
+
     class Meta:
         model = Contacto
         fields = "__all__"
         read_only_fields = ["empresa", "creado_por"]
+        extra_kwargs = {
+            "rut": {"required": True, "allow_null": False, "allow_blank": False},
+            "email": {"required": True, "allow_null": False, "allow_blank": False},
+            "tipo": {"required": True, "allow_null": False, "allow_blank": False},
+        }
+
+    def validate(self, attrs):
+        errors = {}
+
+        rut = attrs.get("rut", getattr(self.instance, "rut", None))
+        email = attrs.get("email", getattr(self.instance, "email", None))
+        tipo = attrs.get("tipo", getattr(self.instance, "tipo", None))
+
+        if not str(rut or "").strip():
+            errors["rut"] = ["Este campo es obligatorio."]
+        if not str(email or "").strip():
+            errors["email"] = ["Este campo es obligatorio."]
+        if not str(tipo or "").strip():
+            errors["tipo"] = ["Este campo es obligatorio."]
+
+        if errors:
+            raise serializers.ValidationError(errors)
+
+        return attrs
 
 
 class ClienteSerializer(serializers.ModelSerializer):

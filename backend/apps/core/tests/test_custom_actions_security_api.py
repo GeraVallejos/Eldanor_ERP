@@ -70,6 +70,7 @@ def presupuesto_empresa_b(db, empresa_b, usuario):
         nombre="Cliente B Presupuesto",
         rut="12.345.678-5",
         email="cliente_b_presupuesto@test.com",
+        tipo="EMPRESA",
     )
     cliente = Cliente.objects.create(
         empresa=empresa_b,

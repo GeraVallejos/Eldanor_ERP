@@ -8,7 +8,7 @@ import SearchableSelect from '@/components/ui/SearchableSelect'
 import { getChileDateSuffix } from '@/lib/dateTimeFormat'
 import { formatCurrencyCLP, normalizeNumericInputByField, toIntegerString, toQuantityString } from '@/lib/numberFormat'
 import { useNormalizedFormItems } from '@/hooks/useNormalizedFormItems'
-import { getProductosCatalog } from '@/modules/productos/services/productosCatalogCache'
+import { mergeProductosCatalog, searchProductosCatalog } from '@/modules/productos/services/productosCatalogCache'
 
 function normalizeListResponse(data) {
   if (Array.isArray(data)) return data
@@ -47,6 +47,7 @@ function ComprasDocumentosCreatePage() {
   const [ordenesCompra, setOrdenesCompra] = useState([])
   const [contactos, setContactos] = useState([])
   const [productos, setProductos] = useState([])
+  const [loadingProductos, setLoadingProductos] = useState(false)
   const [saving, setSaving] = useState(false)
   const [loadingEdit, setLoadingEdit] = useState(isEditMode)
 
@@ -77,7 +78,7 @@ function ComprasDocumentosCreatePage() {
           api.get('/proveedores/', { suppressGlobalErrorToast: true }),
           api.get('/contactos/', { suppressGlobalErrorToast: true }),
           api.get('/ordenes-compra/', { suppressGlobalErrorToast: true }),
-          getProductosCatalog(),
+          searchProductosCatalog({ tipo: 'PRODUCTO' }),
         ])
         setProveedores(normalizeListResponse(provData))
         setContactos(normalizeListResponse(ctcData))
@@ -137,6 +138,18 @@ function ComprasDocumentosCreatePage() {
     void loadForEdit()
   }, [isEditMode, documentoId])
 
+  const searchProductos = async (query) => {
+    setLoadingProductos(true)
+    try {
+      const results = await searchProductosCatalog({ query, tipo: 'PRODUCTO' })
+      setProductos((prev) => mergeProductosCatalog(prev, results))
+    } catch {
+      toast.error('No se pudieron buscar productos.')
+    } finally {
+      setLoadingProductos(false)
+    }
+  }
+
   const contactoById = useMemo(() => {
     const map = new Map()
     contactos.forEach((c) => map.set(String(c.id), c))
@@ -177,15 +190,29 @@ function ComprasDocumentosCreatePage() {
   )
 
   const productoOptions = useMemo(
-    () =>
-      productos
+    () => {
+      const options = productos
         .filter((p) => String(p.tipo || '').toUpperCase() === 'PRODUCTO')
         .map((p) => ({
         value: String(p.id),
         label: p.nombre || `Producto ${p.id}`,
         keywords: `${p.sku || ''} ${p.tipo || ''}`,
-      })),
-    [productos],
+        }))
+
+      items.forEach((item) => {
+        if (!item.producto || options.some((option) => option.value === String(item.producto))) {
+          return
+        }
+        options.unshift({
+          value: String(item.producto),
+          label: item.descripcion || `Producto ${item.producto}`,
+          keywords: item.descripcion || '',
+        })
+      })
+
+      return options
+    },
+    [items, productos],
   )
 
   const productoById = useMemo(() => {
@@ -498,10 +525,12 @@ function ComprasDocumentosCreatePage() {
                         inputClassName="px-2 py-1"
                         value={item.producto}
                         onChange={(next) => handleItemChange(index, 'producto', next)}
+                        onSearchChange={(next) => { void searchProductos(next) }}
                         options={productoOptions}
                         ariaLabel="Producto"
                         placeholder="Buscar producto..."
                         emptyText="No hay productos coincidentes"
+                        loading={loadingProductos}
                       />
                     </td>
                     <td className="px-2 py-1">

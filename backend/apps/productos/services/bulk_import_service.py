@@ -6,10 +6,18 @@ from apps.auditoria.services import AuditoriaService
 from apps.core.exceptions import AuthorizationError, BusinessRuleError
 from apps.tesoreria.models import Moneda
 from apps.core.roles import RolUsuario
-from apps.core.services import DomainEventService, OutboxService
+from apps.core.services import (
+    DomainEventService,
+    OutboxService,
+    build_bulk_import_result,
+    bulk_import_execution_context,
+    format_bulk_import_row_error,
+)
 from apps.core.services.csv_import import parse_csv_upload
 from apps.core.services.xlsx_template import build_xlsx_template
 from apps.productos.models import Categoria, Impuesto, Producto, TipoProducto, UnidadMedida
+from apps.productos.services.catalogo_service import CategoriaService, ImpuestoService
+from apps.productos.services.producto_service import ProductoService
 from apps.productos.validators import normalize_sku
 
 
@@ -41,9 +49,10 @@ def _normalize_name(value):
 
 
 def _get_or_create_categoria(*, categoria_name, categorias, empresa, user):
+    """Resuelve una categoria existente o la crea con el servicio de catalogo."""
     categoria = categorias.get(categoria_name)
     if categoria:
-        return categoria
+        return categoria, False
 
     categoria = Categoria.all_objects.filter(
         empresa=empresa,
@@ -51,12 +60,19 @@ def _get_or_create_categoria(*, categoria_name, categorias, empresa, user):
     ).first()
     if categoria:
         categorias[categoria_name] = categoria
-        return categoria
+        return categoria, False
 
-    categoria = Categoria(empresa=empresa, creado_por=user, nombre=categoria_name)
-    categoria.save()
+    categoria = CategoriaService.crear_categoria(
+        empresa=empresa,
+        usuario=user,
+        data={
+            "nombre": categoria_name,
+            "descripcion": "",
+            "activa": True,
+        },
+    )
     categorias[categoria_name] = categoria
-    return categoria
+    return categoria, True
 
 
 def _extract_impuesto_porcentaje(impuesto_name):
@@ -74,9 +90,10 @@ def _extract_impuesto_porcentaje(impuesto_name):
 
 
 def _get_or_create_impuesto(*, impuesto_name, impuestos, empresa, user):
+    """Resuelve un impuesto existente o lo crea con trazabilidad consistente."""
     impuesto = impuestos.get(impuesto_name)
     if impuesto:
-        return impuesto
+        return impuesto, False
 
     impuesto = Impuesto.all_objects.filter(
         empresa=empresa,
@@ -84,7 +101,7 @@ def _get_or_create_impuesto(*, impuesto_name, impuestos, empresa, user):
     ).first()
     if impuesto:
         impuestos[impuesto_name] = impuesto
-        return impuesto
+        return impuesto, False
 
     porcentaje = _extract_impuesto_porcentaje(impuesto_name)
     if porcentaje is not None:
@@ -94,22 +111,22 @@ def _get_or_create_impuesto(*, impuesto_name, impuestos, empresa, user):
         ).first()
         if impuesto_by_pct:
             impuestos[impuesto_name] = impuesto_by_pct
-            return impuesto_by_pct
+            return impuesto_by_pct, False
     else:
         porcentaje = Decimal("19")
 
-    impuesto = Impuesto(empresa=empresa, creado_por=user, nombre=impuesto_name, porcentaje=porcentaje)
-    try:
-        impuesto.save()
-    except Exception:
-        # If percentage uniqueness collides with an existing tax config, reuse that tax.
-        fallback = Impuesto.all_objects.filter(empresa=empresa, porcentaje=porcentaje).first()
-        if not fallback:
-            raise
-        impuesto = fallback
+    impuesto = ImpuestoService.crear_impuesto(
+        empresa=empresa,
+        usuario=user,
+        data={
+            "nombre": impuesto_name,
+            "porcentaje": porcentaje,
+            "activo": True,
+        },
+    )
 
     impuestos[impuesto_name] = impuesto
-    return impuesto
+    return impuesto, True
 
 
 def _resolve_moneda(*, raw_value, monedas, empresa):
@@ -173,6 +190,86 @@ def _resolve_import_empresa(user, empresa):
         "No hay empresa activa para ejecutar la carga masiva.",
         error_code="BULK_IMPORT_NO_EMPRESA",
     )
+
+
+def _append_warning(warnings, *, code, line_number, sku, detail):
+    """Agrega una advertencia normalizada para consumo uniforme del frontend."""
+    warnings.append(
+        {
+            "code": code,
+            "line": line_number,
+            "sku": sku,
+            "detail": detail,
+        }
+    )
+
+
+def _registrar_warning_servicio_operativo(*, warnings, line_number, sku):
+    """Advierte cuando una fila de servicio informa datos operativos que seran ignorados."""
+    _append_warning(
+        warnings,
+        code="SERVICIO_CON_CAMPOS_INVENTARIO",
+        line_number=line_number,
+        sku=sku,
+        detail="Los campos de inventario informados para un servicio se ignoraran automaticamente.",
+    )
+
+
+def _registrar_warning_precio_referencia_cero(*, warnings, line_number, sku):
+    """Advierte cuando un producto activo queda con precio comercial en cero."""
+    _append_warning(
+        warnings,
+        code="PRECIO_REFERENCIA_CERO",
+        line_number=line_number,
+        sku=sku,
+        detail="El producto activo se importara con precio de referencia 0.",
+    )
+
+
+def _registrar_warning_sin_categoria(*, warnings, line_number, sku):
+    """Advierte sobre productos activos sin categoria asignada."""
+    _append_warning(
+        warnings,
+        code="PRODUCTO_SIN_CATEGORIA",
+        line_number=line_number,
+        sku=sku,
+        detail="El producto activo quedara sin categoria.",
+    )
+
+
+def _registrar_warning_sin_impuesto(*, warnings, line_number, sku):
+    """Advierte sobre productos activos sin impuesto asignado."""
+    _append_warning(
+        warnings,
+        code="PRODUCTO_SIN_IMPUESTO",
+        line_number=line_number,
+        sku=sku,
+        detail="El producto activo quedara sin impuesto.",
+    )
+
+
+def _registrar_warning_categoria_creada(*, warnings, line_number, sku, categoria_name):
+    """Advierte la creacion implicita de una categoria durante la importacion."""
+    _append_warning(
+        warnings,
+        code="CATEGORIA_CREADA_IMPLICITAMENTE",
+        line_number=line_number,
+        sku=sku,
+        detail=f"Se creara la categoria '{categoria_name}' porque no existe en la empresa activa.",
+    )
+
+
+def _registrar_warning_impuesto_creado(*, warnings, line_number, sku, impuesto_name):
+    """Advierte la creacion implicita de un impuesto durante la importacion."""
+    _append_warning(
+        warnings,
+        code="IMPUESTO_CREADO_IMPLICITAMENTE",
+        line_number=line_number,
+        sku=sku,
+        detail=f"Se creara el impuesto '{impuesto_name}' porque no existe en la empresa activa.",
+    )
+
+
 def _registrar_resumen_importacion(*, empresa, user, payload):
     """Registra auditoría y eventos de integración para la carga masiva de productos."""
     DomainEventService.record_event(
@@ -182,7 +279,7 @@ def _registrar_resumen_importacion(*, empresa, user, payload):
         event_type="productos.bulk_import.finalizado",
         payload=payload,
         meta={"source": "productos.bulk_import_service"},
-        idempotency_key=f"productos-bulk-import:{payload['total_rows']}:{payload['successful_rows']}:{payload['errors']}",
+        idempotency_key=f"productos-bulk-import:{payload['total_rows']}:{payload['successful_rows']}:{payload['errors']}:{payload.get('warnings') or 0}",
         usuario=user,
     )
     OutboxService.enqueue(
@@ -191,7 +288,7 @@ def _registrar_resumen_importacion(*, empresa, user, payload):
         event_name="productos.bulk_import.finalizado",
         payload=payload,
         usuario=user,
-        dedup_key=f"productos-bulk-import:{payload['total_rows']}:{payload['successful_rows']}:{payload['errors']}",
+        dedup_key=f"productos-bulk-import:{payload['total_rows']}:{payload['successful_rows']}:{payload['errors']}:{payload.get('warnings') or 0}",
     )
     AuditoriaService.registrar_evento(
         empresa=empresa,
@@ -206,14 +303,15 @@ def _registrar_resumen_importacion(*, empresa, user, payload):
             "registros_creados": [0, int(payload["created"])],
             "registros_actualizados": [0, int(payload["updated"])],
             "filas_con_error": [0, int(payload["errors"])],
+            "filas_con_advertencia": [0, int(payload.get("warnings") or 0)],
         },
         payload=payload,
         source="productos.bulk_import_service",
-        idempotency_key=f"audit:productos-bulk-import:{payload['total_rows']}:{payload['successful_rows']}:{payload['errors']}",
+        idempotency_key=f"audit:productos-bulk-import:{payload['total_rows']}:{payload['successful_rows']}:{payload['errors']}:{payload.get('warnings') or 0}",
     )
 
 
-def bulk_import_productos(*, uploaded_file, user, empresa):
+def bulk_import_productos(*, uploaded_file, user, empresa, dry_run=False):
     """Importa productos desde CSV resolviendo catálogo relacionado dentro de la empresa activa."""
     empresa = _resolve_import_empresa(user, empresa)
     _ensure_admin_user(user, empresa)
@@ -256,131 +354,195 @@ def bulk_import_productos(*, uploaded_file, user, empresa):
     created = 0
     updated = 0
     errors = []
+    warnings = []
 
-    for line_number, row in rows:
-        try:
-            existing = existing_products.get(normalize_sku(str(row.get("sku") or "").strip()))
-            nombre = str(row.get("nombre") or "").strip()
-            if not nombre:
-                raise BusinessRuleError("El nombre es obligatorio.")
+    with bulk_import_execution_context(dry_run=dry_run):
+        for line_number, row in rows:
+            try:
+                existing = existing_products.get(normalize_sku(str(row.get("sku") or "").strip()))
+                nombre = str(row.get("nombre") or "").strip()
+                if not nombre:
+                    raise BusinessRuleError("El nombre es obligatorio.")
 
-            sku_raw = str(row.get("sku") or "").strip()
-            if not sku_raw:
-                raise BusinessRuleError("El SKU es obligatorio.")
-            sku = normalize_sku(sku_raw)
+                sku_raw = str(row.get("sku") or "").strip()
+                if not sku_raw:
+                    raise BusinessRuleError("El SKU es obligatorio.")
+                sku = normalize_sku(sku_raw)
 
-            tipo = str(row.get("tipo") or TipoProducto.PRODUCTO).strip().upper() or TipoProducto.PRODUCTO
-            if tipo not in {TipoProducto.PRODUCTO, TipoProducto.SERVICIO}:
-                raise BusinessRuleError("Tipo invalido. Use PRODUCTO o SERVICIO.")
+                tipo = str(row.get("tipo") or TipoProducto.PRODUCTO).strip().upper() or TipoProducto.PRODUCTO
+                if tipo not in {TipoProducto.PRODUCTO, TipoProducto.SERVICIO}:
+                    raise BusinessRuleError("Tipo invalido. Use PRODUCTO o SERVICIO.")
 
-            categoria = None
-            categoria_name = _normalize_name(row.get("categoria"))
-            if categoria_name:
-                categoria = _get_or_create_categoria(
-                    categoria_name=categoria_name,
-                    categorias=categorias,
-                    empresa=empresa,
-                    user=user,
+                categoria = None
+                categoria_name = _normalize_name(row.get("categoria"))
+                if categoria_name:
+                    categoria, categoria_created = _get_or_create_categoria(
+                        categoria_name=categoria_name,
+                        categorias=categorias,
+                        empresa=empresa,
+                        user=user,
+                    )
+                    if categoria_created:
+                        _registrar_warning_categoria_creada(
+                            warnings=warnings,
+                            line_number=line_number,
+                            sku=sku,
+                            categoria_name=categoria_name,
+                        )
+
+                impuesto = None
+                impuesto_name = _normalize_name(row.get("impuesto"))
+                if impuesto_name:
+                    impuesto, impuesto_created = _get_or_create_impuesto(
+                        impuesto_name=impuesto_name,
+                        impuestos=impuestos,
+                        empresa=empresa,
+                        user=user,
+                    )
+                    if impuesto_created:
+                        _registrar_warning_impuesto_creado(
+                            warnings=warnings,
+                            line_number=line_number,
+                            sku=sku,
+                            impuesto_name=impuesto_name,
+                        )
+
+                moneda = existing.moneda if existing else None
+                moneda_raw = row.get("moneda")
+                if str(moneda_raw or "").strip():
+                    moneda = _resolve_moneda(
+                        raw_value=moneda_raw,
+                        monedas=monedas,
+                        empresa=empresa,
+                    )
+
+                precio_referencia = _to_decimal(row.get("precio_referencia"), default=Decimal("0"))
+                precio_costo = _to_decimal(row.get("precio_costo"), default=Decimal("0"))
+                stock_minimo = _to_decimal(row.get("stock_minimo"), default=Decimal("0"))
+                maneja_inventario = _to_bool(row.get("maneja_inventario"), default=True)
+                permite_decimales = _to_bool(
+                    row.get("permite_decimales"),
+                    default=getattr(existing, "permite_decimales", True),
+                )
+                usa_lotes = _to_bool(row.get("usa_lotes"), default=False)
+                usa_series = _to_bool(row.get("usa_series"), default=False)
+                usa_vencimiento = _to_bool(row.get("usa_vencimiento"), default=False)
+                activo = _to_bool(row.get("activo"), default=True)
+                servicio_con_campos_operativos = (
+                    tipo == TipoProducto.SERVICIO
+                    and (
+                        maneja_inventario
+                        or stock_minimo > Decimal("0")
+                        or usa_lotes
+                        or usa_series
+                        or usa_vencimiento
+                    )
                 )
 
-            impuesto = None
-            impuesto_name = _normalize_name(row.get("impuesto"))
-            if impuesto_name:
-                impuesto = _get_or_create_impuesto(
-                    impuesto_name=impuesto_name,
-                    impuestos=impuestos,
-                    empresa=empresa,
-                    user=user,
-                )
+                unidad_medida = str(
+                    row.get("unidad_medida")
+                    or getattr(existing, "unidad_medida", UnidadMedida.UNIDAD)
+                ).strip().upper()
+                if unidad_medida not in {choice for choice, _label in UnidadMedida.choices}:
+                    raise BusinessRuleError("Unidad de medida invalida.")
 
-            moneda = existing.moneda if existing else None
-            moneda_raw = row.get("moneda")
-            if str(moneda_raw or "").strip():
-                moneda = _resolve_moneda(
-                    raw_value=moneda_raw,
-                    monedas=monedas,
-                    empresa=empresa,
-                )
+                if tipo == TipoProducto.SERVICIO:
+                    maneja_inventario = False
+                    stock_minimo = Decimal("0")
+                    usa_lotes = False
+                    usa_series = False
+                    usa_vencimiento = False
 
-            precio_referencia = _to_decimal(row.get("precio_referencia"), default=Decimal("0"))
-            precio_costo = _to_decimal(row.get("precio_costo"), default=Decimal("0"))
-            stock_minimo = _to_decimal(row.get("stock_minimo"), default=Decimal("0"))
-            maneja_inventario = _to_bool(row.get("maneja_inventario"), default=True)
-            permite_decimales = _to_bool(
-                row.get("permite_decimales"),
-                default=getattr(existing, "permite_decimales", True),
-            )
-            usa_lotes = _to_bool(row.get("usa_lotes"), default=False)
-            usa_series = _to_bool(row.get("usa_series"), default=False)
-            usa_vencimiento = _to_bool(row.get("usa_vencimiento"), default=False)
-            activo = _to_bool(row.get("activo"), default=True)
+                if usa_series:
+                    usa_lotes = True
+                    permite_decimales = False
 
-            unidad_medida = str(
-                row.get("unidad_medida")
-                or getattr(existing, "unidad_medida", UnidadMedida.UNIDAD)
-            ).strip().upper()
-            if unidad_medida not in {choice for choice, _label in UnidadMedida.choices}:
-                raise BusinessRuleError("Unidad de medida invalida.")
+                if servicio_con_campos_operativos:
+                    _registrar_warning_servicio_operativo(
+                        warnings=warnings,
+                        line_number=line_number,
+                        sku=sku,
+                    )
 
-            if tipo == TipoProducto.SERVICIO:
-                maneja_inventario = False
-                stock_minimo = Decimal("0")
-                usa_lotes = False
-                usa_series = False
-                usa_vencimiento = False
+                if activo and categoria is None:
+                    _registrar_warning_sin_categoria(
+                        warnings=warnings,
+                        line_number=line_number,
+                        sku=sku,
+                    )
 
-            if usa_series:
-                usa_lotes = True
-                permite_decimales = False
+                if activo and impuesto is None:
+                    _registrar_warning_sin_impuesto(
+                        warnings=warnings,
+                        line_number=line_number,
+                        sku=sku,
+                    )
 
-            payload = {
-                "empresa": empresa,
-                "creado_por": user,
-                "nombre": nombre,
-                "descripcion": str(row.get("descripcion") or "").strip(),
-                "sku": sku,
-                "tipo": tipo,
-                "categoria": categoria,
-                "impuesto": impuesto,
-                "moneda": moneda,
-                "precio_referencia": precio_referencia,
-                "precio_costo": precio_costo,
-                "unidad_medida": unidad_medida,
-                "permite_decimales": permite_decimales,
-                "maneja_inventario": maneja_inventario,
-                "stock_minimo": stock_minimo,
-                "usa_lotes": usa_lotes,
-                "usa_series": usa_series,
-                "usa_vencimiento": usa_vencimiento,
-                "activo": activo,
-            }
+                if activo and precio_referencia == Decimal("0"):
+                    _registrar_warning_precio_referencia_cero(
+                        warnings=warnings,
+                        line_number=line_number,
+                        sku=sku,
+                    )
 
-            if existing:
-                for key, value in payload.items():
-                    setattr(existing, key, value)
-                existing.save()
-                updated += 1
-            else:
-                producto = Producto(**payload)
-                producto.save()
-                existing_products[sku] = producto
-                created += 1
-        except Exception as exc:  # pragma: no cover - defensive guard for row-level resilience
-            errors.append(
-                {
-                    "line": line_number,
-                    "sku": row.get("sku") or "",
-                    "detail": str(exc),
+                payload = {
+                    "nombre": nombre,
+                    "descripcion": str(row.get("descripcion") or "").strip(),
+                    "sku": sku,
+                    "tipo": tipo,
+                    "categoria": categoria,
+                    "impuesto": impuesto,
+                    "moneda": moneda,
+                    "precio_referencia": precio_referencia,
+                    "precio_costo": precio_costo,
+                    "unidad_medida": unidad_medida,
+                    "permite_decimales": permite_decimales,
+                    "maneja_inventario": maneja_inventario,
+                    "stock_minimo": stock_minimo,
+                    "usa_lotes": usa_lotes,
+                    "usa_series": usa_series,
+                    "usa_vencimiento": usa_vencimiento,
+                    "activo": activo,
                 }
-            )
 
-    result = {
-        "created": created,
-        "updated": updated,
-        "errors": errors,
-        "total_rows": len(rows),
-        "successful_rows": created + updated,
-    }
+                if existing:
+                    # El costo del maestro no se corrige por carga masiva sobre productos existentes.
+                    payload.pop("precio_costo", None)
+                    ProductoService.actualizar_producto(
+                        producto_id=existing.id,
+                        empresa=empresa,
+                        usuario=user,
+                        data=payload,
+                    )
+                    updated += 1
+                else:
+                    producto = ProductoService.crear_producto(
+                        empresa=empresa,
+                        usuario=user,
+                        data=payload,
+                    )
+                    existing_products[sku] = producto
+                    created += 1
+            except Exception as exc:  # pragma: no cover - defensive guard for row-level resilience
+                errors.append(
+                    {
+                        "line": line_number,
+                        "sku": row.get("sku") or "",
+                        "detail": format_bulk_import_row_error(exc),
+                    }
+                )
+
+        result = build_bulk_import_result(
+            created=created,
+            updated=updated,
+            errors=errors,
+            warnings=warnings,
+            total_rows=len(rows),
+            dry_run=dry_run,
+        )
+        if dry_run:
+            return result
+
     _registrar_resumen_importacion(
         empresa=empresa,
         user=user,
@@ -388,6 +550,7 @@ def bulk_import_productos(*, uploaded_file, user, empresa):
             "created": created,
             "updated": updated,
             "errors": len(errors),
+            "warnings": len(warnings),
             "total_rows": len(rows),
             "successful_rows": created + updated,
         },
@@ -430,13 +593,13 @@ def build_productos_bulk_template(*, user, empresa):
         "49990",
         "32000",
         "UN",
-        "false",
-        "true",
+        "NO",
+        "SI",
         "4",
-        "false",
-        "false",
-        "false",
-        "true",
+        "NO",
+        "NO",
+        "NO",
+        "SI",
     ]
 
     instructions = [
@@ -446,9 +609,10 @@ def build_productos_bulk_template(*, user, empresa):
         "NO usar EMPRESA/PERSONA en esta plantilla.",
         "moneda debe existir previamente en la empresa activa (ej: CLP, USD).",
         "unidad_medida permitida: UN, KG, GR, LT, MT, M2, M3, CJ.",
-        "permite_decimales, maneja_inventario, usa_lotes, usa_series, usa_vencimiento y activo: true/false.",
+        "permite_decimales, maneja_inventario, usa_lotes, usa_series, usa_vencimiento y activo: use SI o NO.",
         "stock_actual no se importa desde esta plantilla; el stock operativo se gestiona solo desde inventario.",
-        "Si tipo=SERVICIO, maneja_inventario=false y los campos operativos de stock quedan sin efecto.",
+        "precio_costo solo se usa al crear productos nuevos; no actualiza costos de productos existentes.",
+        "Si tipo=SERVICIO, maneja_inventario=NO y los campos operativos de stock quedan sin efecto.",
         "categoria e impuesto se resolveran por nombre dentro de la empresa activa.",
         "sku identifica un producto existente para actualizarlo; si no existe, se crea.",
     ]
@@ -458,4 +622,5 @@ def build_productos_bulk_template(*, user, empresa):
         sample_row=sample,
         instructions=instructions,
         sheet_name="Productos",
+        template_title="Plantilla de importacion - Productos",
     )

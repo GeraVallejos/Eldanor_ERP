@@ -43,7 +43,9 @@ def cliente(db, empresa):
 
     contacto = Contacto.objects.create(
         nombre="Cliente Test",
-        email="cliente@test.com"
+        rut="12.345.678-5",
+        email="cliente@test.com",
+        tipo="EMPRESA",
     )
 
     cliente = Cliente.objects.create(

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
 import { api } from '@/api/client'
+import ActiveSearchFilter from '@/components/ui/ActiveSearchFilter'
 import { normalizeApiError } from '@/api/errors'
 import Button from '@/components/ui/Button'
 import { buttonVariants } from '@/components/ui/buttonVariants'
@@ -125,6 +126,12 @@ function ComprasRecepcionesListPage() {
     })
   }, [recepciones, search, estadoFilter, ordenById, proveedorById, contactoById])
 
+  const hasActiveFilters = Boolean(search.trim()) || estadoFilter !== 'ALL'
+  const activeFilterLabel = [
+    search.trim() ? `busqueda "${search.trim()}"` : '',
+    estadoFilter !== 'ALL' ? `estado ${ESTADO_LABELS[estadoFilter] || estadoFilter}` : '',
+  ].filter(Boolean).join(' y ')
+
   const { paginatedRows, toggleSort, getSortIndicator, currentPage, totalPages, totalRows, nextPage, prevPage } =
     useTableSorting(filteredRecepciones, {
       accessors: {
@@ -186,9 +193,24 @@ function ComprasRecepcionesListPage() {
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') {
+                setSearch('')
+              }
+            }}
             placeholder="Buscar por OC, proveedor o fecha..."
             className="w-full rounded-md border border-input bg-background px-3 py-2 pr-9 text-sm"
           />
+          {search ? (
+            <button
+              type="button"
+              onClick={() => setSearch('')}
+              className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-muted-foreground transition hover:bg-muted hover:text-foreground"
+              aria-label="Limpiar busqueda"
+            >
+              x
+            </button>
+          ) : null}
         </div>
         <label className="w-full text-sm sm:max-w-xs">
           Estado
@@ -203,6 +225,19 @@ function ComprasRecepcionesListPage() {
           </select>
         </label>
       </div>
+
+      {hasActiveFilters ? (
+        <ActiveSearchFilter
+          activeLabel={activeFilterLabel}
+          filteredCount={filteredRecepciones.length}
+          totalCount={recepciones.length}
+          noun="recepciones"
+          onClear={() => {
+            setSearch('')
+            setEstadoFilter('ALL')
+          }}
+        />
+      ) : null}
 
       {status === 'loading' ? <p className="text-sm text-muted-foreground">Cargando recepciones...</p> : null}
 

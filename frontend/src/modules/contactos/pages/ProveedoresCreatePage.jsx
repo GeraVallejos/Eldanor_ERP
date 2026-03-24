@@ -27,32 +27,13 @@ function normalizeRut(value) {
     .toUpperCase()
 }
 
-function normalizeText(value) {
-  return String(value || '').trim().toLowerCase()
-}
-
 function findExistingContacto(contactos, form) {
   const rut = normalizeRut(form.rut)
-  if (rut) {
-    const matchByRut = contactos.find((contacto) => normalizeRut(contacto?.rut) === rut)
-    if (matchByRut) {
-      return matchByRut
-    }
+  if (!rut) {
+    return null
   }
 
-  const email = normalizeText(form.email)
-  const nombre = normalizeText(form.nombre)
-
-  if (email && nombre) {
-    return (
-      contactos.find(
-        (contacto) =>
-          normalizeText(contacto?.email) === email && normalizeText(contacto?.nombre) === nombre,
-      ) || null
-    )
-  }
-
-  return null
+  return contactos.find((contacto) => normalizeRut(contacto?.rut) === rut) || null
 }
 
 function ProveedoresCreatePage() {
@@ -82,6 +63,14 @@ function ProveedoresCreatePage() {
 
     if (!form.nombre.trim()) {
       toast.error('El nombre es obligatorio.')
+      return
+    }
+    if (!form.rut.trim()) {
+      toast.error('El RUT es obligatorio.')
+      return
+    }
+    if (!form.email.trim()) {
+      toast.error('El email es obligatorio.')
       return
     }
 
@@ -182,6 +171,7 @@ function ProveedoresCreatePage() {
               className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
               value={form.rut}
               onChange={(event) => updateField('rut', event.target.value)}
+              required
             />
           </label>
 
@@ -204,6 +194,7 @@ function ProveedoresCreatePage() {
               className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
               value={form.email}
               onChange={(event) => updateField('email', event.target.value)}
+              required
             />
           </label>
 

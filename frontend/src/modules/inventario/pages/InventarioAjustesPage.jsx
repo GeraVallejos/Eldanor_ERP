@@ -10,7 +10,7 @@ import { buttonVariants } from '@/components/ui/buttonVariants'
 import { formatDateTimeChile, getChileDateSuffix } from '@/lib/dateTimeFormat'
 import { formatSmartNumber } from '@/lib/numberFormat'
 import { cn } from '@/lib/utils'
-import { getProductosCatalog } from '@/modules/productos/services/productosCatalogCache'
+import { mergeProductosCatalog, searchProductosCatalog } from '@/modules/productos/services/productosCatalogCache'
 import { downloadExcelFile } from '@/modules/shared/exports/downloadExcelFile'
 import { downloadSimpleTablePdf } from '@/modules/shared/exports/downloadSimpleTablePdf'
 import { usePermissions } from '@/modules/shared/auth/usePermission'
@@ -39,11 +39,12 @@ function InventarioAjustesPage() {
     bodega_id: '',
     referencia: '',
   })
+  const [loadingProductos, setLoadingProductos] = useState(false)
 
   const loadCatalogs = async () => {
     try {
       const [productosData, { data: bodegasData }, { data: movimientosData }] = await Promise.all([
-        getProductosCatalog(),
+        searchProductosCatalog({ tipo: 'PRODUCTO' }),
         api.get('/bodegas/', { suppressGlobalErrorToast: true }),
         api.get('/movimientos-inventario/', { suppressGlobalErrorToast: true }),
       ])
@@ -52,6 +53,18 @@ function InventarioAjustesPage() {
       setMovimientos(normalizeListResponse(movimientosData).filter((row) => row.documento_tipo === 'AJUSTE'))
     } catch (error) {
       toast.error(normalizeApiError(error, { fallback: 'No se pudieron cargar los datos de ajustes de inventario.' }))
+    }
+  }
+
+  const searchProductos = async (query) => {
+    setLoadingProductos(true)
+    try {
+      const results = await searchProductosCatalog({ query, tipo: 'PRODUCTO' })
+      setProductos((prev) => mergeProductosCatalog(prev, results))
+    } catch (error) {
+      toast.error(normalizeApiError(error, { fallback: 'No se pudieron buscar productos.' }))
+    } finally {
+      setLoadingProductos(false)
     }
   }
 
@@ -226,7 +239,7 @@ function InventarioAjustesPage() {
         <div className="grid gap-3 md:grid-cols-4">
           <label className="text-sm">
             Producto
-            <SearchableSelect className="mt-1" value={form.producto_id} onChange={(next) => updateForm('producto_id', next)} options={productoOptions} ariaLabel="Producto ajuste" placeholder="Buscar producto..." emptyText="No hay productos coincidentes" />
+            <SearchableSelect className="mt-1" value={form.producto_id} onChange={(next) => updateForm('producto_id', next)} onSearchChange={(next) => { void searchProductos(next) }} options={productoOptions} ariaLabel="Producto ajuste" placeholder="Buscar producto..." emptyText="No hay productos coincidentes" loading={loadingProductos} />
           </label>
           <label className="text-sm">
             Bodega
@@ -283,10 +296,12 @@ function InventarioAjustesPage() {
               className="mt-1"
               value={historyFilters.producto_id}
               onChange={(next) => updateHistoryFilter('producto_id', next)}
+              onSearchChange={(next) => { void searchProductos(next) }}
               options={productoOptions}
               ariaLabel="Filtrar ajustes por producto"
               placeholder="Todos los productos"
               emptyText="No hay productos coincidentes"
+              loading={loadingProductos}
             />
           </label>
           <label className="text-sm">

@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import { api } from '@/api/client'
 import { normalizeApiError } from '@/api/errors'
+import ActiveSearchFilter from '@/components/ui/ActiveSearchFilter'
 import Button from '@/components/ui/Button'
 import DocumentActionsDialog from '@/components/ui/DocumentActionsDialog'
 import MenuButton from '@/components/ui/MenuButton'
@@ -268,6 +269,12 @@ function ComprasOrdenesListPage() {
     })
   }
 
+  const hasActiveFilters = Boolean(search.trim()) || estadoFilter !== 'ACTIVAS'
+  const activeFilterLabel = [
+    search.trim() ? `busqueda "${search.trim()}"` : '',
+    estadoFilter !== 'ACTIVAS' ? `estado ${estadoFilter}` : '',
+  ].filter(Boolean).join(' y ')
+
   return (
     <section className="space-y-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -302,9 +309,24 @@ function ComprasOrdenesListPage() {
             type="text"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') {
+                setSearch('')
+              }
+            }}
             placeholder="Buscar por numero, proveedor o estado..."
             className="w-full rounded-md border border-input bg-background px-3 py-2 pr-9 text-sm"
           />
+          {search ? (
+            <button
+              type="button"
+              onClick={() => setSearch('')}
+              className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
+              aria-label="Limpiar busqueda"
+            >
+              x
+            </button>
+          ) : null}
         </div>
         <label className="w-full text-sm sm:max-w-xs">
           Estado
@@ -319,6 +341,19 @@ function ComprasOrdenesListPage() {
           </select>
         </label>
       </div>
+
+      {hasActiveFilters ? (
+        <ActiveSearchFilter
+          activeLabel={activeFilterLabel}
+          filteredCount={filteredOrdenes.length}
+          totalCount={ordenes.length}
+          noun="ordenes"
+          onClear={() => {
+            setSearch('')
+            setEstadoFilter('ACTIVAS')
+          }}
+        />
+      ) : null}
 
       {status === 'loading' ? <p className="text-sm text-muted-foreground">Cargando ordenes...</p> : null}
 

@@ -1,12 +1,22 @@
 from datetime import date
 
-from apps.compras.models import DocumentoCompraProveedorItem
+from apps.compras.models import DocumentoCompraProveedorItem, EstadoDocumentoCompra
 from apps.productos.models import ListaPrecioItem
-from apps.ventas.models import PedidoVentaItem
+from apps.ventas.models import EstadoPedidoVenta, PedidoVentaItem
 
 
 class ProductoTrazabilidadService:
     """Servicio de lectura para consolidar trazabilidad comercial y alertas del maestro de productos."""
+
+    PEDIDO_ESTADOS_RELEVANTES = {
+        EstadoPedidoVenta.CONFIRMADO,
+        EstadoPedidoVenta.EN_PROCESO,
+        EstadoPedidoVenta.DESPACHADO,
+        EstadoPedidoVenta.FACTURADO,
+    }
+    DOCUMENTO_COMPRA_ESTADOS_RELEVANTES = {
+        EstadoDocumentoCompra.CONFIRMADO,
+    }
 
     @staticmethod
     def _build_alertas(*, producto, listas_activas_vigentes, pedidos_count, compras_count):
@@ -100,6 +110,7 @@ class ProductoTrazabilidadService:
         pedidos_qs = (
             PedidoVentaItem.objects.filter(empresa=empresa, producto=producto)
             .select_related("pedido_venta__cliente__contacto", "pedido_venta__lista_precio")
+            .filter(pedido_venta__estado__in=ProductoTrazabilidadService.PEDIDO_ESTADOS_RELEVANTES)
             .order_by("-pedido_venta__fecha_emision", "-pedido_venta__creado_en")
         )
         pedidos_count = pedidos_qs.count()
@@ -120,6 +131,7 @@ class ProductoTrazabilidadService:
         compras_qs = (
             DocumentoCompraProveedorItem.objects.filter(empresa=empresa, producto=producto)
             .select_related("documento__proveedor__contacto")
+            .filter(documento__estado__in=ProductoTrazabilidadService.DOCUMENTO_COMPRA_ESTADOS_RELEVANTES)
             .order_by("-documento__fecha_emision", "-documento__creado_en")
         )
         compras_count = compras_qs.count()

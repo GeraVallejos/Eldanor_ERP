@@ -216,7 +216,7 @@ function TesoreriaBancosPage() {
           <p className="text-sm text-muted-foreground">Operacion diaria de cuentas bancarias, cartolas importadas y conciliacion con cartera.</p>
         </div>
         {canConciliar ? (
-          <BulkImportButton endpoint="/movimientos-bancarios/bulk_import/" templateEndpoint="/movimientos-bancarios/bulk_template/" onCompleted={() => { void loadData() }} />
+          <BulkImportButton endpoint="/movimientos-bancarios/bulk_import/" templateEndpoint="/movimientos-bancarios/bulk_template/" previewBeforeImport onCompleted={() => { void loadData() }} />
         ) : null}
       </div>
 

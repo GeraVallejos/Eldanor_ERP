@@ -9,7 +9,6 @@ import { buttonVariants } from '@/components/ui/buttonVariants'
 import { formatDateChile, getChileDateSuffix } from '@/lib/dateTimeFormat'
 import { formatCurrencyCLP } from '@/lib/numberFormat'
 import { cn } from '@/lib/utils'
-import { getProductosCatalog } from '@/modules/productos/services/productosCatalogCache'
 import { downloadExcelFile } from '@/modules/shared/exports/downloadExcelFile'
 import { downloadSimpleTablePdf } from '@/modules/shared/exports/downloadSimpleTablePdf'
 import { usePermissions } from '@/modules/shared/auth/usePermission'
@@ -48,24 +47,21 @@ function ComprasDocumentosDetailPage() {
   const [items, setItems] = useState([])
   const [proveedores, setProveedores] = useState([])
   const [contactos, setContactos] = useState([])
-  const [productos, setProductos] = useState([])
 
   const loadData = useCallback(async () => {
     setStatus('loading')
     try {
-      const [{ data: documentoData }, { data: itemsData }, { data: proveedoresData }, { data: contactosData }, productosData] = await Promise.all([
+      const [{ data: documentoData }, { data: itemsData }, { data: proveedoresData }, { data: contactosData }] = await Promise.all([
         api.get(`/documentos-compra/${id}/`, { suppressGlobalErrorToast: true }),
         api.get(`/documentos-compra-items/?documento=${id}`, { suppressGlobalErrorToast: true }),
         api.get('/proveedores/', { suppressGlobalErrorToast: true }),
         api.get('/contactos/', { suppressGlobalErrorToast: true }),
-        getProductosCatalog(),
       ])
 
       setDocumento(documentoData)
       setItems(normalizeListResponse(itemsData))
       setProveedores(normalizeListResponse(proveedoresData))
       setContactos(normalizeListResponse(contactosData))
-      setProductos(productosData)
       setStatus('succeeded')
     } catch (error) {
       setStatus('failed')
@@ -92,12 +88,6 @@ function ComprasDocumentosDetailPage() {
     contactos.forEach((c) => map.set(String(c.id), c))
     return map
   }, [contactos])
-
-  const productoById = useMemo(() => {
-    const map = new Map()
-    productos.forEach((p) => map.set(String(p.id), p))
-    return map
-  }, [productos])
 
   const proveedor = proveedorById.get(String(documento?.proveedor || ''))
   const contacto = contactoById.get(String(proveedor?.contacto || ''))
@@ -130,7 +120,7 @@ function ComprasDocumentosDetailPage() {
               proveedor: contacto?.nombre || '-',
               estado: ESTADO_LABELS[documento.estado] || documento.estado,
               fecha_emision: formatDateChile(documento.fecha_emision),
-              producto: productoById.get(String(item.producto))?.nombre || item.descripcion || '-',
+              producto: item.producto_nombre || item.descripcion || '-',
               cantidad: Number(item.cantidad || 0),
               precio_unitario: Number(item.precio_unitario || 0),
               descuento: Number(item.descuento || 0),
@@ -164,7 +154,7 @@ function ComprasDocumentosDetailPage() {
             contacto?.nombre || '-',
             ESTADO_LABELS[documento.estado] || documento.estado,
             formatDateChile(documento.fecha_emision),
-            productoById.get(String(item.producto))?.nombre || item.descripcion || '-',
+            item.producto_nombre || item.descripcion || '-',
             String(Number(item.cantidad || 0)),
             formatMoney(item.precio_unitario),
             String(Number(item.descuento || 0)),
@@ -277,7 +267,7 @@ function ComprasDocumentosDetailPage() {
             ) : (
               items.map((item) => (
                 <tr key={item.id} className="border-t border-border">
-                  <td className="px-3 py-2">{productoById.get(String(item.producto))?.nombre || item.descripcion || '-'}</td>
+                  <td className="px-3 py-2">{item.producto_nombre || item.descripcion || '-'}</td>
                   <td className="px-3 py-2 text-right">{Number(item.cantidad || 0).toLocaleString('es-CL')}</td>
                   <td className="px-3 py-2 text-right">{formatMoney(item.precio_unitario)}</td>
                   <td className="px-3 py-2 text-right">{Number(item.descuento || 0).toLocaleString('es-CL')}</td>
