@@ -193,6 +193,24 @@ class TestProductoApi:
         assert "PRODUCTO ACTIVO VENDEDOR" in nombres
         assert "PRODUCTO INACTIVO VENDEDOR" not in nombres
 
+    def test_vendedor_no_puede_crear_producto(self, api_client, vendedor_usuario):
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(vendedor_usuario)}")
+
+        resp = api_client.post(
+            reverse("producto-list"),
+            {
+                "nombre": "Producto Restringido",
+                "sku": "PR-403-001",
+                "tipo": "PRODUCTO",
+                "precio_referencia": "1000",
+                "activo": True,
+            },
+            format="json",
+        )
+
+        assert resp.status_code == status.HTTP_403_FORBIDDEN
+        assert resp.data["error_code"] == "PERMISSION_DENIED"
+
     def test_delete_producto_sin_referencias_elimina(self, api_client, owner_usuario, empresa):
         api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
 

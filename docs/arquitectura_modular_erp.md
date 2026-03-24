@@ -422,6 +422,8 @@ if isinstance(exc, AppError):
 
 ## Estandar para nuevos modulos
 
+Este checklist define la base tecnica minima. Para el patron objetivo actual del ERP, complementar siempre con [Estandar de Modulo ERP](modulo_estandar_erp.md), donde `productos` queda formalizado como modulo de referencia.
+
 Para un modulo nuevo (`ventas`, `tesoreria`, `contabilidad`), seguir este checklist:
 
 ### 1. Estructura base
