@@ -39,11 +39,16 @@ const AuditoriaEventoDetailPage = lazy(() => import('@/modules/auditoria/pages/A
 const AdministracionPermisosPage = lazy(() => import('@/modules/administracion/pages/AdministracionPermisosPage'))
 const FacturacionSiiPage = lazy(() => import('@/modules/facturacion/pages/FacturacionSiiPage'))
 const InventarioAjustesPage = lazy(() => import('@/modules/inventario/pages/InventarioAjustesPage'))
+const InventarioAjustesMasivosPage = lazy(() => import('@/modules/inventario/pages/InventarioAjustesMasivosPage'))
+const InventarioAjustesMasivosDetailPage = lazy(() => import('@/modules/inventario/pages/InventarioAjustesMasivosDetailPage'))
+const InventarioAuditoriaPage = lazy(() => import('@/modules/inventario/pages/InventarioAuditoriaPage'))
 const InventarioBodegasPage = lazy(() => import('@/modules/inventario/pages/InventarioBodegasPage'))
 const InventarioKardexPage = lazy(() => import('@/modules/inventario/pages/InventarioKardexPage'))
 const InventarioReportesPage = lazy(() => import('@/modules/inventario/pages/InventarioReportesPage'))
 const InventarioResumenPage = lazy(() => import('@/modules/inventario/pages/InventarioResumenPage'))
 const InventarioTrasladosPage = lazy(() => import('@/modules/inventario/pages/InventarioTrasladosPage'))
+const InventarioTrasladosMasivosPage = lazy(() => import('@/modules/inventario/pages/InventarioTrasladosMasivosPage'))
+const InventarioTrasladosMasivosDetailPage = lazy(() => import('@/modules/inventario/pages/InventarioTrasladosMasivosDetailPage'))
 const TesoreriaBancosPage = lazy(() => import('@/modules/tesoreria/pages/TesoreriaBancosPage'))
 const TesoreriaCuentasPage = lazy(() => import('@/modules/tesoreria/pages/TesoreriaCuentasPage'))
 const TesoreriaMonedasPage = lazy(() => import('@/modules/tesoreria/pages/TesoreriaMonedasPage'))
@@ -173,11 +178,16 @@ const router = createBrowserRouter([
           { path: 'administracion/sii', element: guardedPage(FacturacionSiiPage, 'FACTURACION.VER', 'No tiene permiso para revisar configuracion SII.') },
           { path: 'contabilidad/sii', element: guardedPage(FacturacionSiiPage, 'FACTURACION.VER', 'No tiene permiso para revisar configuracion SII.') },
           { path: 'inventario/ajustes', element: guardedPage(InventarioAjustesPage, 'INVENTARIO.EDITAR', 'No tiene permiso para gestionar ajustes de inventario.') },
+          { path: 'inventario/ajustes-masivos', element: guardedPage(InventarioAjustesMasivosPage, 'INVENTARIO.EDITAR', 'No tiene permiso para gestionar ajustes masivos de inventario.') },
+          { path: 'inventario/ajustes-masivos/:id', element: guardedPage(InventarioAjustesMasivosDetailPage, 'INVENTARIO.VER', 'No tiene permiso para revisar ajustes masivos de inventario.') },
+          { path: 'inventario/auditoria', element: guardedPage(InventarioAuditoriaPage, 'INVENTARIO.VER', 'No tiene permiso para revisar auditoria de inventario.') },
           { path: 'inventario/bodegas', element: guardedPage(InventarioBodegasPage, 'INVENTARIO.VER', 'No tiene permiso para revisar bodegas.') },
           { path: 'inventario/kardex', element: guardedPage(InventarioKardexPage, 'INVENTARIO.VER', 'No tiene permiso para revisar kardex.') },
           { path: 'inventario/reportes', element: guardedPage(InventarioReportesPage, 'INVENTARIO.VER', 'No tiene permiso para revisar reportes de inventario.') },
           { path: 'inventario/resumen', element: guardedPage(InventarioResumenPage, 'INVENTARIO.VER', 'No tiene permiso para revisar el resumen de inventario.') },
           { path: 'inventario/traslados', element: guardedPage(InventarioTrasladosPage, 'INVENTARIO.EDITAR', 'No tiene permiso para gestionar traslados de inventario.') },
+          { path: 'inventario/traslados-masivos', element: guardedPage(InventarioTrasladosMasivosPage, 'INVENTARIO.EDITAR', 'No tiene permiso para gestionar traslados masivos de inventario.') },
+          { path: 'inventario/traslados-masivos/:id', element: guardedPage(InventarioTrasladosMasivosDetailPage, 'INVENTARIO.VER', 'No tiene permiso para revisar traslados masivos de inventario.') },
           { path: 'tesoreria/bancos', element: guardedPage(TesoreriaBancosPage, 'TESORERIA.VER', 'No tiene permiso para revisar tesoreria bancaria.') },
           { path: 'tesoreria/cartera', element: guardedPage(TesoreriaCuentasPage, 'TESORERIA.VER', 'No tiene permiso para ver tesoreria.') },
           { path: 'tesoreria/monedas', element: guardedPage(TesoreriaMonedasPage, 'TESORERIA.VER', 'No tiene permiso para revisar monedas.') },

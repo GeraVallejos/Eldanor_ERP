@@ -23,20 +23,6 @@ describe('inventario/InventarioAjustesPage', () => {
     let previewPayload = null
 
     server.use(
-      http.get('*/movimientos-inventario/', async () =>
-        HttpResponse.json([
-          {
-            id: 'mov-10',
-            documento_tipo: 'AJUSTE',
-            producto_id: 'prod-2',
-            bodega_id: 'bod-1',
-            referencia: 'Conteo marzo',
-            tipo: 'AJUSTE',
-            cantidad: '2.00',
-            creado_en: '2026-03-20T10:00:00Z',
-          },
-        ]),
-      ),
       http.get('*/productos/', async () => HttpResponse.json([{ id: 'prod-2', nombre: 'Motosierra' }])),
       http.get('*/bodegas/', async () => HttpResponse.json([{ id: 'bod-1', nombre: 'Principal' }])),
       http.post('*/movimientos-inventario/previsualizar_regularizacion/', async ({ request }) => {
@@ -82,8 +68,6 @@ describe('inventario/InventarioAjustesPage', () => {
     })
 
     expect(await screen.findByRole('heading', { name: 'Ajustes de inventario' })).toBeInTheDocument()
-    expect(await screen.findByRole('heading', { name: 'Historial de ajustes' })).toBeInTheDocument()
-    expect(await screen.findByText('Conteo marzo')).toBeInTheDocument()
     await userEvent.click(screen.getByLabelText('Producto ajuste'))
     await userEvent.type(screen.getByLabelText('Producto ajuste'), 'Moto{enter}')
     await userEvent.click(screen.getByLabelText('Bodega ajuste'))
@@ -99,6 +83,9 @@ describe('inventario/InventarioAjustesPage', () => {
       })
     })
 
+    await userEvent.type(screen.getByLabelText('Motivo operativo'), 'Conteo ciclico')
+    await userEvent.type(screen.getByLabelText('Referencia operativa'), 'ACTA-2026-03')
+    await userEvent.type(screen.getByLabelText('Observaciones'), 'Diferencia detectada en rack A1')
     await userEvent.click(screen.getByRole('button', { name: 'Aplicar ajuste' }))
 
     await waitFor(() => {
@@ -106,11 +93,74 @@ describe('inventario/InventarioAjustesPage', () => {
         producto_id: 'prod-2',
         bodega_id: 'bod-1',
         stock_objetivo: '7',
-        referencia: 'Conteo fisico Motosierra',
+        referencia: 'Conteo ciclico | ACTA-2026-03 | Diferencia detectada en rack A1',
       })
     })
 
-    await userEvent.type(screen.getByLabelText('Buscar referencia'), 'marzo')
-    expect(screen.getByDisplayValue('marzo')).toBeInTheDocument()
+  })
+
+  it('muestra error del contrato API al aplicar un ajuste', async () => {
+    server.use(
+      http.get('*/productos/', async () => HttpResponse.json([{ id: 'prod-2', nombre: 'Motosierra' }])),
+      http.get('*/bodegas/', async () => HttpResponse.json([{ id: 'bod-1', nombre: 'Principal' }])),
+      http.post('*/movimientos-inventario/previsualizar_regularizacion/', async () =>
+        HttpResponse.json({
+          producto_id: 'prod-2',
+          producto_nombre: 'Motosierra',
+          bodega_id: 'bod-1',
+          stock_actual: 5,
+          stock_objetivo: 3,
+          diferencia: -2,
+          reservado_total: 4,
+          disponible_actual: 1,
+          tipo_movimiento: 'SALIDA',
+          ajustable: true,
+          warnings: [],
+        }),
+      ),
+      http.post('*/movimientos-inventario/regularizar/', async () =>
+        HttpResponse.json(
+          {
+            detail: 'No se puede regularizar por debajo del stock reservado en la bodega.',
+            error_code: 'BUSINESS_RULE_ERROR',
+          },
+          { status: 400 },
+        ),
+      ),
+    )
+
+    renderWithProviders(<InventarioAjustesPage />, {
+      preloadedState: {
+        auth: {
+          user: {
+            id: 'user-1',
+            email: 'inventario@eldanor.cl',
+            permissions: ['INVENTARIO.VER', 'INVENTARIO.EDITAR'],
+          },
+          empresas: [],
+          empresasStatus: 'idle',
+          empresasError: null,
+          changingEmpresaId: null,
+          isAuthenticated: true,
+          status: 'idle',
+          bootstrapStatus: 'idle',
+          error: null,
+        },
+      },
+    })
+
+    await screen.findByRole('heading', { name: 'Ajustes de inventario' })
+    await userEvent.click(screen.getByLabelText('Producto ajuste'))
+    await userEvent.type(screen.getByLabelText('Producto ajuste'), 'Moto{enter}')
+    await userEvent.click(screen.getByLabelText('Bodega ajuste'))
+    await userEvent.type(screen.getByLabelText('Bodega ajuste'), 'Prin{enter}')
+    await userEvent.type(screen.getByLabelText('Stock contado'), '3')
+    await userEvent.click(screen.getByRole('button', { name: 'Previsualizar' }))
+    await userEvent.type(screen.getByLabelText('Motivo operativo'), 'Merma')
+    await userEvent.click(screen.getByRole('button', { name: 'Aplicar ajuste' }))
+
+    expect(await screen.findByText('Error al aplicar ajuste')).toBeInTheDocument()
+    expect(await screen.findByText('No se puede regularizar por debajo del stock reservado en la bodega.')).toBeInTheDocument()
+    expect(await screen.findByText(/BUSINESS_RULE_ERROR/)).toBeInTheDocument()
   })
 })

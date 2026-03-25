@@ -2,7 +2,7 @@ from decimal import Decimal
 
 import pytest
 
-from apps.core.exceptions import BusinessRuleError
+from apps.core.exceptions import BusinessRuleError, ResourceNotFoundError
 from apps.core.tenant import set_current_empresa
 from apps.documentos.models import TipoDocumentoReferencia
 from apps.inventario.models import Bodega, InventorySnapshot, ReservaStock, StockLote, StockProducto, StockSerie
@@ -37,8 +37,8 @@ class TestInventarioService:
             usuario=usuario,
         )
 
-        assert Bodega.all_objects.filter(empresa=empresa, nombre="Principal").exists()
-        assert mov.bodega.nombre == "Principal"
+        assert Bodega.all_objects.filter(empresa=empresa, nombre="PRINCIPAL").exists()
+        assert mov.bodega.nombre == "PRINCIPAL"
 
     def test_tipo_movimiento_invalido_lanza_error(self, empresa, usuario, producto_inventariable):
         set_current_empresa(empresa)
@@ -417,6 +417,36 @@ class TestInventarioService:
             serie_codigo="S1",
             estado="SALIDA",
         ).exists()
+
+    def test_registrar_movimiento_producto_inexistente_retorna_not_found(self, empresa, usuario):
+        set_current_empresa(empresa)
+
+        with pytest.raises(ResourceNotFoundError) as excinfo:
+            InventarioService.registrar_movimiento(
+                producto_id="11111111-1111-1111-1111-111111111111",
+                tipo=TipoMovimiento.ENTRADA,
+                cantidad=Decimal("1.00"),
+                referencia="PRODUCTO-INEXISTENTE",
+                empresa=empresa,
+                usuario=usuario,
+            )
+
+        assert "movimiento de inventario" in str(excinfo.value).lower()
+
+    def test_reservar_stock_producto_inexistente_retorna_not_found(self, empresa, usuario):
+        set_current_empresa(empresa)
+
+        with pytest.raises(ResourceNotFoundError) as excinfo:
+            InventarioService.reservar_stock(
+                producto_id="11111111-1111-1111-1111-111111111111",
+                cantidad=Decimal("1.00"),
+                documento_tipo=TipoDocumentoReferencia.PRESUPUESTO,
+                documento_id="22222222-2222-2222-2222-222222222222",
+                empresa=empresa,
+                usuario=usuario,
+            )
+
+        assert "reserva de inventario" in str(excinfo.value).lower()
 
     def test_trasladar_stock_mueve_existencia_entre_bodegas(self, empresa, usuario, producto_inventariable):
         set_current_empresa(empresa)

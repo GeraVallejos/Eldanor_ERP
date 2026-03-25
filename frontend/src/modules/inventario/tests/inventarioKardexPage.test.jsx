@@ -20,6 +20,7 @@ describe('inventario/InventarioKardexPage', () => {
 
   it('consulta kardex con filtros y renderiza filas', async () => {
     let kardexParams = null
+    let auditoriaHits = 0
 
     server.use(
       http.get('*/productos/', async () =>
@@ -51,6 +52,26 @@ describe('inventario/InventarioKardexPage', () => {
           ],
         })
       }),
+      http.get('*/movimientos-inventario/mov-1/auditoria/', async () => {
+        auditoriaHits += 1
+        return HttpResponse.json({
+          count: 1,
+          next: null,
+          previous: null,
+          results: [
+            {
+              id: 'audit-1',
+              summary: 'Movimiento ENTRADA registrado para producto Tijera poda.',
+              event_type: 'INVENTARIO_MOVIMIENTO_REGISTRADO',
+              action_code: 'EDITAR',
+              occurred_at: '2026-03-10T12:01:00Z',
+              changes: {
+                stock_bodega: ['10.00', '15.50'],
+              },
+            },
+          ],
+        })
+      }),
     )
 
     renderWithProviders(<InventarioKardexPage />)
@@ -69,7 +90,7 @@ describe('inventario/InventarioKardexPage', () => {
     await userEvent.type(screen.getByPlaceholderText('Ej: GUIA 123, FACTURA 456, ANULACION'), 'OC-001')
     await userEvent.click(screen.getByRole('button', { name: 'Consultar' }))
 
-    expect(await screen.findByText('Compra recepcion')).toBeInTheDocument()
+    expect((await screen.findAllByText('Compra recepcion')).length).toBeGreaterThan(0)
     expect(screen.getByText('OC-001')).toBeInTheDocument()
     expect(screen.getByText('5')).toBeInTheDocument()
     expect(screen.getByText('10')).toBeInTheDocument()
@@ -77,6 +98,10 @@ describe('inventario/InventarioKardexPage', () => {
     expect(screen.queryByText('5.00')).not.toBeInTheDocument()
     expect(screen.queryByText('10.00')).not.toBeInTheDocument()
     expect(screen.queryByText('15.50')).not.toBeInTheDocument()
+    expect(await screen.findByText('Auditoria del movimiento')).toBeInTheDocument()
+    expect(await screen.findByText(/Movimiento ENTRADA registrado/)).toBeInTheDocument()
+    expect(await screen.findByText('10.00 -> 15.50')).toBeInTheDocument()
+    expect(auditoriaHits).toBeGreaterThan(0)
 
     await waitFor(() => {
       expect(kardexParams).toMatchObject({
