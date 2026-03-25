@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { api } from '@/api/client'
 import { normalizeApiError } from '@/api/errors'
 import Button from '@/components/ui/Button'
 import SearchableSelect from '@/components/ui/SearchableSelect'
 import { formatDateTimeChile, getChileDateSuffix } from '@/lib/dateTimeFormat'
 import { formatCurrencyCLP, formatSmartNumber } from '@/lib/numberFormat'
+import { inventarioApi, useMovimientoAuditoria } from '@/modules/inventario/store'
 import { mergeProductosCatalog, searchProductosCatalog } from '@/modules/productos/services/productosCatalogCache'
 import { downloadExcelFile } from '@/modules/shared/exports/downloadExcelFile'
 import { downloadSimpleTablePdf } from '@/modules/shared/exports/downloadSimpleTablePdf'
@@ -78,6 +78,7 @@ function InventarioKardexPage() {
   const [bodegas, setBodegas] = useState([])
   const [movimientos, setMovimientos] = useState([])
   const [pagination, setPagination] = useState({ count: 0, next: null, previous: null })
+  const [selectedMovimientoId, setSelectedMovimientoId] = useState(null)
   const [filters, setFilters] = useState({
     producto_id: '',
     bodega_id: '',
@@ -92,12 +93,19 @@ function InventarioKardexPage() {
   const [submittedFilters, setSubmittedFilters] = useState(null)
   const [exportMenuOpen, setExportMenuOpen] = useState(false)
   const [loadingProductos, setLoadingProductos] = useState(false)
+  const {
+    rows: auditRows,
+    status: auditStatus,
+  } = useMovimientoAuditoria(selectedMovimientoId, {
+    enabled: Boolean(selectedMovimientoId),
+    params: { page_size: 10 },
+  })
 
   const loadCatalogs = async () => {
     try {
-      const [productosData, { data: bodegasData }] = await Promise.all([
+      const [productosData, bodegasData] = await Promise.all([
         searchProductosCatalog({ tipo: 'PRODUCTO' }),
-        api.get('/bodegas/', { suppressGlobalErrorToast: true }),
+        inventarioApi.getList(inventarioApi.endpoints.bodegas),
       ])
 
       setProductos(productosData)
@@ -125,10 +133,7 @@ function InventarioKardexPage() {
     }
 
     try {
-      const { data } = await api.get('/movimientos-inventario/kardex/', {
-        params: customFilters,
-        suppressGlobalErrorToast: true,
-      })
+      const data = await inventarioApi.getPaginated(inventarioApi.endpoints.movimientosKardex, customFilters)
 
       setMovimientos(normalizeListResponse(data))
       setPagination({
@@ -136,6 +141,7 @@ function InventarioKardexPage() {
         next: data?.next || null,
         previous: data?.previous || null,
       })
+      setSelectedMovimientoId(normalizeListResponse(data)[0]?.id || null)
     } catch (error) {
       toast.error(normalizeApiError(error, { fallback: 'No se pudo consultar el kardex.' }))
     }
@@ -236,6 +242,10 @@ function InventarioKardexPage() {
   }
 
   const pageLabel = `${filters.page}`
+  const selectedAuditMovimiento = useMemo(
+    () => movimientos.find((row) => String(row.id) === String(selectedMovimientoId)) || null,
+    [movimientos, selectedMovimientoId],
+  )
 
   const getTodaySuffix = () => getChileDateSuffix()
   const productExportName = (selectedProducto?.nombre || 'producto').toLowerCase().replace(/\s+/g, '_').slice(0, 40)
@@ -459,12 +469,13 @@ function InventarioKardexPage() {
               <th className="px-3 py-2 text-left font-medium">Valor total</th>
               <th className="px-3 py-2 text-left font-medium">Documento</th>
               <th className="px-3 py-2 text-left font-medium">Referencia</th>
+              <th className="px-3 py-2 text-left font-medium">Auditoria</th>
             </tr>
           </thead>
           <tbody>
             {movimientos.length === 0 ? (
               <tr>
-                <td className="px-3 py-3 text-muted-foreground" colSpan={9}>
+                <td className="px-3 py-3 text-muted-foreground" colSpan={10}>
                   Sin movimientos para los filtros seleccionados.
                 </td>
               </tr>
@@ -480,11 +491,79 @@ function InventarioKardexPage() {
                   <td className="px-3 py-2">{formatCurrencyCLP(row.valor_total)}</td>
                   <td className="px-3 py-2">{formatDocumentoTipo(row.documento_tipo)}</td>
                   <td className="px-3 py-2">{row.referencia || '-'}</td>
+                  <td className="px-3 py-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={String(selectedMovimientoId) === String(row.id) ? 'default' : 'outline'}
+                      onClick={() => setSelectedMovimientoId(row.id)}
+                    >
+                      Ver auditoria
+                    </Button>
+                  </td>
                 </tr>
               ))
             )}
           </tbody>
         </table>
+      </div>
+
+      <div className="rounded-md border border-border bg-card p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h3 className="text-lg font-semibold">Auditoria del movimiento</h3>
+            <p className="text-sm text-muted-foreground">
+              {selectedAuditMovimiento
+                ? `Trazabilidad funcional del movimiento ${selectedAuditMovimiento.referencia || selectedAuditMovimiento.id}.`
+                : 'Selecciona un movimiento del kardex para revisar su auditoria.'}
+            </p>
+          </div>
+          {selectedAuditMovimiento ? (
+            <span className="rounded-full bg-muted px-3 py-1 text-xs font-medium">
+              {formatDocumentoTipo(selectedAuditMovimiento.documento_tipo)}
+            </span>
+          ) : null}
+        </div>
+
+        {!selectedMovimientoId ? (
+          <p className="mt-4 text-sm text-muted-foreground">Aun no hay un movimiento seleccionado.</p>
+        ) : null}
+
+        {selectedMovimientoId && auditStatus === 'loading' ? (
+          <p className="mt-4 text-sm text-muted-foreground">Cargando auditoria del movimiento...</p>
+        ) : null}
+
+        {selectedMovimientoId && auditStatus !== 'loading' ? (
+          <div className="mt-4 space-y-3">
+            {auditRows.length > 0 ? (
+              auditRows.map((evento) => (
+                <article key={evento.id} className="rounded-md border border-border bg-muted/20 p-3">
+                  <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                    <p className="font-medium">{evento.summary}</p>
+                    <p className="text-xs text-muted-foreground">{formatDateTimeChile(evento.occurred_at || evento.creado_en)}</p>
+                  </div>
+                  <p className="mt-1 text-xs uppercase tracking-wide text-muted-foreground">
+                    {evento.event_type} | {evento.action_code}
+                  </p>
+                  {evento.changes && Object.keys(evento.changes).length > 0 ? (
+                    <div className="mt-3 grid gap-2 md:grid-cols-2">
+                      {Object.entries(evento.changes).map(([field, change]) => (
+                        <div key={field} className="rounded-md border border-border bg-background px-3 py-2 text-sm">
+                          <p className="font-medium">{field}</p>
+                          <p className="text-muted-foreground">
+                            {Array.isArray(change) ? `${change[0] ?? '-'} -> ${change[1] ?? '-'}` : JSON.stringify(change)}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                </article>
+              ))
+            ) : (
+              <p className="text-sm text-muted-foreground">No hay eventos de auditoria para este movimiento.</p>
+            )}
+          </div>
+        ) : null}
       </div>
 
       <div className="flex items-center justify-between">

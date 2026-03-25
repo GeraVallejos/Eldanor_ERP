@@ -63,6 +63,7 @@ describe('inventario/InventarioReportesPage', () => {
     expect(screen.getByText('Top valorizados')).toBeInTheDocument()
     expect(screen.getByText('Criticos por minimo')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Actualizar' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Ver auditoria' })).toHaveAttribute('href', '/inventario/auditoria')
 
     await userEvent.selectOptions(screen.getByLabelText('Agrupar por'), 'bodega')
     await userEvent.click(screen.getByRole('button', { name: 'Actualizar' }))

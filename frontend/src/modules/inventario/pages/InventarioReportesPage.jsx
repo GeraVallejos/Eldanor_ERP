@@ -310,6 +310,9 @@ function InventarioReportesPage() {
           <Link to="/inventario/kardex" className={cn(buttonVariants({ variant: 'outline', size: 'md', fullWidth: true }), 'sm:w-auto')}>
             Ver kardex
           </Link>
+          <Link to="/inventario/auditoria" className={cn(buttonVariants({ variant: 'outline', size: 'md', fullWidth: true }), 'sm:w-auto')}>
+            Ver auditoria
+          </Link>
         </div>
       </div>
 

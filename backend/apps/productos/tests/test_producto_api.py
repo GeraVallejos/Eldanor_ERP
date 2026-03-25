@@ -133,6 +133,32 @@ class TestProductoApi:
         assert "PRODUCTO ACTIVO" in nombres
         assert "PRODUCTO INACTIVO" not in nombres
 
+    def test_listado_productos_con_limit_y_tipo_no_falla(self, api_client, owner_usuario, empresa):
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
+
+        Producto.objects.create(
+            empresa=empresa,
+            nombre="Producto Catalogo 1",
+            sku="PCAT-001",
+            tipo="PRODUCTO",
+            precio_referencia=Decimal("1200"),
+            activo=True,
+        )
+        Producto.objects.create(
+            empresa=empresa,
+            nombre="Servicio Catalogo 1",
+            sku="SCAT-001",
+            tipo="SERVICIO",
+            precio_referencia=Decimal("900"),
+            activo=True,
+        )
+
+        resp = api_client.get(reverse("producto-list"), {"tipo": "PRODUCTO", "limit": 50})
+
+        assert resp.status_code == status.HTTP_200_OK, resp.data
+        assert len(resp.data) == 1
+        assert resp.data[0]["nombre"] == "PRODUCTO CATALOGO 1"
+
     def test_owner_puede_listar_inactivos_con_include_inactive(
         self,
         api_client,

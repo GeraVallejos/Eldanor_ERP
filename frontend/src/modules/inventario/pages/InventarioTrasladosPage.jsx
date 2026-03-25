@@ -1,18 +1,15 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
-import { api } from '@/api/client'
 import { normalizeApiError } from '@/api/errors'
+import ApiContractError from '@/components/ui/ApiContractError'
 import Button from '@/components/ui/Button'
-import MenuButton from '@/components/ui/MenuButton'
 import SearchableSelect from '@/components/ui/SearchableSelect'
 import { buttonVariants } from '@/components/ui/buttonVariants'
-import { formatDateTimeChile, getChileDateSuffix } from '@/lib/dateTimeFormat'
 import { formatSmartNumber } from '@/lib/numberFormat'
 import { cn } from '@/lib/utils'
+import { inventarioApi } from '@/modules/inventario/store'
 import { mergeProductosCatalog, searchProductosCatalog } from '@/modules/productos/services/productosCatalogCache'
-import { downloadExcelFile } from '@/modules/shared/exports/downloadExcelFile'
-import { downloadSimpleTablePdf } from '@/modules/shared/exports/downloadSimpleTablePdf'
 import { usePermissions } from '@/modules/shared/auth/usePermission'
 
 function normalizeListResponse(data) {
@@ -25,34 +22,51 @@ function formatNumber(value) {
   return formatSmartNumber(value, { maximumFractionDigits: 2 })
 }
 
+function buildOperationalReference({ motivo, referenciaOperativa, observaciones, fallback }) {
+  const parts = [motivo, referenciaOperativa, observaciones].map((value) => String(value || '').trim()).filter(Boolean)
+  if (parts.length > 0) {
+    return parts.join(' | ')
+  }
+  return String(fallback || '').trim()
+}
+
+function extractContractError(error, fallback) {
+  return {
+    message: fallback,
+    detail: error?.response?.data?.detail ?? null,
+    errorCode: error?.response?.data?.error_code ?? null,
+  }
+}
+
 function InventarioTrasladosPage() {
   const permissions = usePermissions(['INVENTARIO.EDITAR'])
   const canEditInventario = permissions['INVENTARIO.EDITAR']
   const [stocks, setStocks] = useState([])
   const [productos, setProductos] = useState([])
   const [bodegas, setBodegas] = useState([])
-  const [movimientos, setMovimientos] = useState([])
-  const [form, setForm] = useState({ producto_id: '', bodega_origen_id: '', bodega_destino_id: '', cantidad: '' })
-  const [loading, setLoading] = useState(false)
-  const [historyFilters, setHistoryFilters] = useState({
+  const [form, setForm] = useState({
     producto_id: '',
-    referencia: '',
-    bodega_id: '',
+    bodega_origen_id: '',
+    bodega_destino_id: '',
+    cantidad: '',
+    motivo: '',
+    referencia_operativa: '',
+    observaciones: '',
   })
+  const [loading, setLoading] = useState(false)
+  const [submitError, setSubmitError] = useState(null)
   const [loadingProductos, setLoadingProductos] = useState(false)
 
   const loadData = async () => {
     try {
-      const [{ data: stocksData }, productosData, { data: bodegasData }, { data: movimientosData }] = await Promise.all([
-        api.get('/stocks/', { suppressGlobalErrorToast: true }),
+      const [stocksData, productosData, bodegasData] = await Promise.all([
+        inventarioApi.getList(inventarioApi.endpoints.stocks),
         searchProductosCatalog({ tipo: 'PRODUCTO' }),
-        api.get('/bodegas/', { suppressGlobalErrorToast: true }),
-        api.get('/movimientos-inventario/', { suppressGlobalErrorToast: true }),
+        inventarioApi.getList(inventarioApi.endpoints.bodegas),
       ])
       setStocks(normalizeListResponse(stocksData))
       setProductos(productosData)
       setBodegas(normalizeListResponse(bodegasData))
-      setMovimientos(normalizeListResponse(movimientosData).filter((row) => row.documento_tipo === 'TRASLADO'))
     } catch (error) {
       toast.error(normalizeApiError(error, { fallback: 'No se pudieron cargar los datos de traslados.' }))
     }
@@ -88,22 +102,6 @@ function InventarioTrasladosPage() {
     label: bodega.nombre || `Bodega ${bodega.id}`,
   }))
 
-  const productoById = useMemo(() => {
-    const map = new Map()
-    productos.forEach((producto) => {
-      map.set(String(producto.id), producto)
-    })
-    return map
-  }, [productos])
-
-  const bodegaById = useMemo(() => {
-    const map = new Map()
-    bodegas.forEach((bodega) => {
-      map.set(String(bodega.id), bodega)
-    })
-    return map
-  }, [bodegas])
-
   const stockOrigenSeleccionado = useMemo(() => {
     if (!form.producto_id || !form.bodega_origen_id) return null
     const row = stocks.find((item) => String(item.producto) === String(form.producto_id) && String(item.bodega) === String(form.bodega_origen_id))
@@ -114,112 +112,38 @@ function InventarioTrasladosPage() {
     stockOrigenSeleccionado != null && form.cantidad && Number(form.cantidad || 0) > Number(stockOrigenSeleccionado || 0)
 
   const updateForm = (key, value) => setForm((prev) => ({ ...prev, [key]: value }))
-  const updateHistoryFilter = (key, value) => setHistoryFilters((prev) => ({ ...prev, [key]: value }))
-
-  const getMovimientoProductoLabel = (row) =>
-    row.producto_nombre ||
-    row.producto__nombre ||
-    productoById.get(String(row.producto || row.producto_id || ''))?.nombre ||
-    '-'
-
-  const getMovimientoOrigenLabel = (row) =>
-    row.bodega_origen_nombre ||
-    row.bodega_origen__nombre ||
-    bodegaById.get(String(row.bodega_origen || row.bodega_origen_id || row.bodega || ''))?.nombre ||
-    '-'
-
-  const getMovimientoDestinoLabel = (row) =>
-    row.bodega_destino_nombre ||
-    row.bodega_destino__nombre ||
-    bodegaById.get(String(row.bodega_destino || row.bodega_destino_id || ''))?.nombre ||
-    '-'
-
-  const visibleMovimientos = useMemo(() => {
-    return movimientos.filter((row) => {
-      const matchesProducto = historyFilters.producto_id
-        ? String(row.producto || row.producto_id || '') === String(historyFilters.producto_id)
-        : true
-      const referencia = String(row.referencia || '').toLowerCase()
-      const matchesReferencia = historyFilters.referencia
-        ? referencia.includes(historyFilters.referencia.toLowerCase())
-        : true
-      const movimientoBodegas = [
-        String(row.bodega_origen || row.bodega_origen_id || row.bodega || ''),
-        String(row.bodega_destino || row.bodega_destino_id || ''),
-      ]
-      const matchesBodega = historyFilters.bodega_id
-        ? movimientoBodegas.includes(String(historyFilters.bodega_id))
-        : true
-
-      return matchesProducto && matchesReferencia && matchesBodega
-    })
-  }, [movimientos, historyFilters])
-
-  const handleExportExcel = async () => {
-    if (visibleMovimientos.length === 0) {
-      return
-    }
-
-    await downloadExcelFile({
-      sheetName: 'TrasladosInventario',
-      fileName: `traslados_inventario_${getChileDateSuffix()}.xlsx`,
-      columns: [
-        { header: 'Fecha', key: 'fecha', width: 22 },
-        { header: 'Producto', key: 'producto', width: 30 },
-        { header: 'Bodega origen', key: 'origen', width: 24 },
-        { header: 'Bodega destino', key: 'destino', width: 24 },
-        { header: 'Referencia', key: 'referencia', width: 32 },
-        { header: 'Cantidad', key: 'cantidad', width: 14 },
-      ],
-      rows: visibleMovimientos.map((row) => ({
-        fecha: formatDateTimeChile(row.creado_en),
-        producto: getMovimientoProductoLabel(row),
-        origen: getMovimientoOrigenLabel(row),
-        destino: getMovimientoDestinoLabel(row),
-        referencia: row.referencia || '-',
-        cantidad: Number(row.cantidad || 0),
-      })),
-    })
-  }
-
-  const handleExportPdf = async () => {
-    if (visibleMovimientos.length === 0) {
-      return
-    }
-
-    await downloadSimpleTablePdf({
-      title: 'Traslados entre bodegas',
-      fileName: `traslados_inventario_${getChileDateSuffix()}.pdf`,
-      headers: ['Fecha', 'Producto', 'Origen', 'Destino', 'Referencia', 'Cantidad'],
-      rows: visibleMovimientos.map((row) => [
-        formatDateTimeChile(row.creado_en),
-        getMovimientoProductoLabel(row),
-        getMovimientoOrigenLabel(row),
-        getMovimientoDestinoLabel(row),
-        row.referencia || '-',
-        formatNumber(row.cantidad),
-      ]),
-    })
-  }
-
   const handleSubmit = async () => {
     setLoading(true)
+    setSubmitError(null)
     try {
-      await api.post(
-        '/movimientos-inventario/trasladar/',
+      await inventarioApi.postOne(
+        inventarioApi.endpoints.movimientosTrasladar,
         {
           producto_id: form.producto_id,
           bodega_origen_id: form.bodega_origen_id,
           bodega_destino_id: form.bodega_destino_id,
           cantidad: form.cantidad,
-          referencia: `Traslado interno ${form.producto_id}`.trim(),
+          referencia: buildOperationalReference({
+            motivo: form.motivo,
+            referenciaOperativa: form.referencia_operativa,
+            observaciones: form.observaciones,
+            fallback: `Traslado interno ${form.producto_id}`.trim(),
+          }),
         },
-        { suppressGlobalErrorToast: true },
       )
       toast.success('Traslado entre bodegas registrado correctamente.')
-      setForm({ producto_id: '', bodega_origen_id: '', bodega_destino_id: '', cantidad: '' })
+      setForm({
+        producto_id: '',
+        bodega_origen_id: '',
+        bodega_destino_id: '',
+        cantidad: '',
+        motivo: '',
+        referencia_operativa: '',
+        observaciones: '',
+      })
       await loadData()
     } catch (error) {
+      setSubmitError(extractContractError(error, 'No se pudo registrar el traslado entre bodegas.'))
       toast.error(normalizeApiError(error, { fallback: 'No se pudo registrar el traslado entre bodegas.' }))
     } finally {
       setLoading(false)
@@ -233,9 +157,14 @@ function InventarioTrasladosPage() {
           <h2 className="text-2xl font-semibold">Traslados entre bodegas</h2>
           <p className="text-sm text-muted-foreground">Registra movimientos internos entre bodegas y revisa sus ultimos eventos.</p>
         </div>
-        <Link to="/inventario/resumen" className={cn(buttonVariants({ variant: 'outline', size: 'md' }))}>
-          Volver al resumen
-        </Link>
+        <div className="flex flex-wrap gap-2">
+          <Link to="/inventario/traslados-masivos" className={cn(buttonVariants({ variant: 'outline', size: 'md' }))}>
+            Modo masivo
+          </Link>
+          <Link to="/inventario/resumen" className={cn(buttonVariants({ variant: 'outline', size: 'md' }))}>
+            Ver resumen
+          </Link>
+        </div>
       </div>
 
       <div className="rounded-md border border-border bg-card p-4 space-y-4">
@@ -257,11 +186,44 @@ function InventarioTrasladosPage() {
             <input type="number" min="0" step="0.01" value={form.cantidad} onChange={(event) => updateForm('cantidad', event.target.value)} className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2" />
           </label>
           <div className="flex items-end">
-            <Button type="button" disabled={!canEditInventario || !form.producto_id || !form.bodega_origen_id || !form.bodega_destino_id || !form.cantidad || loading} onClick={handleSubmit}>
+            <Button type="button" disabled={!canEditInventario || !form.producto_id || !form.bodega_origen_id || !form.bodega_destino_id || !form.cantidad || !form.motivo.trim() || loading} onClick={handleSubmit}>
               Registrar traslado
             </Button>
           </div>
         </div>
+        <div className="grid gap-3 md:grid-cols-3">
+          <label className="text-sm">
+            Motivo operativo
+            <input
+              type="text"
+              value={form.motivo}
+              onChange={(event) => updateForm('motivo', event.target.value)}
+              className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
+              placeholder="Reposicion sucursal, consolidacion, contingencia..."
+            />
+          </label>
+          <label className="text-sm">
+            Referencia operativa
+            <input
+              type="text"
+              value={form.referencia_operativa}
+              onChange={(event) => updateForm('referencia_operativa', event.target.value)}
+              className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
+              placeholder="Ticket, OT, folio logistico o solicitud interna"
+            />
+          </label>
+          <label className="text-sm">
+            Observaciones
+            <textarea
+              value={form.observaciones}
+              onChange={(event) => updateForm('observaciones', event.target.value)}
+              className="mt-1 min-h-24 w-full rounded-md border border-input bg-background px-3 py-2"
+              placeholder="Aclaraciones para el equipo de bodega o auditoria"
+            />
+          </label>
+        </div>
+        {!canEditInventario ? <ApiContractError error={{ message: 'No tiene permiso para registrar traslados de inventario.', errorCode: 'PERMISSION_DENIED' }} title="Acceso restringido" /> : null}
+        {submitError ? <ApiContractError error={submitError} title="Error al registrar traslado" /> : null}
 
         {stockOrigenSeleccionado != null ? (
           <div className="rounded-md border border-border bg-muted/20 px-3 py-3 text-sm">
@@ -273,86 +235,19 @@ function InventarioTrasladosPage() {
             )}
           </div>
         ) : null}
-      </div>
-
-      <div className="rounded-md border border-border bg-card p-4">
-        <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-          <div>
-            <h3 className="text-lg font-semibold">Historial de traslados</h3>
-            <p className="text-sm text-muted-foreground">Consulta, filtra y exporta movimientos internos entre bodegas.</p>
+        {(form.motivo || form.referencia_operativa || form.observaciones) ? (
+          <div className="rounded-md border border-border bg-muted/20 px-3 py-3 text-sm">
+            <p className="font-medium">Referencia que se registrara</p>
+            <p className="mt-1 text-muted-foreground">
+              {buildOperationalReference({
+                motivo: form.motivo,
+                referenciaOperativa: form.referencia_operativa,
+                observaciones: form.observaciones,
+                fallback: `Traslado interno ${form.producto_id}`.trim(),
+              }) || '-'}
+            </p>
           </div>
-          <MenuButton
-            onExportExcel={handleExportExcel}
-            onExportPdf={handleExportPdf}
-            disabled={visibleMovimientos.length === 0}
-          />
-        </div>
-        <div className="mb-4 grid gap-3 md:grid-cols-3">
-          <label className="text-sm">
-            Filtrar por producto
-            <SearchableSelect
-              className="mt-1"
-              value={historyFilters.producto_id}
-              onChange={(next) => updateHistoryFilter('producto_id', next)}
-              onSearchChange={(next) => { void searchProductos(next) }}
-              options={productoOptions}
-              ariaLabel="Filtrar traslados por producto"
-              placeholder="Todos los productos"
-              emptyText="No hay productos coincidentes"
-              loading={loadingProductos}
-            />
-          </label>
-          <label className="text-sm">
-            Filtrar por bodega
-            <SearchableSelect
-              className="mt-1"
-              value={historyFilters.bodega_id}
-              onChange={(next) => updateHistoryFilter('bodega_id', next)}
-              options={bodegaOptions}
-              ariaLabel="Filtrar traslados por bodega"
-              placeholder="Todas las bodegas"
-              emptyText="No hay bodegas coincidentes"
-            />
-          </label>
-          <label className="text-sm">
-            Buscar referencia
-            <input
-              type="text"
-              value={historyFilters.referencia}
-              onChange={(event) => updateHistoryFilter('referencia', event.target.value)}
-              className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
-              placeholder="Traslado, observacion, motivo..."
-            />
-          </label>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="min-w-full text-sm">
-            <thead className="bg-muted/40">
-              <tr>
-                <th className="px-3 py-2 text-left font-medium">Fecha</th>
-                <th className="px-3 py-2 text-left font-medium">Producto</th>
-                <th className="px-3 py-2 text-left font-medium">Origen</th>
-                <th className="px-3 py-2 text-left font-medium">Destino</th>
-                <th className="px-3 py-2 text-left font-medium">Referencia</th>
-                <th className="px-3 py-2 text-left font-medium">Tipo</th>
-                <th className="px-3 py-2 text-left font-medium">Cantidad</th>
-              </tr>
-            </thead>
-            <tbody>
-              {visibleMovimientos.length > 0 ? visibleMovimientos.slice(0, 50).map((row) => (
-                <tr key={row.id} className="border-t border-border">
-                  <td className="px-3 py-2">{formatDateTimeChile(row.creado_en)}</td>
-                  <td className="px-3 py-2">{getMovimientoProductoLabel(row)}</td>
-                  <td className="px-3 py-2">{getMovimientoOrigenLabel(row)}</td>
-                  <td className="px-3 py-2">{getMovimientoDestinoLabel(row)}</td>
-                  <td className="px-3 py-2">{row.referencia || '-'}</td>
-                  <td className="px-3 py-2">{row.tipo || '-'}</td>
-                  <td className="px-3 py-2">{formatNumber(row.cantidad)}</td>
-                </tr>
-              )) : <tr><td className="px-3 py-3 text-muted-foreground" colSpan={7}>No hay traslados para los filtros seleccionados.</td></tr>}
-            </tbody>
-          </table>
-        </div>
+        ) : null}
       </div>
     </section>
   )

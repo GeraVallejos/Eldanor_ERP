@@ -31,6 +31,11 @@ class InventarioService:
         return Decimal(value).quantize(Decimal("0.0001"))
 
     @staticmethod
+    def _serialize_decimal(value, *, decimals="0.01"):
+        """Serializa decimales a string estable para payloads y auditoria."""
+        return str(Decimal(value).quantize(Decimal(decimals)))
+
+    @staticmethod
     def _resolver_costo_base_producto(producto):
         """Obtiene el costo base del producto usando costo promedio o precio costo como respaldo."""
         costo_promedio = Decimal(producto.costo_promedio or 0)
@@ -228,6 +233,18 @@ class InventarioService:
         return bodega_default.id
 
     @staticmethod
+    def _obtener_producto_con_lock(*, empresa, producto_id, context):
+        """Obtiene un producto inventariable con lock pesimista o levanta un not found del dominio."""
+        producto = (
+            Producto.all_objects.select_for_update()
+            .filter(pk=producto_id, empresa=empresa)
+            .first()
+        )
+        if not producto:
+            raise ResourceNotFoundError(f"Producto no encontrado para {context}.")
+        return producto
+
+    @staticmethod
     def _validar_documento_reserva(*, documento_tipo, documento_id):
         """Valida metadatos de documento requeridos para reservas trazables."""
         if not documento_tipo or not documento_id:
@@ -292,7 +309,11 @@ class InventarioService:
 
         cantidad = Decimal(cantidad)
         bodega_id = InventarioService._resolver_bodega_id(empresa=empresa, bodega_id=bodega_id)
-        producto = Producto.all_objects.select_for_update().get(pk=producto_id, empresa=empresa)
+        producto = InventarioService._obtener_producto_con_lock(
+            empresa=empresa,
+            producto_id=producto_id,
+            context="reserva de inventario",
+        )
 
         if not producto.maneja_inventario:
             raise BusinessRuleError(f"El producto {producto.nombre} no maneja inventario.")
@@ -376,9 +397,10 @@ class InventarioService:
         if restante <= 0:
             return Decimal("0")
 
-        producto = Producto.all_objects.only("id", "nombre", "permite_decimales").get(
-            pk=producto_id,
+        producto = InventarioService._obtener_producto_con_lock(
             empresa=empresa,
+            producto_id=producto_id,
+            context="liberacion de reserva",
         )
         restante = InventarioService._validar_cantidad_producto(
             producto=producto,
@@ -437,10 +459,10 @@ class InventarioService:
 
         bodega_id = InventarioService._resolver_bodega_id(empresa=empresa, bodega_id=bodega_id)
 
-        producto = (
-            Producto.all_objects
-            .select_for_update()
-            .get(pk=producto_id, empresa=empresa)
+        producto = InventarioService._obtener_producto_con_lock(
+            empresa=empresa,
+            producto_id=producto_id,
+            context="movimiento de inventario",
         )
 
         cantidad = InventarioService._validar_cantidad_producto(
@@ -478,6 +500,9 @@ class InventarioService:
         )
 
         stock_anterior = Decimal(stock_obj.stock)
+        valor_stock_anterior = InventarioService._money(stock_obj.valor_stock)
+        costo_promedio_anterior = InventarioService._cost(producto.costo_promedio or 0)
+        stock_global_anterior = Decimal(producto.stock_actual or 0)
         reserva_consumible = Decimal("0")
         reservado_total = Decimal("0")
         if tipo == TipoMovimiento.SALIDA:
@@ -526,7 +551,6 @@ class InventarioService:
 
         valor_total = InventarioService._money(Decimal(cantidad) * Decimal(costo_movimiento))
 
-        valor_stock_anterior = InventarioService._money(stock_obj.valor_stock)
         if tipo == TipoMovimiento.ENTRADA:
             valor_stock_nuevo = InventarioService._money(valor_stock_anterior + valor_total)
         else:
@@ -617,17 +641,53 @@ class InventarioService:
             update_fields=["stock_actual", "costo_promedio"]
         )
 
+        stock_global_nuevo = Decimal(producto.stock_actual or 0)
+
         payload = {
             "movimiento_id": str(movimiento.id),
             "producto_id": str(producto.id),
             "bodega_id": str(bodega_id),
             "tipo": tipo,
-            "cantidad": str(cantidad),
-            "stock_nuevo": str(nuevo_stock),
+            "cantidad": InventarioService._serialize_decimal(cantidad),
+            "stock_anterior": InventarioService._serialize_decimal(stock_anterior),
+            "stock_nuevo": InventarioService._serialize_decimal(nuevo_stock),
+            "stock_global_anterior": InventarioService._serialize_decimal(stock_global_anterior),
+            "stock_global_nuevo": InventarioService._serialize_decimal(stock_global_nuevo),
+            "valor_stock_anterior": InventarioService._serialize_decimal(valor_stock_anterior),
+            "valor_stock_nuevo": InventarioService._serialize_decimal(valor_stock_nuevo),
+            "costo_promedio_anterior": InventarioService._serialize_decimal(
+                costo_promedio_anterior,
+                decimals="0.0001",
+            ),
+            "costo_promedio_nuevo": InventarioService._serialize_decimal(
+                producto.costo_promedio,
+                decimals="0.0001",
+            ),
+            "costo_unitario": InventarioService._serialize_decimal(costo_movimiento, decimals="0.0001"),
+            "valor_total": InventarioService._serialize_decimal(valor_total),
             "lote_codigo": lote_codigo,
             "series": series,
             "documento_tipo": documento_tipo,
             "documento_id": str(documento_id) if documento_id else None,
+            "reserva_consumida": InventarioService._serialize_decimal(reserva_consumible),
+        }
+        changes = {
+            "stock_bodega": [
+                InventarioService._serialize_decimal(stock_anterior),
+                InventarioService._serialize_decimal(nuevo_stock),
+            ],
+            "stock_global_producto": [
+                InventarioService._serialize_decimal(stock_global_anterior),
+                InventarioService._serialize_decimal(stock_global_nuevo),
+            ],
+            "valor_stock_bodega": [
+                InventarioService._serialize_decimal(valor_stock_anterior),
+                InventarioService._serialize_decimal(valor_stock_nuevo),
+            ],
+            "costo_promedio_producto": [
+                InventarioService._serialize_decimal(costo_promedio_anterior, decimals="0.0001"),
+                InventarioService._serialize_decimal(producto.costo_promedio, decimals="0.0001"),
+            ],
         }
         DomainEventService.record_event(
             empresa=empresa,
@@ -658,6 +718,7 @@ class InventarioService:
             entity_id=str(movimiento.id),
             summary=f"Movimiento {tipo} registrado para producto {producto.nombre}.",
             severity=AuditSeverity.INFO,
+            changes=changes,
             payload=payload,
             meta={"source": "InventarioService.registrar_movimiento"},
             source="InventarioService.registrar_movimiento",
@@ -736,6 +797,8 @@ class InventarioService:
         lote_codigo="",
         fecha_vencimiento=None,
         series=None,
+        documento_tipo=TipoDocumentoReferencia.AJUSTE,
+        documento_id=None,
     ):
         """Ajusta una bodega a stock objetivo preservando reservas y trazabilidad."""
         stock_objetivo = Decimal(stock_objetivo)
@@ -787,8 +850,8 @@ class InventarioService:
             empresa=empresa,
             usuario=usuario,
             costo_unitario=costo_unitario,
-            documento_tipo=TipoDocumentoReferencia.AJUSTE,
-            documento_id=None,
+            documento_tipo=documento_tipo,
+            documento_id=documento_id,
             lote_codigo=lote_codigo,
             fecha_vencimiento=fecha_vencimiento,
             series=series,
@@ -871,6 +934,8 @@ class InventarioService:
         empresa,
         usuario,
         lote_codigo="",
+        documento_tipo=TipoDocumentoReferencia.TRASLADO,
+        documento_id=None,
     ):
         """Traslada stock entre bodegas preservando trazabilidad y stock global."""
         cantidad = Decimal(cantidad)
@@ -895,7 +960,7 @@ class InventarioService:
             field_name="cantidad a trasladar",
         )
 
-        traslado_id = str(uuid4())
+        traslado_id = str(documento_id or uuid4())
         referencia_origen = f"{referencia} [SALIDA]"
         referencia_destino = f"{referencia} [ENTRADA]"
 
@@ -908,7 +973,7 @@ class InventarioService:
             empresa=empresa,
             usuario=usuario,
             costo_unitario=producto.costo_promedio,
-            documento_tipo=TipoDocumentoReferencia.TRASLADO,
+            documento_tipo=documento_tipo,
             documento_id=traslado_id,
             lote_codigo=lote_codigo,
         )
@@ -921,7 +986,7 @@ class InventarioService:
             empresa=empresa,
             usuario=usuario,
             costo_unitario=movimiento_salida.costo_unitario,
-            documento_tipo=TipoDocumentoReferencia.TRASLADO,
+            documento_tipo=documento_tipo,
             documento_id=traslado_id,
             lote_codigo=lote_codigo,
         )

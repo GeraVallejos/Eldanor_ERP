@@ -149,10 +149,10 @@ class ProductoViewSet(TenantViewSetMixin, ModelViewSet ):
         if search_query and not has_explicit_pagination:
             return base_queryset.order_by("nombre")[:50]
 
-        return base_queryset
+        return base_queryset.order_by("nombre")
 
     def list(self, request, *args, **kwargs):
-        queryset = self.filter_queryset(self.get_queryset()).order_by("nombre")
+        queryset = self.filter_queryset(self.get_queryset())
 
         # Conservamos compatibilidad con consumidores antiguos que esperan una lista plana
         # cuando no solicitan paginacion explicita.
