@@ -2,6 +2,7 @@ from decimal import Decimal
 from uuid import uuid4
 from django.db import transaction
 from apps.core.exceptions import BusinessRuleError, ResourceNotFoundError
+from apps.core.validators import normalizar_texto
 from apps.documentos.models import TipoDocumentoReferencia
 from apps.inventario.models.bodega import Bodega
 from apps.inventario.models.inventario_snapshot import InventorySnapshot
@@ -225,9 +226,10 @@ class InventarioService:
                 raise BusinessRuleError("La bodega seleccionada no existe o no esta activa.")
             return bodega_id
 
+        nombre_bodega_principal = normalizar_texto("Principal")
         bodega_default, _ = Bodega.all_objects.get_or_create(
             empresa=empresa,
-            nombre="Principal",
+            nombre=nombre_bodega_principal,
             defaults={"activa": True},
         )
         return bodega_default.id

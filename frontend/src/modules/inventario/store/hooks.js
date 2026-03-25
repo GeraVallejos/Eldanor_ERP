@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { inventarioApi } from '@/modules/inventario/store/api'
 
+const EMPTY_ROWS = []
+const EMPTY_PAGINATION = { count: 0, next: null, previous: null }
+
 function buildStableObjectKey(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return JSON.stringify(value ?? null)
@@ -37,21 +40,11 @@ function useInventarioHistorial({
       params.documento_tipo = documentoTipo
     }
 
-    const response = await inventarioApi.getPaginated(inventarioApi.endpoints.movimientosHistorial, params)
-    setRows(response.results)
-    setPagination({
-      count: response.count,
-      next: response.next,
-      previous: response.previous,
-    })
-    return response
+    return inventarioApi.getPaginated(inventarioApi.endpoints.movimientosHistorial, params)
   }, [documentoTipo, stableFilters])
 
   const reload = useCallback(async (overrides = {}) => {
     if (!enabled) {
-      setRows([])
-      setPagination({ count: 0, next: null, previous: null })
-      setStatus('idle')
       return null
     }
 
@@ -59,11 +52,17 @@ function useInventarioHistorial({
     setError(null)
     try {
       const response = await loadHistorial(overrides)
+      setRows(response.results)
+      setPagination({
+        count: response.count,
+        next: response.next,
+        previous: response.previous,
+      })
       setStatus('succeeded')
       return response
     } catch (loadError) {
-      setRows([])
-      setPagination({ count: 0, next: null, previous: null })
+      setRows(EMPTY_ROWS)
+      setPagination(EMPTY_PAGINATION)
       setStatus('failed')
       setError(loadError)
       throw loadError
@@ -72,9 +71,6 @@ function useInventarioHistorial({
 
   useEffect(() => {
     if (!enabled) {
-      setRows([])
-      setPagination({ count: 0, next: null, previous: null })
-      setStatus('idle')
       return
     }
 
@@ -99,8 +95,8 @@ function useInventarioHistorial({
         if (!active) {
           return
         }
-        setRows([])
-        setPagination({ count: 0, next: null, previous: null })
+        setRows(EMPTY_ROWS)
+        setPagination(EMPTY_PAGINATION)
         setStatus('failed')
         setError(loadError)
       }
@@ -114,10 +110,10 @@ function useInventarioHistorial({
   }, [enabled, loadHistorial])
 
   return {
-    rows,
-    pagination,
-    status,
-    error,
+    rows: enabled ? rows : EMPTY_ROWS,
+    pagination: enabled ? pagination : EMPTY_PAGINATION,
+    status: enabled ? status : 'idle',
+    error: enabled ? error : null,
     reload,
   }
 }
@@ -133,30 +129,20 @@ function useMovimientoAuditoria(movimientoId, { enabled = true, params } = {}) {
   const loadAudit = useCallback(async (overrides = {}) => {
     if (!movimientoId) {
       return {
-        results: [],
+        results: EMPTY_ROWS,
         count: 0,
         next: null,
         previous: null,
       }
     }
-    const response = await inventarioApi.getMovimientoAuditoria(movimientoId, {
+    return inventarioApi.getMovimientoAuditoria(movimientoId, {
       ...(stableParams || {}),
       ...overrides,
     })
-    setRows(response.results)
-    setPagination({
-      count: response.count,
-      next: response.next,
-      previous: response.previous,
-    })
-    return response
   }, [movimientoId, stableParams])
 
   const reload = useCallback(async (overrides = {}) => {
     if (!enabled || !movimientoId) {
-      setRows([])
-      setPagination({ count: 0, next: null, previous: null })
-      setStatus('idle')
       return null
     }
 
@@ -164,11 +150,17 @@ function useMovimientoAuditoria(movimientoId, { enabled = true, params } = {}) {
     setError(null)
     try {
       const response = await loadAudit(overrides)
+      setRows(response.results)
+      setPagination({
+        count: response.count,
+        next: response.next,
+        previous: response.previous,
+      })
       setStatus('succeeded')
       return response
     } catch (loadError) {
-      setRows([])
-      setPagination({ count: 0, next: null, previous: null })
+      setRows(EMPTY_ROWS)
+      setPagination(EMPTY_PAGINATION)
       setStatus('failed')
       setError(loadError)
       throw loadError
@@ -177,9 +169,6 @@ function useMovimientoAuditoria(movimientoId, { enabled = true, params } = {}) {
 
   useEffect(() => {
     if (!enabled || !movimientoId) {
-      setRows([])
-      setPagination({ count: 0, next: null, previous: null })
-      setStatus('idle')
       return
     }
 
@@ -204,8 +193,8 @@ function useMovimientoAuditoria(movimientoId, { enabled = true, params } = {}) {
         if (!active) {
           return
         }
-        setRows([])
-        setPagination({ count: 0, next: null, previous: null })
+        setRows(EMPTY_ROWS)
+        setPagination(EMPTY_PAGINATION)
         setStatus('failed')
         setError(loadError)
       }
@@ -219,10 +208,10 @@ function useMovimientoAuditoria(movimientoId, { enabled = true, params } = {}) {
   }, [enabled, loadAudit, movimientoId])
 
   return {
-    rows,
-    pagination,
-    status,
-    error,
+    rows: enabled && movimientoId ? rows : EMPTY_ROWS,
+    pagination: enabled && movimientoId ? pagination : EMPTY_PAGINATION,
+    status: enabled && movimientoId ? status : 'idle',
+    error: enabled && movimientoId ? error : null,
     reload,
   }
 }

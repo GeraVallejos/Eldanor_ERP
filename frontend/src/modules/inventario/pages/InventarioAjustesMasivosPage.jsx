@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
 import { normalizeApiError } from '@/api/errors'
@@ -41,7 +41,7 @@ function InventarioAjustesMasivosPage() {
   const [header, setHeader] = useState({ motivo: '', referencia_operativa: '', observaciones: '' })
   const [rows, setRows] = useState([buildRow()])
 
-  const loadRecentDocuments = async (nextFilters = filters) => {
+  const loadRecentDocuments = useCallback(async (nextFilters) => {
     setLoadingList(true)
     try {
       const documentosData = await inventarioApi.getPaginated(inventarioApi.endpoints.ajustesMasivos, {
@@ -57,7 +57,7 @@ function InventarioAjustesMasivosPage() {
     } finally {
       setLoadingList(false)
     }
-  }
+  }, [])
 
   useEffect(() => {
     const loadData = async () => {
@@ -74,7 +74,7 @@ function InventarioAjustesMasivosPage() {
       }
     }
     void loadData()
-  }, [])
+  }, [loadRecentDocuments])
 
   const productoOptions = productos.map((producto) => ({
     value: String(producto.id),
