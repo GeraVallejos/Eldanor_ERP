@@ -27,6 +27,7 @@ export const INVENTARIO_ENDPOINTS = {
   stockResumen: '/stocks/resumen/',
   stockCriticos: '/stocks/criticos/',
   stockAnalytics: '/stocks/analytics/',
+  stockReconciliation: '/stocks/reconciliation/',
   movimientos: '/movimientos-inventario/',
   movimientosKardex: '/movimientos-inventario/kardex/',
   movimientosHistorial: '/movimientos-inventario/historial/',
@@ -48,6 +49,25 @@ async function getPaginated(endpoint, params) {
   return normalizePaginatedResponse(data)
 }
 
+async function getAllPaginated(endpoint, params, { pageSize = 100, maxPages = 50 } = {}) {
+  let page = 1
+  let next = true
+  const rows = []
+
+  while (next && page <= maxPages) {
+    const data = await getPaginated(endpoint, {
+      ...(params || {}),
+      page,
+      page_size: pageSize,
+    })
+    rows.push(...normalizeListResponse(data))
+    next = Boolean(data.next)
+    page += 1
+  }
+
+  return rows
+}
+
 async function getOne(endpoint, id) {
   const { data } = await api.get(`${endpoint}${id}/`, { suppressGlobalErrorToast: true })
   return data
@@ -55,6 +75,11 @@ async function getOne(endpoint, id) {
 
 async function postOne(endpoint, payload) {
   const { data } = await api.post(endpoint, payload, { suppressGlobalErrorToast: true })
+  return data
+}
+
+async function patchOne(endpoint, id, payload) {
+  const { data } = await api.patch(`${endpoint}${id}/`, payload, { suppressGlobalErrorToast: true })
   return data
 }
 
@@ -82,8 +107,10 @@ export const inventarioApi = {
   normalizePaginatedResponse,
   getList,
   getPaginated,
+  getAllPaginated,
   getOne,
   postOne,
+  patchOne,
   executeDetailAction,
   getMovimientoAuditoria,
 }

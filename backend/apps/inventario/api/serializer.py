@@ -4,6 +4,7 @@ from apps.inventario.models import (
     AjusteInventarioMasivo,
     AjusteInventarioMasivoItem,
     Bodega,
+    EstadoDocumentoInventario,
     InventorySnapshot,
     MovimientoInventario,
     StockProducto,
@@ -126,10 +127,27 @@ class AjusteInventarioMasivoItemCreateSerializer(serializers.Serializer):
 
 
 class AjusteInventarioMasivoCreateSerializer(serializers.Serializer):
+    estado = serializers.ChoiceField(
+        choices=EstadoDocumentoInventario.choices,
+        required=False,
+        default=EstadoDocumentoInventario.CONFIRMADO,
+    )
     referencia = serializers.CharField(max_length=150)
     motivo = serializers.CharField(max_length=120)
     observaciones = serializers.CharField(required=False, allow_blank=True)
     items = AjusteInventarioMasivoItemCreateSerializer(many=True)
+
+    def validate_items(self, value):
+        if not value:
+            raise serializers.ValidationError("Debe informar al menos una linea.")
+        return value
+
+
+class AjusteInventarioMasivoUpdateSerializer(serializers.Serializer):
+    referencia = serializers.CharField(max_length=150, required=False)
+    motivo = serializers.CharField(max_length=120, required=False)
+    observaciones = serializers.CharField(required=False, allow_blank=True)
+    items = AjusteInventarioMasivoItemCreateSerializer(many=True, required=False)
 
     def validate_items(self, value):
         if not value:
@@ -182,6 +200,11 @@ class TrasladoInventarioMasivoItemCreateSerializer(serializers.Serializer):
 
 
 class TrasladoInventarioMasivoCreateSerializer(serializers.Serializer):
+    estado = serializers.ChoiceField(
+        choices=EstadoDocumentoInventario.choices,
+        required=False,
+        default=EstadoDocumentoInventario.CONFIRMADO,
+    )
     referencia = serializers.CharField(max_length=150)
     motivo = serializers.CharField(max_length=120)
     observaciones = serializers.CharField(required=False, allow_blank=True)
@@ -193,6 +216,24 @@ class TrasladoInventarioMasivoCreateSerializer(serializers.Serializer):
         if str(attrs["bodega_origen_id"]) == str(attrs["bodega_destino_id"]):
             raise serializers.ValidationError({"bodega_destino_id": "La bodega destino debe ser distinta a la bodega origen."})
         if not attrs.get("items"):
+            raise serializers.ValidationError({"items": "Debe informar al menos una linea."})
+        return attrs
+
+
+class TrasladoInventarioMasivoUpdateSerializer(serializers.Serializer):
+    referencia = serializers.CharField(max_length=150, required=False)
+    motivo = serializers.CharField(max_length=120, required=False)
+    observaciones = serializers.CharField(required=False, allow_blank=True)
+    bodega_origen_id = serializers.UUIDField(required=False)
+    bodega_destino_id = serializers.UUIDField(required=False)
+    items = TrasladoInventarioMasivoItemCreateSerializer(many=True, required=False)
+
+    def validate(self, attrs):
+        origen = attrs.get("bodega_origen_id")
+        destino = attrs.get("bodega_destino_id")
+        if origen and destino and str(origen) == str(destino):
+            raise serializers.ValidationError({"bodega_destino_id": "La bodega destino debe ser distinta a la bodega origen."})
+        if "items" in attrs and not attrs.get("items"):
             raise serializers.ValidationError({"items": "Debe informar al menos una linea."})
         return attrs
 

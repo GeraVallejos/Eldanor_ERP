@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { normalizeApiError } from '@/api/errors'
 import Button from '@/components/ui/Button'
@@ -9,6 +10,7 @@ import { inventarioApi, useMovimientoAuditoria } from '@/modules/inventario/stor
 import { mergeProductosCatalog, searchProductosCatalog } from '@/modules/productos/services/productosCatalogCache'
 import { downloadExcelFile } from '@/modules/shared/exports/downloadExcelFile'
 import { downloadSimpleTablePdf } from '@/modules/shared/exports/downloadSimpleTablePdf'
+import { usePermission } from '@/modules/shared/auth/usePermission'
 
 const DOCUMENTO_TIPO_OPTIONS = [
   { value: 'GUIA_RECEPCION', label: 'Guia de recepcion' },
@@ -73,6 +75,8 @@ function normalizeFiltersForQuery(filters) {
 }
 
 function InventarioKardexPage() {
+  const [searchParams] = useSearchParams()
+  const canViewInventario = usePermission('INVENTARIO.VER')
   const exportMenuRef = useRef(null)
   const [productos, setProductos] = useState([])
   const [bodegas, setBodegas] = useState([])
@@ -80,13 +84,15 @@ function InventarioKardexPage() {
   const [pagination, setPagination] = useState({ count: 0, next: null, previous: null })
   const [selectedMovimientoId, setSelectedMovimientoId] = useState(null)
   const [filters, setFilters] = useState({
-    producto_id: '',
-    bodega_id: '',
-    tipo: '',
-    documento_tipos: [],
-    referencia: '',
-    desde: '',
-    hasta: '',
+    producto_id: searchParams.get('producto_id') || '',
+    bodega_id: searchParams.get('bodega_id') || '',
+    tipo: searchParams.get('tipo') || '',
+    documento_tipos: searchParams.get('documento_tipo')
+      ? searchParams.get('documento_tipo').split(',').map((value) => value.trim()).filter(Boolean)
+      : [],
+    referencia: searchParams.get('referencia') || '',
+    desde: searchParams.get('desde') || '',
+    hasta: searchParams.get('hasta') || '',
     page: 1,
     page_size: 25,
   })
@@ -166,6 +172,26 @@ function InventarioKardexPage() {
 
     return () => clearTimeout(timeoutId)
   }, [submittedFilters, fetchKardex])
+
+  useEffect(() => {
+    if (!searchParams.get('producto_id')) {
+      return
+    }
+    const nextFilters = normalizeFiltersForQuery({
+      producto_id: searchParams.get('producto_id') || '',
+      bodega_id: searchParams.get('bodega_id') || '',
+      tipo: searchParams.get('tipo') || '',
+      documento_tipos: searchParams.get('documento_tipo')
+        ? searchParams.get('documento_tipo').split(',').map((value) => value.trim()).filter(Boolean)
+        : [],
+      referencia: searchParams.get('referencia') || '',
+      desde: searchParams.get('desde') || '',
+      hasta: searchParams.get('hasta') || '',
+      page: 1,
+      page_size: 25,
+    })
+    setSubmittedFilters(nextFilters)
+  }, [searchParams])
 
   useEffect(() => {
     if (!exportMenuOpen) {
@@ -251,7 +277,16 @@ function InventarioKardexPage() {
   const productExportName = (selectedProducto?.nombre || 'producto').toLowerCase().replace(/\s+/g, '_').slice(0, 40)
 
   const handleExportExcel = async () => {
-    if (movimientos.length === 0) {
+    if (!submittedFilters?.producto_id) {
+      return
+    }
+
+    const exportRows = await inventarioApi.getAllPaginated(
+      inventarioApi.endpoints.movimientosKardex,
+      submittedFilters,
+      { pageSize: 200, maxPages: 100 },
+    )
+    if (exportRows.length === 0) {
       return
     }
 
@@ -275,7 +310,7 @@ function InventarioKardexPage() {
         { header: 'Vencimiento', key: 'fecha_vencimiento', width: 14 },
         { header: 'Series', key: 'series_codigos', width: 30 },
       ],
-      rows: movimientos.map((row) => ({
+      rows: exportRows.map((row) => ({
         producto: selectedProducto?.nombre || String(filters.producto_id || '-'),
         producto_sku: selectedProducto?.sku || '-',
         bodega: bodegaById.get(String(row.bodega))?.nombre || String(row.bodega || '-'),
@@ -296,7 +331,16 @@ function InventarioKardexPage() {
   }
 
   const handleExportPdf = async () => {
-    if (movimientos.length === 0) {
+    if (!submittedFilters?.producto_id) {
+      return
+    }
+
+    const exportRows = await inventarioApi.getAllPaginated(
+      inventarioApi.endpoints.movimientosKardex,
+      submittedFilters,
+      { pageSize: 200, maxPages: 100 },
+    )
+    if (exportRows.length === 0) {
       return
     }
 
@@ -304,7 +348,7 @@ function InventarioKardexPage() {
       title: `Kardex de inventario - ${selectedProducto?.nombre || 'Producto'}`,
       fileName: `kardex_${productExportName}_${getTodaySuffix()}.pdf`,
       headers: ['Fecha', 'Tipo', 'Cant.', 'Stock ant.', 'Stock nuevo', 'Documento', 'Referencia'],
-      rows: movimientos.map((row) => [
+      rows: exportRows.map((row) => [
         formatDateTimeChile(row.creado_en),
         row.tipo || '-',
         formatQuantity(row.cantidad),
@@ -418,7 +462,7 @@ function InventarioKardexPage() {
                 variant="outline"
                 className="min-w-28"
                 onClick={() => setExportMenuOpen((prev) => !prev)}
-                disabled={movimientos.length === 0}
+                disabled={!canViewInventario || movimientos.length === 0}
               >
                 Exportar
               </Button>
@@ -492,14 +536,16 @@ function InventarioKardexPage() {
                   <td className="px-3 py-2">{formatDocumentoTipo(row.documento_tipo)}</td>
                   <td className="px-3 py-2">{row.referencia || '-'}</td>
                   <td className="px-3 py-2">
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant={String(selectedMovimientoId) === String(row.id) ? 'default' : 'outline'}
-                      onClick={() => setSelectedMovimientoId(row.id)}
-                    >
-                      Ver auditoria
-                    </Button>
+                    {canViewInventario ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant={String(selectedMovimientoId) === String(row.id) ? 'default' : 'outline'}
+                        onClick={() => setSelectedMovimientoId(row.id)}
+                      >
+                        Ver auditoria
+                      </Button>
+                    ) : null}
                   </td>
                 </tr>
               ))

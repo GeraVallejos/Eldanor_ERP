@@ -5,13 +5,14 @@ from apps.documentos.models import DocumentoNumeradoBase
 
 
 class EstadoDocumentoInventario(models.TextChoices):
+    BORRADOR = "BORRADOR", "Borrador"
     CONFIRMADO = "CONFIRMADO", "Confirmado"
 
 
 class AjusteInventarioMasivo(DocumentoNumeradoBase):
     referencia = models.CharField(max_length=150)
     motivo = models.CharField(max_length=120)
-    confirmado_en = models.DateTimeField(auto_now_add=True)
+    confirmado_en = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ["-creado_en", "-id"]
@@ -68,7 +69,7 @@ class TrasladoInventarioMasivo(DocumentoNumeradoBase):
         on_delete=models.PROTECT,
         related_name="traslados_masivos_destino",
     )
-    confirmado_en = models.DateTimeField(auto_now_add=True)
+    confirmado_en = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ["-creado_en", "-id"]

@@ -1,14 +1,18 @@
 from decimal import Decimal
+import io
+from uuid import uuid4
 
 import pytest
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.urls import reverse
+from openpyxl import Workbook
 from rest_framework import status
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from apps.auditoria.models import AuditEvent
 from apps.core.models import UserEmpresa
 from apps.documentos.models import TipoDocumentoReferencia
-from apps.inventario.models import Bodega, MovimientoInventario, ReservaStock, StockProducto
+from apps.inventario.models import Bodega, InventorySnapshot, MovimientoInventario, ReservaStock, StockProducto
 from apps.inventario.services.inventario_service import InventarioService
 from apps.productos.models import Categoria, Producto
 
@@ -240,7 +244,16 @@ class TestInventarioApi:
         )
         assert duplicate_response.status_code == status.HTTP_201_CREATED, duplicate_response.data
         assert duplicate_response.data["id"] != create_response.data["id"]
+        assert duplicate_response.data["estado"] == "BORRADOR"
         assert "DUPLICADO" in duplicate_response.data["referencia"]
+
+        confirm_response = api_client.post(
+            reverse("ajuste-inventario-masivo-confirmar", args=[duplicate_response.data["id"]]),
+            {},
+            format="json",
+        )
+        assert confirm_response.status_code == status.HTTP_200_OK, confirm_response.data
+        assert confirm_response.data["estado"] == "CONFIRMADO"
 
     def test_traslado_masivo_api_confirma_documento_con_varias_lineas(self, api_client, owner_usuario, empresa):
         api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
@@ -368,7 +381,293 @@ class TestInventarioApi:
         )
         assert duplicate_response.status_code == status.HTTP_201_CREATED, duplicate_response.data
         assert duplicate_response.data["id"] != create_response.data["id"]
+        assert duplicate_response.data["estado"] == "BORRADOR"
         assert "DUPLICADO" in duplicate_response.data["referencia"]
+
+        confirm_response = api_client.post(
+            reverse("traslado-inventario-masivo-confirmar", args=[duplicate_response.data["id"]]),
+            {},
+            format="json",
+        )
+        assert confirm_response.status_code == status.HTTP_200_OK, confirm_response.data
+        assert confirm_response.data["estado"] == "CONFIRMADO"
+
+    def test_ajuste_masivo_api_permite_guardar_borrador(self, api_client, owner_usuario, empresa):
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
+        producto = Producto.objects.create(
+            empresa=empresa,
+            nombre="Producto Borrador Ajuste",
+            sku="PBA-001",
+            stock_actual=Decimal("0.00"),
+            maneja_inventario=True,
+            precio_referencia=Decimal("1800"),
+        )
+        bodega = Bodega.all_objects.create(empresa=empresa, creado_por=owner_usuario, nombre="Borrador Ajuste")
+
+        response = api_client.post(
+            reverse("ajuste-inventario-masivo-list"),
+            {
+                "estado": "BORRADOR",
+                "referencia": "BORRADOR AJUSTE",
+                "motivo": "PREPARACION",
+                "observaciones": "",
+                "items": [{"producto_id": str(producto.id), "bodega_id": str(bodega.id), "stock_objetivo": "4.00"}],
+            },
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_201_CREATED, response.data
+        assert response.data["estado"] == "BORRADOR"
+        assert MovimientoInventario.all_objects.filter(
+            empresa=empresa,
+            documento_id=response.data["id"],
+        ).count() == 0
+
+    def test_ajuste_masivo_api_permite_editar_borrador(self, api_client, owner_usuario, empresa):
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
+        producto_a = Producto.objects.create(
+            empresa=empresa,
+            nombre="Producto Edit Ajuste A",
+            sku="PEAA-001",
+            stock_actual=Decimal("0.00"),
+            maneja_inventario=True,
+            precio_referencia=Decimal("1800"),
+        )
+        producto_b = Producto.objects.create(
+            empresa=empresa,
+            nombre="Producto Edit Ajuste B",
+            sku="PEAB-001",
+            stock_actual=Decimal("0.00"),
+            maneja_inventario=True,
+            precio_referencia=Decimal("1800"),
+        )
+        bodega = Bodega.all_objects.create(empresa=empresa, creado_por=owner_usuario, nombre="Editar Ajuste")
+
+        create_response = api_client.post(
+            reverse("ajuste-inventario-masivo-list"),
+            {
+                "estado": "BORRADOR",
+                "referencia": "BORRADOR BASE",
+                "motivo": "PREPARACION",
+                "observaciones": "",
+                "items": [{"producto_id": str(producto_a.id), "bodega_id": str(bodega.id), "stock_objetivo": "4.00"}],
+            },
+            format="json",
+        )
+        assert create_response.status_code == status.HTTP_201_CREATED, create_response.data
+
+        update_response = api_client.patch(
+            reverse("ajuste-inventario-masivo-detail", args=[create_response.data["id"]]),
+            {
+                "referencia": "BORRADOR EDITADO",
+                "motivo": "CONTEO FINAL",
+                "items": [{"producto_id": str(producto_b.id), "bodega_id": str(bodega.id), "stock_objetivo": "9.00"}],
+            },
+            format="json",
+        )
+
+        assert update_response.status_code == status.HTTP_200_OK, update_response.data
+        assert update_response.data["estado"] == "BORRADOR"
+        assert update_response.data["referencia"] == "BORRADOR EDITADO"
+        assert update_response.data["motivo"] == "CONTEO FINAL"
+        assert len(update_response.data["items"]) == 1
+        assert str(update_response.data["items"][0]["producto"]) == str(producto_b.id)
+
+    def test_ajuste_masivo_bulk_import_desde_xlsx_crea_borrador(self, api_client, owner_usuario, empresa):
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
+        producto = Producto.objects.create(
+            empresa=empresa,
+            nombre="Producto XLSX Ajuste",
+            sku="PXA-001",
+            stock_actual=Decimal("0.00"),
+            maneja_inventario=True,
+            precio_referencia=Decimal("1800"),
+        )
+        bodega = Bodega.all_objects.create(empresa=empresa, creado_por=owner_usuario, nombre="Casa Matriz")
+
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.append(["motivo", "referencia_operativa", "observaciones", "producto_sku", "bodega", "stock_objetivo"])
+        sheet.append(["Conteo ciclico", "Pasillo norte", "Revision semanal", producto.sku, bodega.nombre, 7])
+
+        buffer = io.BytesIO()
+        workbook.save(buffer)
+        upload = SimpleUploadedFile(
+            "ajustes_masivos.xlsx",
+            buffer.getvalue(),
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
+        response = api_client.post(
+            reverse("ajuste-inventario-masivo-bulk-import"),
+            {"file": upload},
+            format="multipart",
+        )
+
+        assert response.status_code == status.HTTP_200_OK, response.data
+        assert response.data["created"] == 1
+        assert response.data["errors"] == []
+        assert response.data["documento"]["estado"] == "BORRADOR"
+        assert response.data["documento"]["motivo"] == "CONTEO CICLICO"
+        assert MovimientoInventario.all_objects.filter(
+            empresa=empresa,
+            documento_id=response.data["documento"]["id"],
+        ).count() == 0
+
+    def test_ajuste_masivo_bulk_import_dry_run_no_persiste_borrador(self, api_client, owner_usuario, empresa):
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
+        producto = Producto.objects.create(
+            empresa=empresa,
+            nombre="Producto XLSX Ajuste Preview",
+            sku="PXAP-001",
+            stock_actual=Decimal("0.00"),
+            maneja_inventario=True,
+            precio_referencia=Decimal("1800"),
+        )
+        bodega = Bodega.all_objects.create(empresa=empresa, creado_por=owner_usuario, nombre="Preview Bodega")
+
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.append(["motivo", "referencia_operativa", "observaciones", "producto_sku", "bodega", "stock_objetivo"])
+        sheet.append(["Conteo preview", "Preview", "Sin persistencia", producto.sku, bodega.nombre, 4])
+
+        buffer = io.BytesIO()
+        workbook.save(buffer)
+        upload = SimpleUploadedFile(
+            "ajustes_preview.xlsx",
+            buffer.getvalue(),
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
+        response = api_client.post(
+            reverse("ajuste-inventario-masivo-bulk-import"),
+            {"file": upload, "dry_run": "true"},
+            format="multipart",
+        )
+
+        assert response.status_code == status.HTTP_200_OK, response.data
+        assert response.data["dry_run"] is True
+        assert response.data["created"] == 1
+        assert "documento" not in response.data
+        assert not AuditEvent.all_objects.filter(
+            empresa=empresa,
+            summary__icontains="Borrador de ajuste masivo",
+        ).exists()
+
+    def test_ajuste_masivo_bulk_template_descarga_plantilla(self, api_client, owner_usuario):
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
+
+        response = api_client.get(reverse("ajuste-inventario-masivo-bulk-template"))
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response["Content-Type"] == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        assert "attachment; filename=\"plantilla_ajustes_masivos_inventario.xlsx\"" in response["Content-Disposition"]
+
+    def test_traslado_masivo_bulk_import_desde_xlsx_crea_borrador(self, api_client, owner_usuario, empresa):
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
+        producto = Producto.objects.create(
+            empresa=empresa,
+            nombre="Producto XLSX Traslado",
+            sku="PXT-001",
+            stock_actual=Decimal("0.00"),
+            maneja_inventario=True,
+            precio_referencia=Decimal("1800"),
+        )
+        bodega_origen = Bodega.all_objects.create(empresa=empresa, creado_por=owner_usuario, nombre="Origen XLSX")
+        bodega_destino = Bodega.all_objects.create(empresa=empresa, creado_por=owner_usuario, nombre="Destino XLSX")
+
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.append(["motivo", "referencia_operativa", "observaciones", "bodega_origen", "bodega_destino", "producto_sku", "cantidad"])
+        sheet.append(["Cambio de layout", "Pasillo central", "Reubicacion", bodega_origen.nombre, bodega_destino.nombre, producto.sku, 3])
+
+        buffer = io.BytesIO()
+        workbook.save(buffer)
+        upload = SimpleUploadedFile(
+            "traslados_masivos.xlsx",
+            buffer.getvalue(),
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
+        response = api_client.post(
+            reverse("traslado-inventario-masivo-bulk-import"),
+            {"file": upload},
+            format="multipart",
+        )
+
+        assert response.status_code == status.HTTP_200_OK, response.data
+        assert response.data["created"] == 1
+        assert response.data["errors"] == []
+        assert response.data["documento"]["estado"] == "BORRADOR"
+        assert response.data["documento"]["bodega_origen_nombre"] == "ORIGEN XLSX"
+        assert response.data["documento"]["bodega_destino_nombre"] == "DESTINO XLSX"
+        assert MovimientoInventario.all_objects.filter(
+            empresa=empresa,
+            documento_id=response.data["documento"]["id"],
+        ).count() == 0
+
+    def test_traslado_masivo_api_permite_editar_borrador(self, api_client, owner_usuario, empresa):
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
+        producto_a = Producto.objects.create(
+            empresa=empresa,
+            nombre="Producto Edit Traslado A",
+            sku="PETA-001",
+            stock_actual=Decimal("0.00"),
+            maneja_inventario=True,
+            precio_referencia=Decimal("1800"),
+        )
+        producto_b = Producto.objects.create(
+            empresa=empresa,
+            nombre="Producto Edit Traslado B",
+            sku="PETB-001",
+            stock_actual=Decimal("0.00"),
+            maneja_inventario=True,
+            precio_referencia=Decimal("1800"),
+        )
+        bodega_origen = Bodega.all_objects.create(empresa=empresa, creado_por=owner_usuario, nombre="Origen Edit")
+        bodega_destino = Bodega.all_objects.create(empresa=empresa, creado_por=owner_usuario, nombre="Destino Edit")
+        bodega_destino_2 = Bodega.all_objects.create(empresa=empresa, creado_por=owner_usuario, nombre="Destino Edit 2")
+
+        create_response = api_client.post(
+            reverse("traslado-inventario-masivo-list"),
+            {
+                "estado": "BORRADOR",
+                "referencia": "TRASLADO BASE",
+                "motivo": "REUBICACION",
+                "observaciones": "",
+                "bodega_origen_id": str(bodega_origen.id),
+                "bodega_destino_id": str(bodega_destino.id),
+                "items": [{"producto_id": str(producto_a.id), "cantidad": "2.00"}],
+            },
+            format="json",
+        )
+        assert create_response.status_code == status.HTTP_201_CREATED, create_response.data
+
+        update_response = api_client.patch(
+            reverse("traslado-inventario-masivo-detail", args=[create_response.data["id"]]),
+            {
+                "motivo": "REUBICACION FINAL",
+                "bodega_destino_id": str(bodega_destino_2.id),
+                "items": [{"producto_id": str(producto_b.id), "cantidad": "5.00"}],
+            },
+            format="json",
+        )
+
+        assert update_response.status_code == status.HTTP_200_OK, update_response.data
+        assert update_response.data["estado"] == "BORRADOR"
+        assert update_response.data["motivo"] == "REUBICACION FINAL"
+        assert str(update_response.data["bodega_destino"]) == str(bodega_destino_2.id)
+        assert len(update_response.data["items"]) == 1
+        assert str(update_response.data["items"][0]["producto"]) == str(producto_b.id)
+
+    def test_traslado_masivo_bulk_template_descarga_plantilla(self, api_client, owner_usuario):
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
+
+        response = api_client.get(reverse("traslado-inventario-masivo-bulk-template"))
+
+        assert response.status_code == status.HTTP_200_OK
+        assert response["Content-Type"] == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        assert "attachment; filename=\"plantilla_traslados_masivos_inventario.xlsx\"" in response["Content-Disposition"]
 
     def test_previsualizar_regularizacion_por_api_devuelve_diferencia(self, api_client, owner_usuario, empresa):
         api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
@@ -1265,6 +1564,119 @@ class TestInventarioApi:
         assert len(resp.data["criticos"]) == 1
         assert resp.data["criticos"][0]["producto__nombre"] == "VACUNA CANINA"
         assert Decimal(str(resp.data["metrics"]["valor_total"])) == Decimal("3000")
+        assert resp.data["health"]["productos_criticos"] == 1
+        assert resp.data["health"]["descuadrados_snapshot"] == 0
+        assert resp.data["reconciliation"]["count"] == 0
+
+    def test_analytics_inventario_expone_salud_y_conciliacion(self, api_client, owner_usuario, empresa):
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
+
+        producto = Producto.objects.create(
+            empresa=empresa,
+            nombre="Producto Conciliacion",
+            sku="PCON-001",
+            stock_actual=Decimal("0.00"),
+            maneja_inventario=True,
+            stock_minimo=Decimal("2.00"),
+            precio_referencia=Decimal("2500"),
+        )
+        bodega = Bodega.all_objects.create(empresa=empresa, creado_por=owner_usuario, nombre="Bodega Conciliacion")
+
+        InventarioService.registrar_movimiento(
+            producto_id=producto.id,
+            bodega_id=bodega.id,
+            tipo="ENTRADA",
+            cantidad=Decimal("5.00"),
+            costo_unitario=Decimal("1000.00"),
+            referencia="ANALYTICS-CONCILIACION",
+            empresa=empresa,
+            usuario=owner_usuario,
+        )
+        InventarioService.reservar_stock(
+            producto_id=producto.id,
+            bodega_id=bodega.id,
+            cantidad=Decimal("2.00"),
+            documento_tipo=TipoDocumentoReferencia.PEDIDO_VENTA,
+            documento_id=uuid4(),
+            empresa=empresa,
+            usuario=owner_usuario,
+        )
+
+        stock = StockProducto.all_objects.get(empresa=empresa, producto=producto, bodega=bodega)
+        InventorySnapshot.all_objects.create(
+            empresa=empresa,
+            creado_por=owner_usuario,
+            producto=producto,
+            bodega=bodega,
+            stock=stock.stock,
+            valor_stock=stock.valor_stock,
+            costo_promedio=Decimal("1000.0000"),
+        )
+        stock.stock = Decimal("7.00")
+        stock.valor_stock = Decimal("7000.00")
+        stock.save()
+
+        resp = api_client.get(
+            reverse("stock-producto-analytics"),
+            {"group_by": "producto", "only_with_stock": "true"},
+        )
+
+        assert resp.status_code == status.HTTP_200_OK, resp.data
+        assert resp.data["health"]["reservas_activas"] == 1
+        assert Decimal(str(resp.data["health"]["unidades_reservadas"])) == Decimal("2.00")
+        assert resp.data["health"]["bodegas_con_stock"] == 1
+        assert resp.data["health"]["descuadrados_snapshot"] == 1
+        assert resp.data["reconciliation"]["count"] == 1
+        assert resp.data["reconciliation"]["detail"][0]["producto_nombre"] == "PRODUCTO CONCILIACION"
+        assert Decimal(str(resp.data["reconciliation"]["detail"][0]["stock_actual"])) == Decimal("7.00")
+
+    def test_reconciliation_endpoint_devuelve_dataset_paginado(self, api_client, owner_usuario, empresa):
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
+
+        producto = Producto.objects.create(
+            empresa=empresa,
+            nombre="Producto Reconciliation Dataset",
+            sku="PREC-001",
+            stock_actual=Decimal("0.00"),
+            maneja_inventario=True,
+            precio_referencia=Decimal("2500"),
+        )
+        bodega = Bodega.all_objects.create(empresa=empresa, creado_por=owner_usuario, nombre="Bodega Dataset")
+
+        InventarioService.registrar_movimiento(
+            producto_id=producto.id,
+            bodega_id=bodega.id,
+            tipo="ENTRADA",
+            cantidad=Decimal("4.00"),
+            costo_unitario=Decimal("1000.00"),
+            referencia="RECON-DATASET",
+            empresa=empresa,
+            usuario=owner_usuario,
+        )
+        stock = StockProducto.all_objects.get(empresa=empresa, producto=producto, bodega=bodega)
+        InventorySnapshot.all_objects.create(
+            empresa=empresa,
+            creado_por=owner_usuario,
+            producto=producto,
+            bodega=bodega,
+            stock=Decimal("3.00"),
+            valor_stock=Decimal("3000.00"),
+            costo_promedio=Decimal("1000.0000"),
+        )
+        stock.stock = Decimal("4.00")
+        stock.valor_stock = Decimal("4000.00")
+        stock.save()
+
+        resp = api_client.get(
+            reverse("stock-producto-reconciliation"),
+            {"producto_id": str(producto.id), "page_size": 10},
+        )
+
+        assert resp.status_code == status.HTTP_200_OK, resp.data
+        assert resp.data["count"] == 1
+        assert len(resp.data["results"]) == 1
+        assert resp.data["results"][0]["producto_nombre"] == "PRODUCTO RECONCILIATION DATASET"
+        assert Decimal(str(resp.data["results"][0]["stock_snapshot"])) == Decimal("3.00")
 
     def test_resumen_operativo_movimientos_retorna_metricas(self, api_client, owner_usuario, empresa):
         api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
