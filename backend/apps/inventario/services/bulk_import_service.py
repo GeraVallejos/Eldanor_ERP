@@ -1,8 +1,8 @@
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 from apps.auditoria.models import AuditSeverity
 from apps.auditoria.services import AuditoriaService
-from apps.core.exceptions import BusinessRuleError
+from apps.core.exceptions import AppError, BusinessRuleError
 from apps.core.permisos.constantes_permisos import Acciones, Modulos
 from apps.core.services import (
     DomainEventService,
@@ -54,7 +54,7 @@ def _to_decimal(raw_value, *, field_name):
     normalized = value.replace(",", ".")
     try:
         return Decimal(normalized)
-    except Exception as exc:
+    except (InvalidOperation, ValueError, TypeError) as exc:
         raise BusinessRuleError(f"{field_name} invalido.") from exc
 
 
@@ -218,7 +218,7 @@ def import_ajustes_masivos_desde_archivo(*, uploaded_file, user, empresa, dry_ru
                         "stock_objetivo": stock_objetivo,
                     }
                 )
-            except Exception as exc:
+            except AppError as exc:
                 errors.append(
                     {
                         "line": line_number,
@@ -342,7 +342,7 @@ def import_traslados_masivos_desde_archivo(*, uploaded_file, user, empresa, dry_
                         "cantidad": cantidad,
                     }
                 )
-            except Exception as exc:
+            except AppError as exc:
                 errors.append(
                     {
                         "line": line_number,
