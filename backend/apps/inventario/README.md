@@ -18,7 +18,7 @@
 - Mantiene `InventorySnapshot` para lectura historica y conciliacion.
 - Mantiene `CorteInventario` como foto global del inventario, tanto manual como de cierre mensual contable.
 - Mantiene trazabilidad por `StockLote` y `StockSerie`.
-- Audita movimientos, reservas, liberaciones y documentos masivos.
+- Audita movimientos, reservas, liberaciones, documentos masivos y cierres.
 
 ### Operacion documental
 
@@ -35,7 +35,7 @@
 
 - Permite correccion de codigo de lote con auditoria.
 - Permite anular lotes vacios y sin series disponibles.
-- Bloquea lotes “muy similares” para evitar duplicados por digitacion como `1` vs `001`.
+- Bloquea lotes "muy similares" para evitar duplicados por digitacion como `1` vs `001`.
 
 ## Integraciones backend
 
@@ -81,7 +81,7 @@
 
 ### Lotes, vencimiento y series
 
-- Un producto con lotes o vencimiento no debe ajustarse “a ciegas”.
+- Un producto con lotes o vencimiento no debe ajustarse "a ciegas".
 - Si un lote existente ya tiene vencimiento, no puede recibir otro distinto.
 - Las series se crean solo en entrada y deben existir para salida.
 - La importacion masiva valida lotes, vencimiento y similitud de codigos antes de crear borradores.
@@ -91,6 +91,12 @@
 - La importacion nunca mueve stock directo; crea borradores.
 - Confirmar documento ejecuta los movimientos reales.
 - Los borradores pueden editarse, duplicarse o eliminarse mientras sigan en `BORRADOR`.
+
+### Cortes y cierres
+
+- `cortes-inventario` permite generar y consultar snapshots globales auditados del inventario.
+- `cierre_mensual` permite emitir un cierre contable mensual unico por periodo `YYYY-MM`.
+- Los cortes quedan persistidos con detalle por producto y bodega para consulta y exportacion posterior.
 
 ### Correccion de lotes
 
@@ -103,8 +109,7 @@
 - `reconciliation` entrega dataset paginado de diferencias contra snapshots.
 - `historial` y `auditoria` exponen trazabilidad de movimientos.
 - `kardex` concentra lectura transaccional por producto y bodega.
-- `cortes-inventario` permite generar y consultar snapshots globales auditados del inventario.
-- `cierre_mensual` permite emitir un cierre contable mensual unico por periodo `YYYY-MM`.
+- Los cortes y cierres mensuales sirven como soporte operativo y contable.
 
 ## Estado actual del modulo
 
@@ -116,9 +121,10 @@ El modulo ya cumple un nivel enterprise solido en estos puntos:
 - auditoria y outbox
 - trazabilidad por lote, vencimiento y serie
 - conciliacion y reportes operativos
+- cortes globales y cierres mensuales exportables
 - correccion administrativa de lotes
 
 ## Deuda residual baja
 
 - separar permisos finos por operacion especializada cuando el negocio lo necesite
-- seguir ampliando documentacion de integraciones cruzadas si crecen ventas o compras
+- profundizar integracion con contabilidad para bloqueo de periodos, reapertura y conciliacion contable
