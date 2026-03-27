@@ -56,6 +56,56 @@ describe('inventario/InventarioReportesPage', () => {
           ],
         }),
       ),
+      http.get('*/cortes-inventario/', async () =>
+        HttpResponse.json({
+          count: 1,
+          next: null,
+          previous: null,
+          results: [
+            {
+              id: 'corte-1',
+              numero: 'CIN-0001',
+              estado: 'GENERADO',
+              fecha_corte: '2026-03-27',
+              observaciones: 'Cierre diario',
+              subtotal: 15,
+              total: 180000,
+              reservado_total: 4,
+              disponible_total: 11,
+              items_count: 2,
+              creado_en: '2026-03-27T13:00:00Z',
+              actualizado_en: '2026-03-27T13:00:00Z',
+            },
+          ],
+        }),
+      ),
+      http.get('*/cortes-inventario/corte-1/items/', async () =>
+        HttpResponse.json({
+          count: 1,
+          next: null,
+          previous: null,
+          results: [
+            {
+              id: 'corte-item-1',
+              producto: 'prod-2',
+              bodega: 'bod-1',
+              producto_nombre: 'Motosierra',
+              producto_sku: 'MOT-001',
+              producto_categoria_nombre: 'Herramientas',
+              bodega_nombre: 'Principal',
+              stock: 5,
+              reservado: 1,
+              disponible: 4,
+              costo_promedio: 12000,
+              valor_stock: 60000,
+              lotes_activos: 'LT-001',
+              proximo_vencimiento: '2027-10-31',
+              series_disponibles: 0,
+              series_muestra: '',
+            },
+          ],
+        }),
+      ),
       http.get('*/stocks/analytics/', async ({ request }) => {
         analyticsParams = Object.fromEntries(new URL(request.url).searchParams.entries())
         const groupBy = analyticsParams.group_by || 'producto'
@@ -114,11 +164,16 @@ describe('inventario/InventarioReportesPage', () => {
     expect(screen.getByText('Diferencias contra ultimo snapshot')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Investigar en kardex' })).toHaveAttribute('href', expect.stringContaining('/inventario/kardex?'))
     expect(screen.getByRole('link', { name: 'Abrir ajuste' })).toHaveAttribute('href', expect.stringContaining('/inventario/ajustes?'))
-    expect(screen.getByRole('button', { name: 'Actualizar' })).toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: 'Actualizar' }).length).toBeGreaterThan(0)
     expect(screen.getByRole('link', { name: 'Ver auditoria' })).toHaveAttribute('href', '/inventario/auditoria')
+    expect(screen.getByRole('button', { name: 'Ver cortes y cierres' })).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: 'Ver cortes y cierres' }))
+    expect(screen.getByText('Snapshot completo del inventario')).toBeInTheDocument()
+    expect(screen.getByText('CIN-0001')).toBeInTheDocument()
 
     await userEvent.selectOptions(screen.getByLabelText('Agrupar por'), 'bodega')
-    await userEvent.click(screen.getByRole('button', { name: 'Actualizar' }))
+    await userEvent.click(screen.getAllByRole('button', { name: 'Actualizar' })[0])
 
     await waitFor(() => {
       expect(analyticsParams).toMatchObject({ group_by: 'bodega' })
@@ -135,6 +190,9 @@ describe('inventario/InventarioReportesPage', () => {
       ),
       http.get('*/bodegas/', async () => HttpResponse.json([{ id: 'bod-1', nombre: 'Principal' }])),
       http.get('*/stocks/reconciliation/', async () =>
+        HttpResponse.json({ count: 0, next: null, previous: null, results: [] }),
+      ),
+      http.get('*/cortes-inventario/', async () =>
         HttpResponse.json({ count: 0, next: null, previous: null, results: [] }),
       ),
       http.get('*/stocks/analytics/', async () =>

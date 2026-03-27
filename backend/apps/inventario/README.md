@@ -16,6 +16,7 @@
 
 - Registra movimientos valorizados en `MovimientoInventario`.
 - Mantiene `InventorySnapshot` para lectura historica y conciliacion.
+- Mantiene `CorteInventario` como foto global del inventario, tanto manual como de cierre mensual contable.
 - Mantiene trazabilidad por `StockLote` y `StockSerie`.
 - Audita movimientos, reservas, liberaciones y documentos masivos.
 
@@ -67,6 +68,8 @@
   Alta, actualizacion e inactivacion controlada de bodegas.
 - `lote_service.py`
   Correccion y anulacion segura de lotes.
+- `corte_inventario_service.py`
+  Generacion de cortes globales auditados y cierres mensuales para consultar el inventario completo en una fecha de cierre.
 
 ## Contratos funcionales clave
 
@@ -100,6 +103,8 @@
 - `reconciliation` entrega dataset paginado de diferencias contra snapshots.
 - `historial` y `auditoria` exponen trazabilidad de movimientos.
 - `kardex` concentra lectura transaccional por producto y bodega.
+- `cortes-inventario` permite generar y consultar snapshots globales auditados del inventario.
+- `cierre_mensual` permite emitir un cierre contable mensual unico por periodo `YYYY-MM`.
 
 ## Estado actual del modulo
 

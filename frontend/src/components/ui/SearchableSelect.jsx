@@ -95,6 +95,7 @@ function SearchableSelect({
 
   const normalizedQuery = normalizeText(query)
   const displayValue = open ? query : selectedOption?.label || ''
+  const canClear = Boolean(query || selectedOption)
 
   const filteredOptions = useMemo(() => {
     if (!normalizedQuery) {
@@ -192,7 +193,7 @@ function SearchableSelect({
           setCursor(-1)
         }}
         />
-        {query && (
+        {canClear && (
           <button
             type="button"
             onClick={handleClear}

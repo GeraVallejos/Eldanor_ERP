@@ -23,6 +23,10 @@ from apps.inventario.api.serializer import (
     AjusteInventarioMasivoUpdateSerializer,
     AnularLoteSerializer,
     BodegaSerializer,
+    CorteInventarioCreateSerializer,
+    CorteInventarioCierreMensualSerializer,
+    CorteInventarioItemSerializer,
+    CorteInventarioSerializer,
     CorregirLoteSerializer,
     InventorySnapshotSerializer,
     MovimientoInventarioSerializer,
@@ -38,6 +42,7 @@ from apps.inventario.api.serializer import (
 from apps.inventario.models import (
     AjusteInventarioMasivo,
     Bodega,
+    CorteInventario,
     EstadoDocumentoInventario,
     InventorySnapshot,
     MovimientoInventario,
@@ -53,6 +58,7 @@ from apps.inventario.services.bulk_import_service import (
     import_ajustes_masivos_desde_archivo,
     import_traslados_masivos_desde_archivo,
 )
+from apps.inventario.services.corte_inventario_service import CorteInventarioService
 from apps.inventario.services.documento_inventario_service import DocumentoInventarioService
 from apps.inventario.services.bodega_service import BodegaService
 from apps.inventario.services.inventario_service import InventarioService
@@ -620,6 +626,12 @@ class InventarioReconciliationPagination(PageNumberPagination):
     max_page_size = 100
 
 
+class InventarioCorteItemPagination(PageNumberPagination):
+    page_size = 25
+    page_size_query_param = "page_size"
+    max_page_size = 200
+
+
 class MovimientoInventarioViewSet(TenantViewSetMixin, ModelViewSet):
     model = MovimientoInventario
     serializer_class = MovimientoInventarioSerializer
@@ -952,6 +964,91 @@ class InventorySnapshotViewSet(TenantViewSetMixin, ModelViewSet):
         "list": Acciones.VER,
         "retrieve": Acciones.VER,
     }
+
+
+class CorteInventarioViewSet(TenantViewSetMixin, ModelViewSet):
+    model = CorteInventario
+    serializer_class = CorteInventarioSerializer
+    permission_classes = [IsAuthenticated, TieneRelacionActiva, TienePermisoModuloAccion]
+    permission_modulo = Modulos.INVENTARIO
+    permission_action_map = {
+        "list": Acciones.VER,
+        "retrieve": Acciones.VER,
+        "create": Acciones.CREAR,
+        "cierre_mensual": Acciones.CREAR,
+        "items": Acciones.VER,
+    }
+    http_method_names = ["get", "post", "head", "options"]
+
+    def get_queryset(self):
+        queryset = super().get_queryset().order_by("-fecha_corte", "-creado_en", "-id")
+        fecha_corte = self.request.query_params.get("fecha_corte")
+        tipo_corte = self.request.query_params.get("tipo_corte")
+        periodo_referencia = self.request.query_params.get("periodo_referencia")
+        desde = self.request.query_params.get("desde")
+        hasta = self.request.query_params.get("hasta")
+
+        if fecha_corte:
+            queryset = queryset.filter(fecha_corte=fecha_corte)
+        if tipo_corte:
+            queryset = queryset.filter(tipo_corte=tipo_corte)
+        if periodo_referencia:
+            queryset = queryset.filter(periodo_referencia=periodo_referencia)
+        if desde:
+            queryset = queryset.filter(fecha_corte__gte=desde)
+        if hasta:
+            queryset = queryset.filter(fecha_corte__lte=hasta)
+        return queryset
+
+    def create(self, request, *args, **kwargs):
+        serializer = CorteInventarioCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        corte = CorteInventarioService.generar_corte_global(
+            empresa=self.get_empresa(),
+            usuario=request.user,
+            fecha_corte=serializer.validated_data["fecha_corte"],
+            observaciones=serializer.validated_data.get("observaciones", ""),
+        )
+        output = self.get_serializer(corte)
+        return Response(output.data, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=["post"])
+    def cierre_mensual(self, request):
+        serializer = CorteInventarioCierreMensualSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        corte = CorteInventarioService.generar_cierre_mensual(
+            empresa=self.get_empresa(),
+            usuario=request.user,
+            periodo=serializer.validated_data["periodo"],
+            observaciones=serializer.validated_data.get("observaciones", ""),
+        )
+        output = self.get_serializer(corte)
+        return Response(output.data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["get"])
+    def items(self, request, pk=None):
+        corte = CorteInventarioService.obtener_corte(corte_id=pk, empresa=self.get_empresa())
+        queryset = corte.items.all().order_by("producto_nombre", "bodega_nombre", "id")
+
+        producto_id = request.query_params.get("producto_id")
+        bodega_id = request.query_params.get("bodega_id")
+        q = request.query_params.get("q")
+        if producto_id:
+            queryset = queryset.filter(producto_id=producto_id)
+        if bodega_id:
+            queryset = queryset.filter(bodega_id=bodega_id)
+        if q:
+            queryset = queryset.filter(
+                Q(producto_nombre__icontains=q)
+                | Q(producto_sku__icontains=q)
+                | Q(bodega_nombre__icontains=q)
+                | Q(lotes_activos__icontains=q)
+            )
+
+        paginator = InventarioCorteItemPagination()
+        page = paginator.paginate_queryset(queryset, request, view=self)
+        serializer = CorteInventarioItemSerializer(page, many=True)
+        return paginator.get_paginated_response(serializer.data)
 
 
 class AjusteInventarioMasivoViewSet(TenantViewSetMixin, ModelViewSet):
