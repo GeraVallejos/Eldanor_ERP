@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, createSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { api } from '@/api/client'
 import { normalizeApiError } from '@/api/errors'
@@ -10,6 +10,7 @@ import { buttonVariants } from '@/components/ui/buttonVariants'
 import { formatDateTimeChile, getChileDateSuffix } from '@/lib/dateTimeFormat'
 import { formatCurrencyCLP, formatSmartNumber } from '@/lib/numberFormat'
 import { cn } from '@/lib/utils'
+import { inventarioApi } from '@/modules/inventario/store'
 import { mergeProductosCatalog, searchProductosCatalog } from '@/modules/productos/services/productosCatalogCache'
 import { downloadExcelFile } from '@/modules/shared/exports/downloadExcelFile'
 import { downloadSimpleTablePdf } from '@/modules/shared/exports/downloadSimpleTablePdf'
@@ -43,6 +44,25 @@ function formatInventoryContext({ groupBy, producto, bodega, onlyWithStock }) {
   ]
 }
 
+function formatDateCell(value) {
+  if (!value) {
+    return '-'
+  }
+  return formatDateTimeChile(value)
+}
+
+function buildRemediationHref(path, params) {
+  const search = createSearchParams(
+    Object.entries(params).reduce((acc, [key, value]) => {
+      if (value !== null && value !== undefined && value !== '') {
+        acc[key] = String(value)
+      }
+      return acc
+    }, {}),
+  ).toString()
+  return search ? `${path}?${search}` : path
+}
+
 function InventarioReportesPage() {
   const [productos, setProductos] = useState([])
   const [bodegas, setBodegas] = useState([])
@@ -54,6 +74,9 @@ function InventarioReportesPage() {
   })
   const [onlyWithStock, setOnlyWithStock] = useState(true)
   const [loadingProductos, setLoadingProductos] = useState(false)
+  const [reconciliationRows, setReconciliationRows] = useState([])
+  const [reconciliationPagination, setReconciliationPagination] = useState({ count: 0, next: null, previous: null })
+  const [reconciliationPage, setReconciliationPage] = useState(1)
 
   const loadCatalogs = useCallback(async () => {
     try {
@@ -95,6 +118,24 @@ function InventarioReportesPage() {
     }
   }, [])
 
+  const loadReconciliation = useCallback(async (nextFilters, page = 1) => {
+    try {
+      const data = await inventarioApi.getPaginated(inventarioApi.endpoints.stockReconciliation, {
+        ...nextFilters,
+        page,
+        page_size: 20,
+      })
+      setReconciliationRows(data.results || [])
+      setReconciliationPagination({
+        count: Number(data.count || 0),
+        next: data.next || null,
+        previous: data.previous || null,
+      })
+    } catch (error) {
+      toast.error(normalizeApiError(error, { fallback: 'No se pudo cargar la conciliacion de inventario.' }))
+    }
+  }, [])
+
   useEffect(() => {
     const timeoutId = setTimeout(() => {
       void loadCatalogs()
@@ -103,10 +144,14 @@ function InventarioReportesPage() {
         producto_id: '',
         bodega_id: '',
       }, true)
+      void loadReconciliation({
+        producto_id: '',
+        bodega_id: '',
+      }, 1)
     }, 0)
 
     return () => clearTimeout(timeoutId)
-  }, [loadAnalytics, loadCatalogs])
+  }, [loadAnalytics, loadCatalogs, loadReconciliation])
 
   const updateFilter = (key, value) => {
     setFilters((prev) => ({ ...prev, [key]: value }))
@@ -150,6 +195,11 @@ function InventarioReportesPage() {
   const onSubmit = async (event) => {
     event.preventDefault()
     await loadAnalytics(filters, onlyWithStock)
+    setReconciliationPage(1)
+    await loadReconciliation({
+      producto_id: filters.producto_id,
+      bodega_id: filters.bodega_id,
+    }, 1)
   }
 
   const getTodaySuffix = () => getChileDateSuffix()
@@ -287,6 +337,8 @@ function InventarioReportesPage() {
   const metrics = analytics?.metrics || {}
   const topValorizados = analytics?.top_valorizados || []
   const criticos = analytics?.criticos || []
+  const health = analytics?.health || {}
+  const reconciliationSummary = analytics?.reconciliation || {}
   const inventoryContext = formatInventoryContext({
     groupBy: filters.group_by,
     producto: filters.producto_id ? productoById.get(String(filters.producto_id))?.nombre : '',
@@ -436,6 +488,33 @@ function InventarioReportesPage() {
         </div>
       </div>
 
+      <div className="grid gap-4 lg:grid-cols-3">
+        <div className="rounded-md border border-border bg-card p-4">
+          <p className="text-xs uppercase tracking-wide text-muted-foreground">Salud operativa</p>
+          <div className="mt-3 space-y-2 text-sm">
+            <p>Productos criticos: <span className="font-medium">{formatNumber(health.productos_criticos || 0)}</span></p>
+            <p>Reservas activas: <span className="font-medium">{formatNumber(health.reservas_activas || 0)}</span></p>
+            <p>Unidades reservadas: <span className="font-medium">{formatNumber(health.unidades_reservadas || 0)}</span></p>
+          </div>
+        </div>
+
+        <div className="rounded-md border border-border bg-card p-4">
+          <p className="text-xs uppercase tracking-wide text-muted-foreground">Cobertura estructural</p>
+          <div className="mt-3 space-y-2 text-sm">
+            <p>Bodegas con stock: <span className="font-medium">{formatNumber(health.bodegas_con_stock || 0)}</span></p>
+            <p>Sin snapshot: <span className="font-medium">{formatNumber(health.sin_snapshot || 0)}</span></p>
+            <p>Descuadrados vs snapshot: <span className="font-medium">{formatNumber(reconciliationSummary.count || health.descuadrados_snapshot || 0)}</span></p>
+          </div>
+        </div>
+
+        <div className="rounded-md border border-border bg-card p-4">
+          <p className="text-xs uppercase tracking-wide text-muted-foreground">Lectura enterprise</p>
+          <p className="mt-3 text-sm text-muted-foreground">
+            Este panel resume criticidad, reservas y conciliacion contra el ultimo snapshot por producto y bodega.
+          </p>
+        </div>
+      </div>
+
       <div className="overflow-x-auto rounded-md border border-border bg-card">
         <div className="border-b border-border px-4 py-3">
           <p className="text-sm text-muted-foreground">Detalle exportable</p>
@@ -481,6 +560,114 @@ function InventarioReportesPage() {
             )}
           </tbody>
         </table>
+      </div>
+
+      <div className="overflow-x-auto rounded-md border border-border bg-card">
+        <div className="border-b border-border px-4 py-3">
+          <p className="text-sm text-muted-foreground">Conciliacion de stock</p>
+          <h3 className="text-lg font-semibold">Diferencias contra ultimo snapshot</h3>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Registros detectados: {formatNumber(reconciliationPagination.count || reconciliationSummary.count || 0)}
+          </p>
+        </div>
+        <table className="min-w-full text-sm">
+          <thead className="bg-muted/40">
+            <tr>
+              <th className="px-3 py-2 text-left font-medium">Producto</th>
+              <th className="px-3 py-2 text-left font-medium">Bodega</th>
+              <th className="px-3 py-2 text-left font-medium">Stock actual</th>
+              <th className="px-3 py-2 text-left font-medium">Stock snapshot</th>
+              <th className="px-3 py-2 text-left font-medium">Valor actual</th>
+              <th className="px-3 py-2 text-left font-medium">Valor snapshot</th>
+              <th className="px-3 py-2 text-left font-medium">Ultimo snapshot</th>
+              <th className="px-3 py-2 text-left font-medium">Acciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            {reconciliationRows.length > 0 ? (
+              reconciliationRows.map((row, index) => (
+                <tr key={`${row.producto_id}-${row.bodega_id}-${index}`} className="border-t border-border">
+                  <td className="px-3 py-2">{row.producto_nombre || '-'}</td>
+                  <td className="px-3 py-2">{row.bodega_nombre || '-'}</td>
+                  <td className="px-3 py-2">{formatNumber(row.stock_actual)}</td>
+                  <td className="px-3 py-2">{formatNumber(row.stock_snapshot)}</td>
+                  <td className="px-3 py-2">{formatCurrency(row.valor_actual)}</td>
+                  <td className="px-3 py-2">{formatCurrency(row.valor_snapshot)}</td>
+                  <td className="px-3 py-2">{formatDateCell(row.ultimo_snapshot_en)}</td>
+                  <td className="px-3 py-2">
+                    <div className="flex flex-wrap gap-2">
+                      <Link
+                        to={buildRemediationHref('/inventario/kardex', {
+                          producto_id: row.producto_id,
+                          bodega_id: row.bodega_id,
+                          desde: row.ultimo_snapshot_en,
+                        })}
+                        className={cn(buttonVariants({ variant: 'outline', size: 'sm' }))}
+                      >
+                        Investigar en kardex
+                      </Link>
+                      <Link
+                        to={buildRemediationHref('/inventario/ajustes', {
+                          producto_id: row.producto_id,
+                          bodega_id: row.bodega_id,
+                          stock_objetivo: row.stock_snapshot,
+                          motivo: 'CONCILIACION SNAPSHOT',
+                        })}
+                        className={cn(buttonVariants({ variant: 'outline', size: 'sm' }))}
+                      >
+                        Abrir ajuste
+                      </Link>
+                    </div>
+                  </td>
+                </tr>
+              ))
+            ) : (
+              <tr>
+                <td className="px-3 py-3 text-muted-foreground" colSpan={8}>
+                  Sin diferencias detectadas contra snapshots para los filtros actuales.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+        <div className="flex items-center justify-between border-t border-border px-4 py-3">
+          <p className="text-xs text-muted-foreground">Total diferencias: {reconciliationPagination.count}</p>
+          <div className="flex gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={!reconciliationPagination.previous || reconciliationPage <= 1}
+              onClick={() => {
+                const nextPage = Math.max(reconciliationPage - 1, 1)
+                setReconciliationPage(nextPage)
+                void loadReconciliation({
+                  producto_id: filters.producto_id,
+                  bodega_id: filters.bodega_id,
+                }, nextPage)
+              }}
+            >
+              Anterior
+            </Button>
+            <span className="self-center text-xs text-muted-foreground">Pagina {reconciliationPage}</span>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={!reconciliationPagination.next}
+              onClick={() => {
+                const nextPage = reconciliationPage + 1
+                setReconciliationPage(nextPage)
+                void loadReconciliation({
+                  producto_id: filters.producto_id,
+                  bodega_id: filters.bodega_id,
+                }, nextPage)
+              }}
+            >
+              Siguiente
+            </Button>
+          </div>
+        </div>
       </div>
     </section>
   )

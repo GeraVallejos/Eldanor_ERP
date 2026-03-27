@@ -12,6 +12,7 @@ import { inventarioApi, useInventarioHistorial } from '@/modules/inventario/stor
 import { mergeProductosCatalog, searchProductosCatalog } from '@/modules/productos/services/productosCatalogCache'
 import { downloadExcelFile } from '@/modules/shared/exports/downloadExcelFile'
 import { downloadSimpleTablePdf } from '@/modules/shared/exports/downloadSimpleTablePdf'
+import { usePermission } from '@/modules/shared/auth/usePermission'
 
 const DOCUMENTO_TIPO_OPTIONS = [
   { value: '', label: 'Todos' },
@@ -73,6 +74,7 @@ function buildEventRowsForExport(rows, productoById, bodegaById) {
 }
 
 function InventarioAuditoriaPage() {
+  const canViewInventario = usePermission('INVENTARIO.VER')
   const [productos, setProductos] = useState([])
   const [bodegas, setBodegas] = useState([])
   const [loadingProductos, setLoadingProductos] = useState(false)
@@ -223,7 +225,21 @@ function InventarioAuditoriaPage() {
   }
 
   const handleExportExcel = async () => {
-    if (exportRows.length === 0) return
+    const allRows = await inventarioApi.getAllPaginated(
+      inventarioApi.endpoints.movimientosHistorial,
+      {
+        producto_id: submittedFilters.producto_id || undefined,
+        bodega_id: submittedFilters.bodega_id || undefined,
+        documento_tipo: submittedFilters.documento_tipo || undefined,
+        tipo: submittedFilters.tipo || undefined,
+        referencia: submittedFilters.referencia || undefined,
+        desde: submittedFilters.desde || undefined,
+        hasta: submittedFilters.hasta || undefined,
+      },
+      { pageSize: 100, maxPages: 100 },
+    )
+    const allExportRows = buildEventRowsForExport(allRows, productoById, bodegaById)
+    if (allExportRows.length === 0) return
 
     await downloadExcelFile({
       sheetName: 'AuditoriaInventario',
@@ -237,18 +253,32 @@ function InventarioAuditoriaPage() {
         { header: 'Tipo', key: 'tipo', width: 16 },
         { header: 'Referencia', key: 'referencia', width: 30 },
       ],
-      rows: exportRows,
+      rows: allExportRows,
     })
   }
 
   const handleExportPdf = async () => {
-    if (exportRows.length === 0) return
+    const allRows = await inventarioApi.getAllPaginated(
+      inventarioApi.endpoints.movimientosHistorial,
+      {
+        producto_id: submittedFilters.producto_id || undefined,
+        bodega_id: submittedFilters.bodega_id || undefined,
+        documento_tipo: submittedFilters.documento_tipo || undefined,
+        tipo: submittedFilters.tipo || undefined,
+        referencia: submittedFilters.referencia || undefined,
+        desde: submittedFilters.desde || undefined,
+        hasta: submittedFilters.hasta || undefined,
+      },
+      { pageSize: 100, maxPages: 100 },
+    )
+    const allExportRows = buildEventRowsForExport(allRows, productoById, bodegaById)
+    if (allExportRows.length === 0) return
 
     await downloadSimpleTablePdf({
       title: 'Auditoria de inventario',
       fileName: `auditoria_inventario_${getChileDateSuffix()}.pdf`,
       headers: ['Fecha', 'Resumen', 'Producto', 'Bodega', 'Documento'],
-      rows: exportRows.map((row) => [row.fecha, row.resumen, row.producto, row.bodega, row.documento]),
+      rows: allExportRows.map((row) => [row.fecha, row.resumen, row.producto, row.bodega, row.documento]),
     })
   }
 
@@ -355,7 +385,7 @@ function InventarioAuditoriaPage() {
         <div className="flex items-end gap-2 md:col-span-4">
           <Button type="submit">Consultar</Button>
           <Button type="button" variant="outline" onClick={handleReset}>Limpiar</Button>
-          <MenuButton variant="outline" onExportExcel={handleExportExcel} onExportPdf={handleExportPdf} disabled={exportRows.length === 0} />
+          <MenuButton variant="outline" onExportExcel={handleExportExcel} onExportPdf={handleExportPdf} disabled={!canViewInventario || exportRows.length === 0} />
         </div>
       </form>
 

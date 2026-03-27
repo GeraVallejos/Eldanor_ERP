@@ -1,10 +1,12 @@
 from datetime import datetime, time
 
-from django.db.models import Count, DecimalField, Exists, OuterRef, Q, Sum, Value
+from django.http import HttpResponse
+from django.db.models import Count, DecimalField, Exists, F, OuterRef, Q, Subquery, Sum, Value
 from django.db.models.functions import Coalesce
 from django.utils.dateparse import parse_date, parse_datetime
 from rest_framework import status
 from rest_framework.decorators import action
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -18,6 +20,7 @@ from apps.core.permisos.permissions import TienePermisoModuloAccion, TieneRelaci
 from apps.inventario.api.serializer import (
     AjusteInventarioMasivoCreateSerializer,
     AjusteInventarioMasivoSerializer,
+    AjusteInventarioMasivoUpdateSerializer,
     BodegaSerializer,
     InventorySnapshotSerializer,
     MovimientoInventarioSerializer,
@@ -26,11 +29,13 @@ from apps.inventario.api.serializer import (
     StockProductoSerializer,
     TrasladoInventarioMasivoCreateSerializer,
     TrasladoInventarioMasivoSerializer,
+    TrasladoInventarioMasivoUpdateSerializer,
     TrasladoInventarioSerializer,
 )
 from apps.inventario.models import (
     AjusteInventarioMasivo,
     Bodega,
+    EstadoDocumentoInventario,
     InventorySnapshot,
     MovimientoInventario,
     ReservaStock,
@@ -38,6 +43,12 @@ from apps.inventario.models import (
     StockProducto,
     StockSerie,
     TrasladoInventarioMasivo,
+)
+from apps.inventario.services.bulk_import_service import (
+    build_ajustes_masivos_bulk_template,
+    build_traslados_masivos_bulk_template,
+    import_ajustes_masivos_desde_archivo,
+    import_traslados_masivos_desde_archivo,
 )
 from apps.inventario.services.documento_inventario_service import DocumentoInventarioService
 from apps.inventario.services.bodega_service import BodegaService
@@ -149,7 +160,34 @@ class StockProductoViewSet(TenantViewSetMixin, ReadOnlyModelViewSet):
         "resumen": Acciones.VER,
         "criticos": Acciones.VER,
         "analytics": Acciones.VER,
+        "reconciliation": Acciones.VER,
     }
+
+    def _build_stock_base_queryset(self, request):
+        """Construye el queryset base de stock con filtros operativos compartidos."""
+        queryset = self.get_queryset().filter(producto__activo=True)
+        producto_id = request.query_params.get("producto_id")
+        bodega_id = request.query_params.get("bodega_id")
+        if producto_id:
+            queryset = queryset.filter(producto_id=producto_id)
+        if bodega_id:
+            queryset = queryset.filter(bodega_id=bodega_id)
+        return queryset
+
+    def _build_stock_with_snapshot_queryset(self, request):
+        """Anota stock actual con ultimo snapshot para conciliacion y salud."""
+        latest_snapshot_qs = InventorySnapshot.all_objects.filter(
+            empresa=self.get_empresa(),
+            producto_id=OuterRef("producto_id"),
+            bodega_id=OuterRef("bodega_id"),
+        ).order_by("-creado_en", "-id")
+        return self._build_stock_base_queryset(request).annotate(
+            latest_snapshot_stock=Subquery(latest_snapshot_qs.values("stock")[:1]),
+            latest_snapshot_valor=Subquery(latest_snapshot_qs.values("valor_stock")[:1]),
+            latest_snapshot_at=Subquery(latest_snapshot_qs.values("creado_en")[:1]),
+            producto_nombre=F("producto__nombre"),
+            bodega_nombre=F("bodega__nombre"),
+        )
 
     def _build_resumen_payload(self, request, *, include_filters=False):
         """Construye el payload valorizado de inventario para resumen y reportes."""
@@ -329,7 +367,89 @@ class StockProductoViewSet(TenantViewSetMixin, ReadOnlyModelViewSet):
             "valor_total": payload["totales"]["valor_total"],
             "stock_total": payload["totales"]["stock_total"],
         }
+
+        producto_id = request.query_params.get("producto_id")
+        bodega_id = request.query_params.get("bodega_id")
+        stock_with_snapshot = self._build_stock_with_snapshot_queryset(request)
+        reconciliation_qs = stock_with_snapshot.exclude(
+            latest_snapshot_stock__isnull=True,
+        ).exclude(
+            Q(stock=F("latest_snapshot_stock")) & Q(valor_stock=F("latest_snapshot_valor")),
+        )
+        reconciliation_rows = []
+        for row in reconciliation_qs.values(
+            "producto_id",
+            "producto_nombre",
+            "bodega_id",
+            "bodega_nombre",
+            "stock",
+            "valor_stock",
+            "latest_snapshot_stock",
+            "latest_snapshot_valor",
+            "latest_snapshot_at",
+        ).order_by("producto_nombre", "bodega_nombre")[:20]:
+            reconciliation_rows.append(
+                {
+                    "producto_id": row["producto_id"],
+                    "producto_nombre": row["producto_nombre"],
+                    "bodega_id": row["bodega_id"],
+                    "bodega_nombre": row["bodega_nombre"],
+                    "stock_actual": row["stock"] or 0,
+                    "stock_snapshot": row["latest_snapshot_stock"] or 0,
+                    "valor_actual": row["valor_stock"] or 0,
+                    "valor_snapshot": row["latest_snapshot_valor"] or 0,
+                    "ultimo_snapshot_en": row["latest_snapshot_at"],
+                }
+            )
+
+        reservas_qs = ReservaStock.all_objects.filter(
+            empresa=self.get_empresa(),
+            producto__activo=True,
+        )
+        if producto_id:
+            reservas_qs = reservas_qs.filter(producto_id=producto_id)
+        if bodega_id:
+            reservas_qs = reservas_qs.filter(bodega_id=bodega_id)
+
+        payload["health"] = {
+            "productos_criticos": len(payload["criticos"]),
+            "reservas_activas": reservas_qs.count(),
+            "unidades_reservadas": reservas_qs.aggregate(total=Sum("cantidad"))["total"] or 0,
+            "bodegas_con_stock": self._build_stock_base_queryset(request).filter(stock__gt=0).values("bodega_id").distinct().count(),
+            "sin_snapshot": stock_with_snapshot.filter(latest_snapshot_stock__isnull=True).count(),
+            "descuadrados_snapshot": reconciliation_qs.count(),
+        }
+        payload["reconciliation"] = {
+            "count": reconciliation_qs.count(),
+            "detail": reconciliation_rows,
+        }
         return Response(payload, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=["get"])
+    def reconciliation(self, request):
+        """Entrega conciliacion paginada entre stock actual y ultimo snapshot."""
+        queryset = self._build_stock_with_snapshot_queryset(request).exclude(
+            latest_snapshot_stock__isnull=True,
+        ).exclude(
+            Q(stock=F("latest_snapshot_stock")) & Q(valor_stock=F("latest_snapshot_valor")),
+        ).order_by("producto_nombre", "bodega_nombre", "id")
+        paginator = InventarioReconciliationPagination()
+        page = paginator.paginate_queryset(queryset, request, view=self)
+        rows = [
+            {
+                "producto_id": row.producto_id,
+                "producto_nombre": row.producto_nombre,
+                "bodega_id": row.bodega_id,
+                "bodega_nombre": row.bodega_nombre,
+                "stock_actual": row.stock or 0,
+                "stock_snapshot": row.latest_snapshot_stock or 0,
+                "valor_actual": row.valor_stock or 0,
+                "valor_snapshot": row.latest_snapshot_valor or 0,
+                "ultimo_snapshot_en": row.latest_snapshot_at,
+            }
+            for row in page
+        ]
+        return paginator.get_paginated_response(rows)
 
     @action(detail=False, methods=["get"])
     def criticos(self, request):
@@ -393,6 +513,12 @@ class KardexPagination(PageNumberPagination):
 
 
 class InventarioAuditPagination(PageNumberPagination):
+    page_size = 20
+    page_size_query_param = "page_size"
+    max_page_size = 100
+
+
+class InventarioReconciliationPagination(PageNumberPagination):
     page_size = 20
     page_size_query_param = "page_size"
     max_page_size = 100
@@ -566,20 +692,20 @@ class MovimientoInventarioViewSet(TenantViewSetMixin, ModelViewSet):
         if hasta is not None:
             movimientos_qs = movimientos_qs.filter(creado_en__lte=hasta)
 
-        movimiento_ids = [
-            str(row_id)
-            for row_id in movimientos_qs.values_list("id", flat=True)
-        ]
+        paginator = InventarioAuditPagination()
+        page_movimientos = paginator.paginate_queryset(
+            movimientos_qs.order_by("-creado_en", "-id"),
+            request,
+            view=self,
+        )
+        movimiento_ids = [str(row.id) for row in page_movimientos]
         audit_qs = AuditEvent.all_objects.filter(
             empresa=empresa,
             module_code=Modulos.INVENTARIO,
             entity_type="MOVIMIENTO_INVENTARIO",
             entity_id__in=movimiento_ids,
         ).order_by("-occurred_at", "-id")
-
-        paginator = InventarioAuditPagination()
-        page = paginator.paginate_queryset(audit_qs, request, view=self)
-        serializer = AuditEventSerializer(page, many=True)
+        serializer = AuditEventSerializer(audit_qs, many=True)
         return paginator.get_paginated_response(self._enriquecer_eventos_auditoria(list(serializer.data)))
 
     @action(detail=True, methods=["get"])
@@ -741,9 +867,18 @@ class AjusteInventarioMasivoViewSet(TenantViewSetMixin, ModelViewSet):
         "list": Acciones.VER,
         "retrieve": Acciones.VER,
         "create": Acciones.EDITAR,
+        "update": Acciones.EDITAR,
+        "partial_update": Acciones.EDITAR,
         "duplicar": Acciones.EDITAR,
+        "confirmar": Acciones.EDITAR,
+        "bulk_import": Acciones.EDITAR,
+        "bulk_template": Acciones.VER,
     }
-    http_method_names = ["get", "post", "head", "options"]
+    http_method_names = ["get", "post", "put", "patch", "head", "options"]
+
+    @staticmethod
+    def _is_truthy(value):
+        return str(value).strip().lower() in {"1", "true", "t", "yes", "y", "si", "on"}
 
     def get_queryset(self):
         queryset = super().get_queryset().prefetch_related("items__producto", "items__bodega", "items__movimiento")
@@ -765,13 +900,39 @@ class AjusteInventarioMasivoViewSet(TenantViewSetMixin, ModelViewSet):
     def create(self, request, *args, **kwargs):
         serializer = AjusteInventarioMasivoCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        documento = DocumentoInventarioService.crear_ajuste_masivo(
-            empresa=self.get_empresa(),
-            usuario=request.user,
-            **serializer.validated_data,
-        )
+        payload = dict(serializer.validated_data)
+        estado = payload.pop("estado", None)
+        if estado == EstadoDocumentoInventario.BORRADOR:
+            documento = DocumentoInventarioService.guardar_borrador_ajuste_masivo(
+                empresa=self.get_empresa(),
+                usuario=request.user,
+                **payload,
+            )
+        else:
+            documento = DocumentoInventarioService.crear_ajuste_masivo(
+                empresa=self.get_empresa(),
+                usuario=request.user,
+                **payload,
+            )
         output = self.get_serializer(documento)
         return Response(output.data, status=status.HTTP_201_CREATED)
+
+    def update(self, request, *args, **kwargs):
+        partial = kwargs.pop("partial", False)
+        serializer = AjusteInventarioMasivoUpdateSerializer(data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        documento = DocumentoInventarioService.actualizar_borrador_ajuste_masivo(
+            documento_id=self.get_object().id,
+            empresa=self.get_empresa(),
+            usuario=request.user,
+            data=serializer.validated_data,
+        )
+        output = self.get_serializer(documento)
+        return Response(output.data, status=status.HTTP_200_OK)
+
+    def partial_update(self, request, *args, **kwargs):
+        kwargs["partial"] = True
+        return self.update(request, *args, **kwargs)
 
     @action(detail=True, methods=["post"])
     def duplicar(self, request, pk=None):
@@ -783,6 +944,38 @@ class AjusteInventarioMasivoViewSet(TenantViewSetMixin, ModelViewSet):
         output = self.get_serializer(documento)
         return Response(output.data, status=status.HTTP_201_CREATED)
 
+    @action(detail=True, methods=["post"])
+    def confirmar(self, request, pk=None):
+        documento = DocumentoInventarioService.confirmar_ajuste_masivo(
+            documento_id=pk,
+            empresa=self.get_empresa(),
+            usuario=request.user,
+        )
+        output = self.get_serializer(documento)
+        return Response(output.data, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=["post"], url_path="bulk_import", parser_classes=[MultiPartParser, FormParser])
+    def bulk_import(self, request):
+        payload, documento = import_ajustes_masivos_desde_archivo(
+            uploaded_file=request.FILES.get("file"),
+            user=request.user,
+            empresa=self.get_empresa(),
+            dry_run=self._is_truthy(request.data.get("dry_run")),
+        )
+        if documento is not None:
+            payload["documento"] = self.get_serializer(documento).data
+        return Response(payload, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=["get"], url_path="bulk_template")
+    def bulk_template(self, request):
+        content = build_ajustes_masivos_bulk_template(user=request.user, empresa=self.get_empresa())
+        response = HttpResponse(
+            content,
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        response["Content-Disposition"] = 'attachment; filename="plantilla_ajustes_masivos_inventario.xlsx"'
+        return response
+
 
 class TrasladoInventarioMasivoViewSet(TenantViewSetMixin, ModelViewSet):
     model = TrasladoInventarioMasivo
@@ -793,9 +986,18 @@ class TrasladoInventarioMasivoViewSet(TenantViewSetMixin, ModelViewSet):
         "list": Acciones.VER,
         "retrieve": Acciones.VER,
         "create": Acciones.EDITAR,
+        "update": Acciones.EDITAR,
+        "partial_update": Acciones.EDITAR,
         "duplicar": Acciones.EDITAR,
+        "confirmar": Acciones.EDITAR,
+        "bulk_import": Acciones.EDITAR,
+        "bulk_template": Acciones.VER,
     }
-    http_method_names = ["get", "post", "head", "options"]
+    http_method_names = ["get", "post", "put", "patch", "head", "options"]
+
+    @staticmethod
+    def _is_truthy(value):
+        return str(value).strip().lower() in {"1", "true", "t", "yes", "y", "si", "on"}
 
     def get_queryset(self):
         queryset = (
@@ -822,13 +1024,39 @@ class TrasladoInventarioMasivoViewSet(TenantViewSetMixin, ModelViewSet):
     def create(self, request, *args, **kwargs):
         serializer = TrasladoInventarioMasivoCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        documento = DocumentoInventarioService.crear_traslado_masivo(
-            empresa=self.get_empresa(),
-            usuario=request.user,
-            **serializer.validated_data,
-        )
+        payload = dict(serializer.validated_data)
+        estado = payload.pop("estado", None)
+        if estado == EstadoDocumentoInventario.BORRADOR:
+            documento = DocumentoInventarioService.guardar_borrador_traslado_masivo(
+                empresa=self.get_empresa(),
+                usuario=request.user,
+                **payload,
+            )
+        else:
+            documento = DocumentoInventarioService.crear_traslado_masivo(
+                empresa=self.get_empresa(),
+                usuario=request.user,
+                **payload,
+            )
         output = self.get_serializer(documento)
         return Response(output.data, status=status.HTTP_201_CREATED)
+
+    def update(self, request, *args, **kwargs):
+        partial = kwargs.pop("partial", False)
+        serializer = TrasladoInventarioMasivoUpdateSerializer(data=request.data, partial=partial)
+        serializer.is_valid(raise_exception=True)
+        documento = DocumentoInventarioService.actualizar_borrador_traslado_masivo(
+            documento_id=self.get_object().id,
+            empresa=self.get_empresa(),
+            usuario=request.user,
+            data=serializer.validated_data,
+        )
+        output = self.get_serializer(documento)
+        return Response(output.data, status=status.HTTP_200_OK)
+
+    def partial_update(self, request, *args, **kwargs):
+        kwargs["partial"] = True
+        return self.update(request, *args, **kwargs)
 
     @action(detail=True, methods=["post"])
     def duplicar(self, request, pk=None):
@@ -839,3 +1067,35 @@ class TrasladoInventarioMasivoViewSet(TenantViewSetMixin, ModelViewSet):
         )
         output = self.get_serializer(documento)
         return Response(output.data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"])
+    def confirmar(self, request, pk=None):
+        documento = DocumentoInventarioService.confirmar_traslado_masivo(
+            documento_id=pk,
+            empresa=self.get_empresa(),
+            usuario=request.user,
+        )
+        output = self.get_serializer(documento)
+        return Response(output.data, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=["post"], url_path="bulk_import", parser_classes=[MultiPartParser, FormParser])
+    def bulk_import(self, request):
+        payload, documento = import_traslados_masivos_desde_archivo(
+            uploaded_file=request.FILES.get("file"),
+            user=request.user,
+            empresa=self.get_empresa(),
+            dry_run=self._is_truthy(request.data.get("dry_run")),
+        )
+        if documento is not None:
+            payload["documento"] = self.get_serializer(documento).data
+        return Response(payload, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=["get"], url_path="bulk_template")
+    def bulk_template(self, request):
+        content = build_traslados_masivos_bulk_template(user=request.user, empresa=self.get_empresa())
+        response = HttpResponse(
+            content,
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        response["Content-Disposition"] = 'attachment; filename="plantilla_traslados_masivos_inventario.xlsx"'
+        return response

@@ -5,6 +5,7 @@ import pytest
 from apps.core.exceptions import BusinessRuleError, ResourceNotFoundError
 from apps.core.tenant import set_current_empresa
 from apps.documentos.models import TipoDocumentoReferencia
+from apps.auditoria.models import AuditEvent
 from apps.inventario.models import Bodega, InventorySnapshot, ReservaStock, StockLote, StockProducto, StockSerie
 from apps.inventario.models.movimiento import TipoMovimiento
 from apps.inventario.services.inventario_service import InventarioService
@@ -448,6 +449,54 @@ class TestInventarioService:
 
         assert "reserva de inventario" in str(excinfo.value).lower()
 
+    def test_reservar_y_liberar_stock_generan_auditoria(self, empresa, usuario, producto_inventariable):
+        set_current_empresa(empresa)
+
+        movimiento = InventarioService.registrar_movimiento(
+            producto_id=producto_inventariable.id,
+            tipo=TipoMovimiento.ENTRADA,
+            cantidad=Decimal("6.00"),
+            referencia="BASE-RESERVA-AUD",
+            empresa=empresa,
+            usuario=usuario,
+        )
+
+        reserva = InventarioService.reservar_stock(
+            producto_id=producto_inventariable.id,
+            bodega_id=movimiento.bodega_id,
+            cantidad=Decimal("4.00"),
+            documento_tipo=TipoDocumentoReferencia.PRESUPUESTO,
+            documento_id="99999999-9999-9999-9999-999999999999",
+            empresa=empresa,
+            usuario=usuario,
+        )
+
+        evento_reserva = AuditEvent.all_objects.filter(
+            empresa=empresa,
+            entity_type="RESERVA_STOCK",
+            entity_id=str(reserva.id),
+            event_type="INVENTARIO_RESERVA_CREADA",
+        ).first()
+        assert evento_reserva is not None
+
+        liberado = InventarioService.liberar_reserva(
+            producto_id=producto_inventariable.id,
+            bodega_id=movimiento.bodega_id,
+            documento_tipo=TipoDocumentoReferencia.PRESUPUESTO,
+            documento_id="99999999-9999-9999-9999-999999999999",
+            empresa=empresa,
+            cantidad=Decimal("2.00"),
+            usuario=usuario,
+        )
+
+        assert liberado == Decimal("2.00")
+        evento_liberacion = AuditEvent.all_objects.filter(
+            empresa=empresa,
+            entity_type="RESERVA_STOCK",
+            event_type="INVENTARIO_RESERVA_LIBERADA",
+        ).order_by("-occurred_at").first()
+        assert evento_liberacion is not None
+
     def test_trasladar_stock_mueve_existencia_entre_bodegas(self, empresa, usuario, producto_inventariable):
         set_current_empresa(empresa)
         bodega_origen = Bodega.all_objects.create(empresa=empresa, creado_por=usuario, nombre="Origen")
@@ -508,4 +557,3 @@ class TestInventarioService:
             )
 
         assert "distintas" in str(excinfo.value)
-

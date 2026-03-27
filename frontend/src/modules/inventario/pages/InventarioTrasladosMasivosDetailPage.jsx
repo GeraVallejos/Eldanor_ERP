@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { normalizeApiError } from '@/api/errors'
 import Button from '@/components/ui/Button'
@@ -11,6 +11,7 @@ import { cn } from '@/lib/utils'
 import { inventarioApi } from '@/modules/inventario/store'
 import { downloadExcelFile } from '@/modules/shared/exports/downloadExcelFile'
 import { downloadSimpleTablePdf } from '@/modules/shared/exports/downloadSimpleTablePdf'
+import { usePermissions } from '@/modules/shared/auth/usePermission'
 
 function formatNumber(value) {
   return formatSmartNumber(value, { maximumFractionDigits: 2 })
@@ -18,8 +19,12 @@ function formatNumber(value) {
 
 function InventarioTrasladosMasivosDetailPage() {
   const { id } = useParams()
+  const navigate = useNavigate()
+  const permissions = usePermissions(['INVENTARIO.VER', 'INVENTARIO.EDITAR'])
+  const canEditInventario = permissions['INVENTARIO.EDITAR']
   const [status, setStatus] = useState('idle')
   const [duplicating, setDuplicating] = useState(false)
+  const [confirming, setConfirming] = useState(false)
   const [documento, setDocumento] = useState(null)
 
   useEffect(() => {
@@ -73,11 +78,24 @@ function InventarioTrasladosMasivosDetailPage() {
     setDuplicating(true)
     try {
       const data = await inventarioApi.executeDetailAction(inventarioApi.endpoints.trasladosMasivos, id, 'duplicar')
-      toast.success(`Traslado masivo ${data.numero} duplicado correctamente.`)
+      toast.success(`Borrador ${data.numero} generado correctamente.`)
     } catch (error) {
       toast.error(normalizeApiError(error, { fallback: 'No se pudo duplicar el traslado masivo.' }))
     } finally {
       setDuplicating(false)
+    }
+  }
+
+  const handleConfirm = async () => {
+    setConfirming(true)
+    try {
+      const data = await inventarioApi.executeDetailAction(inventarioApi.endpoints.trasladosMasivos, id, 'confirmar')
+      setDocumento(data)
+      toast.success(`Traslado masivo ${data.numero} confirmado correctamente.`)
+    } catch (error) {
+      toast.error(normalizeApiError(error, { fallback: 'No se pudo confirmar el traslado masivo.' }))
+    } finally {
+      setConfirming(false)
     }
   }
 
@@ -94,12 +112,26 @@ function InventarioTrasladosMasivosDetailPage() {
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <h2 className="text-2xl font-semibold">Detalle traslado masivo</h2>
-          <p className="text-sm text-muted-foreground">{documento.numero} | confirmado {formatDateTimeChile(documento.confirmado_en)}</p>
+          <p className="text-sm text-muted-foreground">
+            {documento.numero} | {documento.confirmado_en ? `confirmado ${formatDateTimeChile(documento.confirmado_en)}` : 'borrador pendiente de confirmacion'}
+          </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button type="button" variant="outline" onClick={handleDuplicate} disabled={duplicating}>
-            {duplicating ? 'Duplicando...' : 'Duplicar documento'}
-          </Button>
+          {documento.estado === 'BORRADOR' && canEditInventario ? (
+            <>
+              <Button type="button" variant="outline" onClick={() => navigate(`/inventario/traslados-masivos?draft=${documento.id}`)}>
+                Editar borrador
+              </Button>
+              <Button type="button" onClick={handleConfirm} disabled={confirming}>
+                {confirming ? 'Confirmando...' : 'Confirmar borrador'}
+              </Button>
+            </>
+          ) : null}
+          {canEditInventario ? (
+            <Button type="button" variant="outline" onClick={handleDuplicate} disabled={duplicating}>
+              {duplicating ? 'Duplicando...' : 'Duplicar documento'}
+            </Button>
+          ) : null}
           <MenuButton variant="outline" onExportExcel={handleExportExcel} onExportPdf={handleExportPdf} disabled={exportRows.length === 0} />
           <Link to="/inventario/traslados-masivos" className={cn(buttonVariants({ variant: 'outline', size: 'md' }))}>Volver</Link>
         </div>

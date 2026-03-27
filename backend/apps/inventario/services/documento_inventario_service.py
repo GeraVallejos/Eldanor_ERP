@@ -2,10 +2,11 @@ from decimal import Decimal
 from uuid import uuid4
 
 from django.db import transaction
+from django.utils import timezone
 
 from apps.auditoria.models import AuditSeverity
 from apps.auditoria.services import AuditoriaService
-from apps.core.exceptions import BusinessRuleError
+from apps.core.exceptions import BusinessRuleError, ConflictError, ResourceNotFoundError
 from apps.core.permisos.constantes_permisos import Acciones, Modulos
 from apps.core.services import DomainEventService, OutboxService
 from apps.inventario.models import (
@@ -73,10 +74,87 @@ class DocumentoInventarioService:
             source=DocumentoInventarioService.source,
         )
 
+    @staticmethod
+    def _get_ajuste_documento(*, documento_id, empresa):
+        """Obtiene un ajuste masivo del tenant o levanta not found de dominio."""
+        documento = (
+            AjusteInventarioMasivo.all_objects
+            .prefetch_related("items")
+            .filter(id=documento_id, empresa=empresa)
+            .first()
+        )
+        if not documento:
+            raise ResourceNotFoundError("Ajuste masivo no encontrado.")
+        return documento
+
+    @staticmethod
+    def _get_traslado_documento(*, documento_id, empresa):
+        """Obtiene un traslado masivo del tenant o levanta not found de dominio."""
+        documento = (
+            TrasladoInventarioMasivo.all_objects
+            .prefetch_related("items")
+            .filter(id=documento_id, empresa=empresa)
+            .first()
+        )
+        if not documento:
+            raise ResourceNotFoundError("Traslado masivo no encontrado.")
+        return documento
+
     @classmethod
     @transaction.atomic
-    def crear_ajuste_masivo(cls, *, empresa, usuario, referencia, motivo, observaciones="", items):
-        """Crea y confirma un ajuste masivo aplicando regularizaciones por cada linea."""
+    def actualizar_borrador_ajuste_masivo(cls, *, documento_id, empresa, usuario, data):
+        """Actualiza un borrador de ajuste masivo reemplazando cabecera y lineas cuando corresponde."""
+        documento = cls._get_ajuste_documento(documento_id=documento_id, empresa=empresa)
+        if documento.estado != EstadoDocumentoInventario.BORRADOR:
+            raise ConflictError("Solo se pueden editar ajustes masivos en borrador.")
+
+        update_fields = []
+        for field in ("referencia", "motivo", "observaciones"):
+            if field in data:
+                setattr(documento, field, data[field])
+                update_fields.append(field)
+
+        if "items" in data:
+            items = data["items"] or []
+            if not items:
+                raise BusinessRuleError("Debe informar al menos una linea para el ajuste masivo.")
+            documento.items.all().delete()
+            for item in items:
+                AjusteInventarioMasivoItem.all_objects.create(
+                    empresa=empresa,
+                    creado_por=usuario,
+                    documento=documento,
+                    producto_id=item["producto_id"],
+                    bodega_id=item.get("bodega_id"),
+                    stock_objetivo=item["stock_objetivo"],
+                    stock_actual=Decimal("0"),
+                    diferencia=Decimal("0"),
+                )
+
+        if update_fields:
+            documento.save(skip_clean=True, update_fields=[*update_fields, "actualizado_en"])
+
+        cls._record_side_effects(
+            empresa=empresa,
+            usuario=usuario,
+            aggregate_type="AjusteInventarioMasivo",
+            aggregate_id=documento.id,
+            event_name="inventario.ajuste_masivo.borrador_actualizado",
+            summary=f"Borrador de ajuste masivo {documento.numero} actualizado.",
+            payload={
+                "documento_id": str(documento.id),
+                "numero": documento.numero,
+                "estado": documento.estado,
+                "items_count": documento.items.count(),
+                "updated_fields": sorted(list(data.keys())),
+            },
+        )
+        return documento
+
+    @classmethod
+    @transaction.atomic
+    def guardar_borrador_ajuste_masivo(cls, *, empresa, usuario, referencia, motivo, observaciones="", items):
+        """Guarda un borrador de ajuste masivo sin impactar stock operativo."""
         if not items:
             raise BusinessRuleError("Debe informar al menos una linea para el ajuste masivo.")
 
@@ -84,22 +162,69 @@ class DocumentoInventarioService:
             empresa=empresa,
             creado_por=usuario,
             numero=cls._generate_number("AJM"),
-            estado=EstadoDocumentoInventario.CONFIRMADO,
+            estado=EstadoDocumentoInventario.BORRADOR,
             referencia=referencia,
             motivo=motivo,
             observaciones=observaciones or "",
             subtotal=Decimal("0"),
             total=Decimal("0"),
+            confirmado_en=None,
         )
+        for item in items:
+            AjusteInventarioMasivoItem.all_objects.create(
+                empresa=empresa,
+                creado_por=usuario,
+                documento=documento,
+                producto_id=item["producto_id"],
+                bodega_id=item.get("bodega_id"),
+                stock_objetivo=item["stock_objetivo"],
+                stock_actual=Decimal("0"),
+                diferencia=Decimal("0"),
+            )
+
+        cls._record_side_effects(
+            empresa=empresa,
+            usuario=usuario,
+            aggregate_type="AjusteInventarioMasivo",
+            aggregate_id=documento.id,
+            event_name="inventario.ajuste_masivo.borrador_guardado",
+            summary=f"Borrador de ajuste masivo {documento.numero} guardado.",
+            payload={"documento_id": str(documento.id), "numero": documento.numero, "estado": documento.estado},
+        )
+        return documento
+
+    @classmethod
+    @transaction.atomic
+    def crear_ajuste_masivo(cls, *, empresa, usuario, referencia, motivo, observaciones="", items):
+        """Crea y confirma un ajuste masivo aplicando regularizaciones por cada linea."""
+        if not items:
+            raise BusinessRuleError("Debe informar al menos una linea para el ajuste masivo.")
+        documento = cls.guardar_borrador_ajuste_masivo(
+            empresa=empresa,
+            usuario=usuario,
+            referencia=referencia,
+            motivo=motivo,
+            observaciones=observaciones,
+            items=items,
+        )
+        return cls.confirmar_ajuste_masivo(documento_id=documento.id, empresa=empresa, usuario=usuario)
+
+    @classmethod
+    @transaction.atomic
+    def confirmar_ajuste_masivo(cls, *, documento_id, empresa, usuario):
+        """Confirma un borrador de ajuste masivo ejecutando sus regularizaciones."""
+        documento = cls._get_ajuste_documento(documento_id=documento_id, empresa=empresa)
+        if documento.estado != EstadoDocumentoInventario.BORRADOR:
+            raise ConflictError("Solo se pueden confirmar ajustes masivos en borrador.")
 
         lineas_payload = []
         total_diferencia = Decimal("0")
 
-        for idx, item in enumerate(items, start=1):
+        for idx, item in enumerate(documento.items.all(), start=1):
             preview = InventarioService.previsualizar_regularizacion_stock(
-                producto_id=item["producto_id"],
-                bodega_id=item.get("bodega_id"),
-                stock_objetivo=item["stock_objetivo"],
+                producto_id=item.producto_id,
+                bodega_id=item.bodega_id,
+                stock_objetivo=item.stock_objetivo,
                 empresa=empresa,
             )
             if not preview["ajustable"]:
@@ -109,43 +234,38 @@ class DocumentoInventarioService:
             if Decimal(preview["diferencia"]) == 0:
                 raise BusinessRuleError(f"La linea {idx} no genera diferencia de stock y debe omitirse.")
 
-            producto_label = preview.get("producto_nombre") or str(item["producto_id"])
-            referencia_linea = cls._build_reference(referencia, producto_label)
+            producto_label = preview.get("producto_nombre") or str(item.producto_id)
+            referencia_linea = cls._build_reference(documento.referencia, producto_label)
             movimiento = InventarioService.regularizar_stock(
-                producto_id=item["producto_id"],
-                bodega_id=item.get("bodega_id"),
-                stock_objetivo=item["stock_objetivo"],
+                producto_id=item.producto_id,
+                bodega_id=item.bodega_id,
+                stock_objetivo=item.stock_objetivo,
                 referencia=referencia_linea,
                 empresa=empresa,
                 usuario=usuario,
                 documento_id=documento.id,
             )
-            AjusteInventarioMasivoItem.all_objects.create(
-                empresa=empresa,
-                creado_por=usuario,
-                documento=documento,
-                producto_id=item["producto_id"],
-                bodega_id=item.get("bodega_id"),
-                stock_objetivo=item["stock_objetivo"],
-                stock_actual=preview["stock_actual"],
-                diferencia=preview["diferencia"],
-                movimiento=movimiento,
-            )
+            item.stock_actual = preview["stock_actual"]
+            item.diferencia = preview["diferencia"]
+            item.movimiento = movimiento
+            item.save(update_fields=["stock_actual", "diferencia", "movimiento", "actualizado_en"], skip_clean=True)
             total_diferencia += abs(Decimal(preview["diferencia"]))
             lineas_payload.append(
                 {
-                    "producto_id": str(item["producto_id"]),
-                    "bodega_id": str(item.get("bodega_id")) if item.get("bodega_id") else None,
+                    "producto_id": str(item.producto_id),
+                    "bodega_id": str(item.bodega_id) if item.bodega_id else None,
                     "stock_actual": cls._serialize_decimal(preview["stock_actual"]),
-                    "stock_objetivo": cls._serialize_decimal(item["stock_objetivo"]),
+                    "stock_objetivo": cls._serialize_decimal(item.stock_objetivo),
                     "diferencia": cls._serialize_decimal(preview["diferencia"]),
                     "movimiento_id": str(movimiento.id),
                 }
             )
 
+        documento.estado = EstadoDocumentoInventario.CONFIRMADO
+        documento.confirmado_en = timezone.now()
         documento.subtotal = total_diferencia
         documento.total = total_diferencia
-        documento.save(skip_clean=True, update_fields=["subtotal", "total", "actualizado_en"])
+        documento.save(skip_clean=True, update_fields=["estado", "confirmado_en", "subtotal", "total", "actualizado_en"])
 
         payload = {
             "documento_id": str(documento.id),
@@ -196,7 +316,7 @@ class DocumentoInventarioService:
                     "stock_objetivo": stock_objetivo,
                 }
             )
-        return cls.crear_ajuste_masivo(
+        return cls.guardar_borrador_ajuste_masivo(
             empresa=empresa,
             usuario=usuario,
             referencia=f"{documento.referencia} | DUPLICADO",
@@ -204,6 +324,109 @@ class DocumentoInventarioService:
             observaciones=documento.observaciones,
             items=items,
         )
+
+    @classmethod
+    @transaction.atomic
+    def actualizar_borrador_traslado_masivo(cls, *, documento_id, empresa, usuario, data):
+        """Actualiza un borrador de traslado masivo reemplazando cabecera y lineas cuando corresponde."""
+        documento = cls._get_traslado_documento(documento_id=documento_id, empresa=empresa)
+        if documento.estado != EstadoDocumentoInventario.BORRADOR:
+            raise ConflictError("Solo se pueden editar traslados masivos en borrador.")
+
+        update_fields = []
+        for field in ("referencia", "motivo", "observaciones", "bodega_origen_id", "bodega_destino_id"):
+            if field in data:
+                setattr(documento, field, data[field])
+                update_fields.append(field)
+
+        if str(documento.bodega_origen_id) == str(documento.bodega_destino_id):
+            raise BusinessRuleError("La bodega destino debe ser distinta a la bodega origen.")
+
+        if "items" in data:
+            items = data["items"] or []
+            if not items:
+                raise BusinessRuleError("Debe informar al menos una linea para el traslado masivo.")
+            documento.items.all().delete()
+            for item in items:
+                TrasladoInventarioMasivoItem.all_objects.create(
+                    empresa=empresa,
+                    creado_por=usuario,
+                    documento=documento,
+                    producto_id=item["producto_id"],
+                    cantidad=item["cantidad"],
+                )
+
+        if update_fields:
+            documento.save(skip_clean=True, update_fields=[*update_fields, "actualizado_en"])
+
+        cls._record_side_effects(
+            empresa=empresa,
+            usuario=usuario,
+            aggregate_type="TrasladoInventarioMasivo",
+            aggregate_id=documento.id,
+            event_name="inventario.traslado_masivo.borrador_actualizado",
+            summary=f"Borrador de traslado masivo {documento.numero} actualizado.",
+            payload={
+                "documento_id": str(documento.id),
+                "numero": documento.numero,
+                "estado": documento.estado,
+                "items_count": documento.items.count(),
+                "updated_fields": sorted(list(data.keys())),
+            },
+        )
+        return documento
+
+    @classmethod
+    @transaction.atomic
+    def guardar_borrador_traslado_masivo(
+        cls,
+        *,
+        empresa,
+        usuario,
+        referencia,
+        motivo,
+        observaciones="",
+        bodega_origen_id,
+        bodega_destino_id,
+        items,
+    ):
+        """Guarda un borrador de traslado masivo sin mover stock entre bodegas."""
+        if not items:
+            raise BusinessRuleError("Debe informar al menos una linea para el traslado masivo.")
+
+        documento = TrasladoInventarioMasivo.all_objects.create(
+            empresa=empresa,
+            creado_por=usuario,
+            numero=cls._generate_number("TRM"),
+            estado=EstadoDocumentoInventario.BORRADOR,
+            referencia=referencia,
+            motivo=motivo,
+            observaciones=observaciones or "",
+            bodega_origen_id=bodega_origen_id,
+            bodega_destino_id=bodega_destino_id,
+            subtotal=Decimal("0"),
+            total=Decimal("0"),
+            confirmado_en=None,
+        )
+        for item in items:
+            TrasladoInventarioMasivoItem.all_objects.create(
+                empresa=empresa,
+                creado_por=usuario,
+                documento=documento,
+                producto_id=item["producto_id"],
+                cantidad=item["cantidad"],
+            )
+
+        cls._record_side_effects(
+            empresa=empresa,
+            usuario=usuario,
+            aggregate_type="TrasladoInventarioMasivo",
+            aggregate_id=documento.id,
+            event_name="inventario.traslado_masivo.borrador_guardado",
+            summary=f"Borrador de traslado masivo {documento.numero} guardado.",
+            payload={"documento_id": str(documento.id), "numero": documento.numero, "estado": documento.estado},
+        )
+        return documento
 
     @classmethod
     @transaction.atomic
@@ -222,20 +445,25 @@ class DocumentoInventarioService:
         """Crea y confirma un traslado masivo aplicando traslados unitarios por linea."""
         if not items:
             raise BusinessRuleError("Debe informar al menos una linea para el traslado masivo.")
-
-        documento = TrasladoInventarioMasivo.all_objects.create(
+        documento = cls.guardar_borrador_traslado_masivo(
             empresa=empresa,
-            creado_por=usuario,
-            numero=cls._generate_number("TRM"),
-            estado=EstadoDocumentoInventario.CONFIRMADO,
+            usuario=usuario,
             referencia=referencia,
             motivo=motivo,
-            observaciones=observaciones or "",
+            observaciones=observaciones,
             bodega_origen_id=bodega_origen_id,
             bodega_destino_id=bodega_destino_id,
-            subtotal=Decimal("0"),
-            total=Decimal("0"),
+            items=items,
         )
+        return cls.confirmar_traslado_masivo(documento_id=documento.id, empresa=empresa, usuario=usuario)
+
+    @classmethod
+    @transaction.atomic
+    def confirmar_traslado_masivo(cls, *, documento_id, empresa, usuario):
+        """Confirma un borrador de traslado masivo ejecutando sus lineas unitarias."""
+        documento = cls._get_traslado_documento(documento_id=documento_id, empresa=empresa)
+        if documento.estado != EstadoDocumentoInventario.BORRADOR:
+            raise ConflictError("Solo se pueden confirmar traslados masivos en borrador.")
 
         total_cantidad = Decimal("0")
         lineas_payload = []
@@ -243,42 +471,36 @@ class DocumentoInventarioService:
             str(producto.id): producto.nombre
             for producto in Producto.all_objects.filter(
                 empresa=empresa,
-                id__in=[item["producto_id"] for item in items],
+                id__in=[item.producto_id for item in documento.items.all()],
             ).only("id", "nombre")
         }
 
-        for idx, item in enumerate(items, start=1):
-            cantidad = Decimal(item["cantidad"])
+        for idx, item in enumerate(documento.items.all(), start=1):
+            cantidad = Decimal(item.cantidad)
             if cantidad <= 0:
                 raise BusinessRuleError(f"La linea {idx} debe informar una cantidad mayor a cero.")
 
             referencia_linea = cls._build_reference(
-                referencia,
-                productos.get(str(item["producto_id"]), str(item["producto_id"])),
+                documento.referencia,
+                productos.get(str(item.producto_id), str(item.producto_id)),
             )
             traslado = InventarioService.trasladar_stock(
-                producto_id=item["producto_id"],
-                bodega_origen_id=bodega_origen_id,
-                bodega_destino_id=bodega_destino_id,
+                producto_id=item.producto_id,
+                bodega_origen_id=documento.bodega_origen_id,
+                bodega_destino_id=documento.bodega_destino_id,
                 cantidad=cantidad,
                 referencia=referencia_linea,
                 empresa=empresa,
                 usuario=usuario,
                 documento_id=documento.id,
             )
-            TrasladoInventarioMasivoItem.all_objects.create(
-                empresa=empresa,
-                creado_por=usuario,
-                documento=documento,
-                producto_id=item["producto_id"],
-                cantidad=cantidad,
-                movimiento_salida=traslado["movimiento_salida"],
-                movimiento_entrada=traslado["movimiento_entrada"],
-            )
+            item.movimiento_salida = traslado["movimiento_salida"]
+            item.movimiento_entrada = traslado["movimiento_entrada"]
+            item.save(update_fields=["movimiento_salida", "movimiento_entrada", "actualizado_en"], skip_clean=True)
             total_cantidad += cantidad
             lineas_payload.append(
                 {
-                    "producto_id": str(item["producto_id"]),
+                    "producto_id": str(item.producto_id),
                     "producto_nombre": traslado["movimiento_salida"].producto.nombre,
                     "cantidad": cls._serialize_decimal(cantidad),
                     "movimiento_salida_id": str(traslado["movimiento_salida"].id),
@@ -286,9 +508,11 @@ class DocumentoInventarioService:
                 }
             )
 
+        documento.estado = EstadoDocumentoInventario.CONFIRMADO
+        documento.confirmado_en = timezone.now()
         documento.subtotal = total_cantidad
         documento.total = total_cantidad
-        documento.save(skip_clean=True, update_fields=["subtotal", "total", "actualizado_en"])
+        documento.save(skip_clean=True, update_fields=["estado", "confirmado_en", "subtotal", "total", "actualizado_en"])
 
         payload = {
             "documento_id": str(documento.id),
@@ -332,7 +556,7 @@ class DocumentoInventarioService:
             }
             for item in documento.items.all()
         ]
-        return cls.crear_traslado_masivo(
+        return cls.guardar_borrador_traslado_masivo(
             empresa=empresa,
             usuario=usuario,
             referencia=f"{documento.referencia} | DUPLICADO",

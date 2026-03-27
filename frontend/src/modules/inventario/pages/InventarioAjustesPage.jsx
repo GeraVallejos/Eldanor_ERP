@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { normalizeApiError } from '@/api/errors'
 import ApiContractError from '@/components/ui/ApiContractError'
@@ -39,15 +39,16 @@ function extractContractError(error, fallback) {
 }
 
 function InventarioAjustesPage() {
+  const [searchParams] = useSearchParams()
   const permissions = usePermissions(['INVENTARIO.EDITAR'])
   const canEditInventario = permissions['INVENTARIO.EDITAR']
   const [productos, setProductos] = useState([])
   const [bodegas, setBodegas] = useState([])
   const [form, setForm] = useState({
-    producto_id: '',
-    bodega_id: '',
-    stock_objetivo: '',
-    motivo: '',
+    producto_id: searchParams.get('producto_id') || '',
+    bodega_id: searchParams.get('bodega_id') || '',
+    stock_objetivo: searchParams.get('stock_objetivo') || '',
+    motivo: searchParams.get('motivo') || '',
     referencia_operativa: '',
     observaciones: '',
   })

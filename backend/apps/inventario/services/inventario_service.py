@@ -1,4 +1,6 @@
 from decimal import Decimal
+import hashlib
+import json
 from uuid import uuid4
 from django.db import transaction
 from apps.core.exceptions import BusinessRuleError, ResourceNotFoundError
@@ -20,6 +22,51 @@ from apps.core.permisos.constantes_permisos import Modulos, Acciones
 
 
 class InventarioService:
+    @staticmethod
+    def _record_reserva_side_effects(*, empresa, usuario, event_name, summary, aggregate_id, entity_id, payload, changes):
+        """Registra trazabilidad enterprise para reservas y liberaciones de stock."""
+        if not usuario:
+            return
+
+        payload_fingerprint = hashlib.sha1(
+            json.dumps(payload or {}, sort_keys=True, default=str).encode("utf-8")
+        ).hexdigest()[:16]
+        dedup_key = f"invres:{event_name}:{aggregate_id}:{payload_fingerprint}"[:120]
+        DomainEventService.record_event(
+            empresa=empresa,
+            aggregate_type="RESERVA_STOCK",
+            aggregate_id=aggregate_id,
+            event_type=event_name,
+            payload=payload,
+            meta={"source": "InventarioService.reservas"},
+            usuario=usuario,
+            idempotency_key=dedup_key,
+        )
+        OutboxService.enqueue(
+            empresa=empresa,
+            topic="inventario.reservas",
+            event_name=event_name,
+            payload=payload,
+            usuario=usuario,
+            dedup_key=dedup_key,
+        )
+        AuditoriaService.registrar_evento(
+            empresa=empresa,
+            usuario=usuario,
+            module_code=Modulos.INVENTARIO,
+            action_code=Acciones.EDITAR,
+            event_type=event_name,
+            entity_type="RESERVA_STOCK",
+            entity_id=str(entity_id),
+            summary=summary,
+            severity=AuditSeverity.INFO,
+            changes=changes,
+            payload=payload,
+            meta={"source": "InventarioService.reservas"},
+            source="InventarioService.reservas",
+            idempotency_key=f"audit:{dedup_key}",
+        )
+
 
     @staticmethod
     def _money(value):
@@ -345,7 +392,7 @@ class InventarioService:
         if cantidad > disponible:
             raise BusinessRuleError("Stock insuficiente para reservar la cantidad solicitada.")
 
-        return ReservaStock.all_objects.create(
+        reserva = ReservaStock.all_objects.create(
             empresa=empresa,
             creado_por=usuario,
             producto=producto,
@@ -354,6 +401,27 @@ class InventarioService:
             documento_tipo=documento_tipo,
             documento_id=documento_id,
         )
+        payload = {
+            "reserva_id": str(reserva.id),
+            "producto_id": str(producto.id),
+            "bodega_id": str(bodega_id),
+            "cantidad": InventarioService._serialize_decimal(cantidad),
+            "documento_tipo": documento_tipo,
+            "documento_id": str(documento_id),
+        }
+        InventarioService._record_reserva_side_effects(
+            empresa=empresa,
+            usuario=usuario,
+            event_name="INVENTARIO_RESERVA_CREADA",
+            summary=f"Reserva de stock creada para producto {producto.nombre}.",
+            aggregate_id=reserva.id,
+            entity_id=reserva.id,
+            payload=payload,
+            changes={
+                "cantidad_reservada": ["0.00", InventarioService._serialize_decimal(cantidad)],
+            },
+        )
+        return reserva
 
     @staticmethod
     @transaction.atomic
@@ -365,6 +433,7 @@ class InventarioService:
         documento_id,
         empresa,
         cantidad=None,
+        usuario=None,
     ):
         """Libera reservas por documento en forma total o parcial."""
         InventarioService._validar_documento_reserva(
@@ -387,29 +456,57 @@ class InventarioService:
         if not reservas:
             return Decimal("0")
 
+        producto = InventarioService._obtener_producto_con_lock(
+            empresa=empresa,
+            producto_id=producto_id,
+            context="liberacion de reserva",
+        )
+
         liberado = Decimal("0")
         if cantidad is None:
+            reservas_payload = []
             for reserva in reservas:
                 liberado += Decimal(reserva.cantidad)
+                reservas_payload.append(
+                    {
+                        "reserva_id": str(reserva.id),
+                        "cantidad": InventarioService._serialize_decimal(reserva.cantidad),
+                    }
+                )
             for reserva in reservas:
                 reserva.delete()
+            InventarioService._record_reserva_side_effects(
+                empresa=empresa,
+                usuario=usuario,
+                event_name="INVENTARIO_RESERVA_LIBERADA",
+                summary=f"Reserva de stock liberada para producto {producto.nombre}.",
+                aggregate_id=producto.id,
+                entity_id=producto.id,
+                payload={
+                    "producto_id": str(producto.id),
+                    "bodega_id": str(bodega_id),
+                    "documento_tipo": documento_tipo,
+                    "documento_id": str(documento_id),
+                    "reservas": reservas_payload,
+                    "cantidad_liberada": InventarioService._serialize_decimal(liberado),
+                },
+                changes={
+                    "cantidad_reservada": [InventarioService._serialize_decimal(liberado), "0.00"],
+                },
+            )
             return liberado
 
         restante = Decimal(cantidad)
         if restante <= 0:
             return Decimal("0")
 
-        producto = InventarioService._obtener_producto_con_lock(
-            empresa=empresa,
-            producto_id=producto_id,
-            context="liberacion de reserva",
-        )
         restante = InventarioService._validar_cantidad_producto(
             producto=producto,
             cantidad=restante,
             field_name="cantidad a liberar",
         )
 
+        reservas_payload = []
         for reserva in reservas:
             actual = Decimal(reserva.cantidad)
             if restante <= 0:
@@ -418,14 +515,48 @@ class InventarioService:
             if actual <= restante:
                 restante -= actual
                 liberado += actual
+                reservas_payload.append(
+                    {
+                        "reserva_id": str(reserva.id),
+                        "cantidad_antes": InventarioService._serialize_decimal(actual),
+                        "cantidad_despues": "0.00",
+                    }
+                )
                 reserva.delete()
                 continue
 
             reserva.cantidad = actual - restante
             reserva.save(update_fields=["cantidad"])
+            reservas_payload.append(
+                {
+                    "reserva_id": str(reserva.id),
+                    "cantidad_antes": InventarioService._serialize_decimal(actual),
+                    "cantidad_despues": InventarioService._serialize_decimal(reserva.cantidad),
+                }
+            )
             liberado += restante
             restante = Decimal("0")
 
+        if liberado > 0:
+            InventarioService._record_reserva_side_effects(
+                empresa=empresa,
+                usuario=usuario,
+                event_name="INVENTARIO_RESERVA_LIBERADA",
+                summary=f"Reserva de stock liberada para producto {producto.nombre}.",
+                aggregate_id=producto.id,
+                entity_id=producto.id,
+                payload={
+                    "producto_id": str(producto.id),
+                    "bodega_id": str(bodega_id),
+                    "documento_tipo": documento_tipo,
+                    "documento_id": str(documento_id),
+                    "reservas": reservas_payload,
+                    "cantidad_liberada": InventarioService._serialize_decimal(liberado),
+                },
+                changes={
+                    "cantidad_liberada": ["0.00", InventarioService._serialize_decimal(liberado)],
+                },
+            )
         return liberado
 
     @staticmethod
@@ -636,6 +767,7 @@ class InventarioService:
                     documento_id=documento_id,
                     empresa=empresa,
                     cantidad=min(cantidad, reserva_consumible),
+                    usuario=usuario,
                 )
 
         producto.save(
