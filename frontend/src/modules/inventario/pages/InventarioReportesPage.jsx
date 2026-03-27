@@ -68,15 +68,6 @@ function getChileDateInputValue() {
   }).format(new Date())
 }
 
-function getChileMonthInputValue() {
-  const date = new Date()
-  return new Intl.DateTimeFormat('sv-SE', {
-    timeZone: 'America/Santiago',
-    year: 'numeric',
-    month: '2-digit',
-  }).format(date).slice(0, 7)
-}
-
 function getPreviousMonthInputValue() {
   const now = new Date()
   const chileDate = new Date(now.getFullYear(), now.getMonth(), now.getDate())
