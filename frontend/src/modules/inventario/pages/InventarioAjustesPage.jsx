@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { normalizeApiError } from '@/api/errors'
@@ -31,10 +31,26 @@ function buildOperationalReference({ motivo, referenciaOperativa, observaciones,
 }
 
 function extractContractError(error, fallback) {
+  const detail = error?.response?.data?.detail ?? null
+  const errorCode = error?.response?.data?.error_code ?? null
+  if (errorCode === 'BUSINESS_RULE_ERROR') {
+    return {
+      message: fallback,
+      detail,
+      errorCode: null,
+    }
+  }
+  if (errorCode === 'RESOURCE_NOT_FOUND') {
+    return {
+      message: 'El producto o la bodega seleccionados ya no estan disponibles.',
+      detail: null,
+      errorCode: null,
+    }
+  }
   return {
     message: fallback,
-    detail: error?.response?.data?.detail ?? null,
-    errorCode: error?.response?.data?.error_code ?? null,
+    detail,
+    errorCode: null,
   }
 }
 
@@ -51,6 +67,8 @@ function InventarioAjustesPage() {
     motivo: searchParams.get('motivo') || '',
     referencia_operativa: '',
     observaciones: '',
+    lote_codigo: '',
+    fecha_vencimiento: '',
   })
   const [preview, setPreview] = useState(null)
   const [loading, setLoading] = useState(false)
@@ -100,6 +118,12 @@ function InventarioAjustesPage() {
     value: String(bodega.id),
     label: bodega.nombre || `Bodega ${bodega.id}`,
   }))
+  const selectedProducto = useMemo(
+    () => productos.find((producto) => String(producto.id) === String(form.producto_id)) || null,
+    [productos, form.producto_id],
+  )
+  const requiresLote = Boolean(selectedProducto?.usa_lotes)
+  const usesVencimiento = Boolean(selectedProducto?.usa_vencimiento)
 
   const updateForm = (key, value) => setForm((prev) => ({ ...prev, [key]: value }))
   const handlePreview = async () => {
@@ -122,6 +146,14 @@ function InventarioAjustesPage() {
 
   const handleApply = async () => {
     if (!preview?.ajustable) return
+    if (requiresLote && !String(form.lote_codigo || '').trim()) {
+      setSubmitError({
+        message: 'Debe indicar el lote para ajustar este producto.',
+        detail: null,
+        errorCode: null,
+      })
+      return
+    }
     setLoading(true)
     setSubmitError(null)
     try {
@@ -137,6 +169,8 @@ function InventarioAjustesPage() {
             observaciones: form.observaciones,
             fallback: `Conteo fisico ${preview.producto_nombre || ''}`.trim(),
           }),
+          lote_codigo: form.lote_codigo || '',
+          fecha_vencimiento: form.fecha_vencimiento || null,
         },
       )
       toast.success('Ajuste de inventario aplicado correctamente.')
@@ -147,6 +181,8 @@ function InventarioAjustesPage() {
         motivo: '',
         referencia_operativa: '',
         observaciones: '',
+        lote_codigo: '',
+        fecha_vencimiento: '',
       })
       setPreview(null)
       await loadCatalogs()
@@ -225,6 +261,33 @@ function InventarioAjustesPage() {
             />
           </label>
         </div>
+        {requiresLote || usesVencimiento ? (
+          <div className="grid gap-3 md:grid-cols-2">
+            {requiresLote ? (
+              <label className="text-sm">
+                Lote
+                <input
+                  type="text"
+                  value={form.lote_codigo}
+                  onChange={(event) => updateForm('lote_codigo', event.target.value.toUpperCase())}
+                  className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
+                  placeholder="Codigo de lote"
+                />
+              </label>
+            ) : <div />}
+            {usesVencimiento ? (
+              <label className="text-sm">
+                Fecha de vencimiento
+                <input
+                  type="date"
+                  value={form.fecha_vencimiento}
+                  onChange={(event) => updateForm('fecha_vencimiento', event.target.value)}
+                  className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
+                />
+              </label>
+            ) : <div />}
+          </div>
+        ) : null}
         {!canEditInventario ? <ApiContractError error={{ message: 'No tiene permiso para aplicar ajustes de inventario.', errorCode: 'PERMISSION_DENIED' }} title="Acceso restringido" /> : null}
         {previewError ? <ApiContractError error={previewError} title="Error al previsualizar ajuste" /> : null}
         {submitError ? <ApiContractError error={submitError} title="Error al aplicar ajuste" /> : null}
@@ -257,6 +320,12 @@ function InventarioAjustesPage() {
                 }) || '-'}
               </p>
             </div>
+            {requiresLote || usesVencimiento ? (
+              <div className="md:col-span-3 rounded-md border border-border bg-background px-3 py-3 text-sm text-muted-foreground">
+                {requiresLote ? `Lote: ${form.lote_codigo || 'Pendiente de informar'}. ` : ''}
+                {usesVencimiento ? `Vencimiento: ${form.fecha_vencimiento || 'Sin fecha informada'}.` : ''}
+              </div>
+            ) : null}
             {Array.isArray(preview.warnings) && preview.warnings.length > 0 ? <div className="md:col-span-3 rounded-md border border-border bg-background px-3 py-3 text-sm text-muted-foreground">{preview.warnings.join(' ')}</div> : null}
           </div>
         ) : null}

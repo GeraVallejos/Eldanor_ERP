@@ -135,6 +135,6 @@ describe('inventario/InventarioTrasladosPage', () => {
 
     expect(await screen.findByText('Error al registrar traslado')).toBeInTheDocument()
     expect(await screen.findByText('Stock insuficiente para Motosierra: disponible 1.00.')).toBeInTheDocument()
-    expect(await screen.findByText(/BUSINESS_RULE_ERROR/)).toBeInTheDocument()
+    expect(screen.queryByText(/BUSINESS_RULE_ERROR/)).not.toBeInTheDocument()
   })
 })

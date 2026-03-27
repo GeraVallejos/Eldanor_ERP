@@ -38,6 +38,8 @@ class AjusteInventarioMasivoItem(BaseModel):
         blank=True,
     )
     stock_objetivo = models.DecimalField(max_digits=12, decimal_places=2)
+    lote_codigo = models.CharField(max_length=80, blank=True, default="")
+    fecha_vencimiento = models.DateField(null=True, blank=True)
     stock_actual = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     diferencia = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     movimiento = models.ForeignKey(

@@ -22,6 +22,8 @@ function buildRow() {
     producto_id: '',
     bodega_id: '',
     stock_objetivo: '',
+    lote_codigo: '',
+    fecha_vencimiento: '',
   }
 }
 
@@ -146,6 +148,8 @@ function InventarioAjustesMasivosPage() {
             producto_id: String(item.producto || ''),
             bodega_id: item.bodega ? String(item.bodega) : '',
             stock_objetivo: String(item.stock_objetivo ?? ''),
+            lote_codigo: String(item.lote_codigo || ''),
+            fecha_vencimiento: item.fecha_vencimiento || '',
           })),
         )
         setLastDocument(data)
@@ -164,6 +168,10 @@ function InventarioAjustesMasivosPage() {
     label: producto.nombre || `Producto ${producto.id}`,
     keywords: `${producto.sku || ''} ${producto.tipo || ''}`,
   }))
+  const productoById = useMemo(
+    () => new Map(productos.map((producto) => [String(producto.id), producto])),
+    [productos],
+  )
   const bodegaOptions = bodegas.map((bodega) => ({
     value: String(bodega.id),
     label: bodega.nombre || `Bodega ${bodega.id}`,
@@ -188,7 +196,7 @@ function InventarioAjustesMasivosPage() {
   const rowDiagnostics = useMemo(() => {
     const duplicates = new Map()
     rows.forEach((row) => {
-      const key = `${row.producto_id || ''}|${row.bodega_id || ''}`
+      const key = `${row.producto_id || ''}|${row.bodega_id || ''}|${String(row.lote_codigo || '').trim().toUpperCase()}`
       if (!row.producto_id) {
         return
       }
@@ -197,6 +205,9 @@ function InventarioAjustesMasivosPage() {
 
     return rows.map((row) => {
       const errors = []
+      const producto = productoById.get(String(row.producto_id))
+      const requiresLote = Boolean(producto?.usa_lotes)
+      const usesVencimiento = Boolean(producto?.usa_vencimiento)
       if (!row.producto_id) {
         errors.push('Debe seleccionar un producto.')
       }
@@ -205,9 +216,18 @@ function InventarioAjustesMasivosPage() {
       } else if (Number(row.stock_objetivo) < 0) {
         errors.push('El stock objetivo no puede ser negativo.')
       }
-      const key = `${row.producto_id || ''}|${row.bodega_id || ''}`
+      if (requiresLote && !String(row.lote_codigo || '').trim()) {
+        errors.push('Debe informar lote para este producto.')
+      }
+      if (row.lote_codigo && !requiresLote) {
+        errors.push('Este producto no usa control por lotes.')
+      }
+      if (row.fecha_vencimiento && !usesVencimiento) {
+        errors.push('Este producto no usa control de vencimiento.')
+      }
+      const key = `${row.producto_id || ''}|${row.bodega_id || ''}|${String(row.lote_codigo || '').trim().toUpperCase()}`
       if (row.producto_id && (duplicates.get(key) || 0) > 1) {
-        errors.push('La combinacion producto y bodega no puede repetirse.')
+        errors.push('La combinacion producto, bodega y lote no puede repetirse.')
       }
       return {
         id: row.id,
@@ -215,7 +235,7 @@ function InventarioAjustesMasivosPage() {
         valid: errors.length === 0,
       }
     })
-  }, [rows])
+  }, [productoById, rows])
   const diagnosticsById = useMemo(
     () => new Map(rowDiagnostics.map((diagnostic) => [diagnostic.id, diagnostic])),
     [rowDiagnostics],
@@ -252,6 +272,8 @@ function InventarioAjustesMasivosPage() {
         producto_id: row.producto_id,
         bodega_id: row.bodega_id || null,
         stock_objetivo: row.stock_objetivo,
+        lote_codigo: String(row.lote_codigo || '').trim().toUpperCase(),
+        fecha_vencimiento: row.fecha_vencimiento || null,
       }))
 
     if (!header.motivo.trim()) {
@@ -345,6 +367,7 @@ function InventarioAjustesMasivosPage() {
             templateEndpoint={bulkTemplateEndpoint}
             previewBeforeImport
             previewTitle="Confirmar importacion de ajustes masivos"
+            summaryMode="rows"
             onCompleted={(data) => { void handleBulkImportCompleted(data) }}
           />
           <Link to={draftId ? `/inventario/ajustes-masivos/${draftId}` : '/inventario/ajustes'} className={cn(buttonVariants({ variant: 'outline', size: 'md' }))}>
@@ -418,6 +441,8 @@ function InventarioAjustesMasivosPage() {
                 <th className="px-3 py-2 text-left font-medium">Producto</th>
                 <th className="px-3 py-2 text-left font-medium">Bodega</th>
                 <th className="px-3 py-2 text-left font-medium">Stock objetivo</th>
+                <th className="px-3 py-2 text-left font-medium">Lote</th>
+                <th className="px-3 py-2 text-left font-medium">Vencimiento</th>
                 <th className="px-3 py-2 text-left font-medium">Validacion</th>
                 <th className="px-3 py-2 text-left font-medium">Acciones</th>
               </tr>
@@ -463,9 +488,28 @@ function InventarioAjustesMasivosPage() {
                         className="w-full rounded-md border border-input bg-background px-3 py-2"
                       />
                     </td>
+                    <td className="min-w-44 px-3 py-3">
+                      <input
+                        type="text"
+                        value={row.lote_codigo}
+                        onChange={(event) => updateRow(row.id, 'lote_codigo', event.target.value.toUpperCase())}
+                        className="w-full rounded-md border border-input bg-background px-3 py-2"
+                        placeholder="Segun producto"
+                      />
+                    </td>
+                    <td className="min-w-44 px-3 py-3">
+                      <input
+                        type="date"
+                        value={row.fecha_vencimiento}
+                        onChange={(event) => updateRow(row.id, 'fecha_vencimiento', event.target.value)}
+                        className="w-full rounded-md border border-input bg-background px-3 py-2"
+                      />
+                    </td>
                     <td className="min-w-64 px-3 py-3">
                       {diagnostics?.valid ? (
-                        <span className="text-muted-foreground">Linea valida</span>
+                        <span className="text-muted-foreground">
+                          {productoById.get(String(row.producto_id))?.usa_lotes ? 'Linea valida con trazabilidad por lote' : 'Linea valida'}
+                        </span>
                       ) : (
                         <div className="rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive">
                           {diagnostics.errors.join(' ')}

@@ -1,5 +1,9 @@
 from decimal import Decimal, InvalidOperation
 
+from datetime import datetime
+
+from django.utils.dateparse import parse_date
+
 from apps.auditoria.models import AuditSeverity
 from apps.auditoria.services import AuditoriaService
 from apps.core.exceptions import AppError, BusinessRuleError
@@ -14,6 +18,7 @@ from apps.core.services import (
 from apps.core.services.csv_import import parse_csv_upload
 from apps.core.services.xlsx_template import build_xlsx_template
 from apps.inventario.services.documento_inventario_service import DocumentoInventarioService
+from apps.inventario.services.inventario_service import InventarioService
 from apps.inventario.models import Bodega
 from apps.productos.models import Producto
 
@@ -25,6 +30,8 @@ AJUSTE_BULK_HEADERS = [
     "producto_sku",
     "bodega",
     "stock_objetivo",
+    "lote_codigo",
+    "fecha_vencimiento",
 ]
 
 TRASLADO_BULK_HEADERS = [
@@ -67,6 +74,41 @@ def _build_reference(motivo, referencia_operativa, observaciones):
     )
 
 
+def _to_optional_date(raw_value, *, field_name):
+    """Convierte una celda de fecha opcional a un valor date compatible con el dominio."""
+    if raw_value in (None, ""):
+        return None
+
+    if hasattr(raw_value, "date"):
+        try:
+            return raw_value.date()
+        except (TypeError, ValueError, AttributeError):
+            pass
+
+    if hasattr(raw_value, "year") and hasattr(raw_value, "month") and hasattr(raw_value, "day"):
+        return raw_value
+
+    value = _normalize_text(raw_value)
+    if not value:
+        return None
+
+    normalized = value.replace(".", "/")
+    if " " in normalized:
+        normalized = normalized.split(" ", 1)[0]
+
+    parsed = parse_date(normalized)
+    if parsed is not None:
+        return parsed
+
+    for fmt in ("%d/%m/%Y", "%d-%m-%Y", "%Y/%m/%d"):
+        try:
+            return datetime.strptime(normalized, fmt).date()
+        except ValueError:
+            continue
+
+    raise BusinessRuleError(f"{field_name} invalido.")
+
+
 def _resolve_producto(*, empresa, sku):
     """Resuelve un producto manejado en inventario a partir de su SKU."""
     normalized_sku = _normalize_text(sku, uppercase=True)
@@ -76,7 +118,7 @@ def _resolve_producto(*, empresa, sku):
     producto = (
         Producto.all_objects
         .filter(empresa=empresa, sku=normalized_sku, maneja_inventario=True)
-        .only("id", "nombre", "sku")
+        .only("id", "nombre", "sku", "usa_lotes", "usa_vencimiento")
         .first()
     )
     if not producto:
@@ -183,8 +225,32 @@ def import_ajustes_masivos_desde_archivo(*, uploaded_file, user, empresa, dry_ru
                     allow_blank=True,
                 )
                 stock_objetivo = _to_decimal(row.get("stock_objetivo"), field_name="stock_objetivo")
+                lote_codigo = _normalize_text(row.get("lote_codigo"), uppercase=True)
+                fecha_vencimiento = _to_optional_date(
+                    row.get("fecha_vencimiento"),
+                    field_name="fecha_vencimiento",
+                )
                 if stock_objetivo < 0:
                     raise BusinessRuleError("stock_objetivo no puede ser negativo.")
+                if producto.usa_lotes and not lote_codigo:
+                    raise BusinessRuleError(
+                        f"El producto {producto.nombre} requiere lote para registrar movimientos."
+                    )
+                if lote_codigo and not producto.usa_lotes:
+                    raise BusinessRuleError(
+                        f"El producto {producto.nombre} no utiliza control por lotes."
+                    )
+                if fecha_vencimiento and not producto.usa_vencimiento:
+                    raise BusinessRuleError(
+                        f"El producto {producto.nombre} no tiene control de vencimiento habilitado."
+                    )
+                if lote_codigo and bodega:
+                    InventarioService._validar_lote_similar_existente(
+                        empresa=empresa,
+                        producto=producto,
+                        bodega_id=bodega.id,
+                        lote_codigo=lote_codigo,
+                    )
 
                 line_context = {
                     "motivo": _normalize_text(row.get("motivo"), uppercase=True),
@@ -206,9 +272,9 @@ def import_ajustes_masivos_desde_archivo(*, uploaded_file, user, empresa, dry_ru
                     continue
                 context = next_context
 
-                dedup_key = (str(producto.id), str(bodega.id) if bodega else "")
+                dedup_key = (str(producto.id), str(bodega.id) if bodega else "", lote_codigo)
                 if dedup_key in seen_keys:
-                    raise BusinessRuleError("La combinacion producto_sku y bodega no puede repetirse en el archivo.")
+                    raise BusinessRuleError("La combinacion producto_sku, bodega y lote no puede repetirse en el archivo.")
                 seen_keys.add(dedup_key)
 
                 items.append(
@@ -216,6 +282,8 @@ def import_ajustes_masivos_desde_archivo(*, uploaded_file, user, empresa, dry_ru
                         "producto_id": producto.id,
                         "bodega_id": bodega.id if bodega else None,
                         "stock_objetivo": stock_objetivo,
+                        "lote_codigo": lote_codigo,
+                        "fecha_vencimiento": fecha_vencimiento,
                     }
                 )
             except AppError as exc:
@@ -415,12 +483,16 @@ def build_ajustes_masivos_bulk_template(*, user, empresa):
             "SKU-001",
             "CASA MATRIZ",
             "15",
+            "LOTE-001",
+            "2027-12-31",
         ],
         instructions=[
             "Cada archivo genera un solo documento borrador de ajuste masivo.",
             "MOTIVO, REFERENCIA_OPERATIVA y OBSERVACIONES deben ser consistentes en todas las filas.",
             "BODEGA es opcional; si queda vacia, el ajuste se registra sin bodega explicita.",
             "PRODUCTO_SKU debe existir y STOCK_OBJETIVO no puede ser negativo.",
+            "LOTE_CODIGO es obligatorio para productos con control por lotes.",
+            "FECHA_VENCIMIENTO es opcional y solo aplica a productos con vencimiento habilitado.",
         ],
         sheet_name="AjustesMasivos",
         template_title="Plantilla de importacion - Ajustes masivos de inventario",

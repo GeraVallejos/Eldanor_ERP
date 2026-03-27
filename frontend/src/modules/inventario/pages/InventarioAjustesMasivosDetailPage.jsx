@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { normalizeApiError } from '@/api/errors'
 import Button from '@/components/ui/Button'
+import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import MenuButton from '@/components/ui/MenuButton'
 import { buttonVariants } from '@/components/ui/buttonVariants'
 import { formatDateTimeChile, getChileDateSuffix } from '@/lib/dateTimeFormat'
@@ -25,6 +26,8 @@ function InventarioAjustesMasivosDetailPage() {
   const [status, setStatus] = useState('idle')
   const [duplicating, setDuplicating] = useState(false)
   const [confirming, setConfirming] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false)
   const [documento, setDocumento] = useState(null)
 
   useEffect(() => {
@@ -47,6 +50,8 @@ function InventarioAjustesMasivosDetailPage() {
     bodega: item.bodega_nombre || '-',
     stock_actual: formatNumber(item.stock_actual),
     stock_objetivo: formatNumber(item.stock_objetivo),
+    lote_codigo: item.lote_codigo || '-',
+    fecha_vencimiento: item.fecha_vencimiento || '-',
     diferencia: formatNumber(item.diferencia),
     movimiento: item.movimiento || '-',
   }))
@@ -61,6 +66,8 @@ function InventarioAjustesMasivosDetailPage() {
         { header: 'Bodega', key: 'bodega', width: 24 },
         { header: 'Stock actual', key: 'stock_actual', width: 16 },
         { header: 'Stock objetivo', key: 'stock_objetivo', width: 16 },
+        { header: 'Lote', key: 'lote_codigo', width: 18 },
+        { header: 'Vencimiento', key: 'fecha_vencimiento', width: 18 },
         { header: 'Diferencia', key: 'diferencia', width: 16 },
         { header: 'Movimiento', key: 'movimiento', width: 18 },
       ],
@@ -73,8 +80,8 @@ function InventarioAjustesMasivosDetailPage() {
     await downloadSimpleTablePdf({
       title: `Ajuste masivo ${documento.numero || documento.id}`,
       fileName: `ajuste_masivo_${documento.numero || documento.id}_${getChileDateSuffix()}.pdf`,
-      headers: ['Producto', 'Bodega', 'Stock actual', 'Stock objetivo', 'Diferencia'],
-      rows: exportRows.map((row) => [row.producto, row.bodega, row.stock_actual, row.stock_objetivo, row.diferencia]),
+      headers: ['Producto', 'Bodega', 'Stock actual', 'Stock objetivo', 'Lote', 'Vencimiento', 'Diferencia'],
+      rows: exportRows.map((row) => [row.producto, row.bodega, row.stock_actual, row.stock_objetivo, row.lote_codigo, row.fecha_vencimiento, row.diferencia]),
     })
   }
 
@@ -103,6 +110,20 @@ function InventarioAjustesMasivosDetailPage() {
     }
   }
 
+  const handleDelete = async () => {
+    setDeleting(true)
+    try {
+      await inventarioApi.deleteOne(inventarioApi.endpoints.ajustesMasivos, id)
+      toast.success(`Borrador ${documento?.numero || id} eliminado correctamente.`)
+      setConfirmDeleteOpen(false)
+      navigate('/inventario/ajustes-masivos', { replace: true })
+    } catch (error) {
+      toast.error(normalizeApiError(error, { fallback: 'No se pudo eliminar el borrador de ajuste masivo.' }))
+    } finally {
+      setDeleting(false)
+    }
+  }
+
   if (status === 'loading') {
     return <p className="text-sm text-muted-foreground">Cargando ajuste masivo...</p>
   }
@@ -125,6 +146,9 @@ function InventarioAjustesMasivosDetailPage() {
             <>
               <Button type="button" variant="outline" onClick={() => navigate(`/inventario/ajustes-masivos?draft=${documento.id}`)}>
                 Editar borrador
+              </Button>
+              <Button type="button" variant="outline" onClick={() => setConfirmDeleteOpen(true)} disabled={deleting}>
+                {deleting ? 'Eliminando...' : 'Eliminar borrador'}
               </Button>
               <Button type="button" onClick={handleConfirm} disabled={confirming}>
                 {confirming ? 'Confirmando...' : 'Confirmar borrador'}
@@ -168,6 +192,8 @@ function InventarioAjustesMasivosDetailPage() {
               <th className="px-3 py-2 text-left font-medium">Bodega</th>
               <th className="px-3 py-2 text-left font-medium">Stock actual</th>
               <th className="px-3 py-2 text-left font-medium">Stock objetivo</th>
+              <th className="px-3 py-2 text-left font-medium">Lote</th>
+              <th className="px-3 py-2 text-left font-medium">Vencimiento</th>
               <th className="px-3 py-2 text-left font-medium">Diferencia</th>
             </tr>
           </thead>
@@ -178,12 +204,28 @@ function InventarioAjustesMasivosDetailPage() {
                 <td className="px-3 py-2">{row.bodega}</td>
                 <td className="px-3 py-2">{row.stock_actual}</td>
                 <td className="px-3 py-2">{row.stock_objetivo}</td>
+                <td className="px-3 py-2">{row.lote_codigo}</td>
+                <td className="px-3 py-2">{row.fecha_vencimiento}</td>
                 <td className="px-3 py-2">{row.diferencia}</td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+
+      <ConfirmDialog
+        open={confirmDeleteOpen}
+        title="Eliminar borrador"
+        description={`Se eliminara el borrador ${documento.numero}. Esta accion no afecta stock porque el documento aun no esta confirmado.`}
+        confirmLabel="Eliminar borrador"
+        loading={deleting}
+        onCancel={() => {
+          if (!deleting) {
+            setConfirmDeleteOpen(false)
+          }
+        }}
+        onConfirm={handleDelete}
+      />
     </section>
   )
 }

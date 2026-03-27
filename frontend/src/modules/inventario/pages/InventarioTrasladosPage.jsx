@@ -31,10 +31,26 @@ function buildOperationalReference({ motivo, referenciaOperativa, observaciones,
 }
 
 function extractContractError(error, fallback) {
+  const detail = error?.response?.data?.detail ?? null
+  const errorCode = error?.response?.data?.error_code ?? null
+  if (errorCode === 'BUSINESS_RULE_ERROR') {
+    return {
+      message: fallback,
+      detail,
+      errorCode: null,
+    }
+  }
+  if (errorCode === 'RESOURCE_NOT_FOUND') {
+    return {
+      message: 'El producto o alguna de las bodegas seleccionadas ya no estan disponibles.',
+      detail: null,
+      errorCode: null,
+    }
+  }
   return {
     message: fallback,
-    detail: error?.response?.data?.detail ?? null,
-    errorCode: error?.response?.data?.error_code ?? null,
+    detail,
+    errorCode: null,
   }
 }
 
