@@ -31,11 +31,13 @@ export const INVENTARIO_ENDPOINTS = {
   stockReconciliation: '/stocks/reconciliation/',
   movimientos: '/movimientos-inventario/',
   movimientosKardex: '/movimientos-inventario/kardex/',
+  movimientosSnapshot: '/movimientos-inventario/snapshot/',
   movimientosHistorial: '/movimientos-inventario/historial/',
   movimientosResumen: '/movimientos-inventario/resumen_operativo/',
   movimientosPreviewRegularizacion: '/movimientos-inventario/previsualizar_regularizacion/',
   movimientosRegularizar: '/movimientos-inventario/regularizar/',
   movimientosTrasladar: '/movimientos-inventario/trasladar/',
+  cortesInventario: '/cortes-inventario/',
   ajustesMasivos: '/ajustes-masivos/',
   trasladosMasivos: '/traslados-masivos/',
 }
@@ -48,6 +50,11 @@ async function getList(endpoint, params) {
 async function getPaginated(endpoint, params) {
   const { data } = await api.get(endpoint, { params, suppressGlobalErrorToast: true })
   return normalizePaginatedResponse(data)
+}
+
+async function getData(endpoint, params) {
+  const { data } = await api.get(endpoint, { params, suppressGlobalErrorToast: true })
+  return data
 }
 
 async function getAllPaginated(endpoint, params, { pageSize = 100, maxPages = 50 } = {}) {
@@ -94,7 +101,17 @@ async function executeDetailAction(endpoint, id, action, { method = 'post', payl
     const { data } = await api.post(target, payload || {}, { suppressGlobalErrorToast: true })
     return data
   }
-  const { data } = await api.get(target, { suppressGlobalErrorToast: true })
+  const { data } = await api.get(target, { params: payload, suppressGlobalErrorToast: true })
+  return data
+}
+
+async function executeCollectionAction(endpoint, action, { method = 'post', payload } = {}) {
+  const target = `${endpoint}${action}/`
+  if (method === 'post') {
+    const { data } = await api.post(target, payload || {}, { suppressGlobalErrorToast: true })
+    return data
+  }
+  const { data } = await api.get(target, { params: payload, suppressGlobalErrorToast: true })
   return data
 }
 
@@ -106,17 +123,24 @@ async function getMovimientoAuditoria(movimientoId, params) {
   return normalizePaginatedResponse(data)
 }
 
+async function getAllCorteItems(corteId, params, options) {
+  return getAllPaginated(`${INVENTARIO_ENDPOINTS.cortesInventario}${corteId}/items/`, params, options)
+}
+
 export const inventarioApi = {
   endpoints: INVENTARIO_ENDPOINTS,
   normalizeListResponse,
   normalizePaginatedResponse,
   getList,
   getPaginated,
+  getData,
   getAllPaginated,
   getOne,
   postOne,
   patchOne,
   deleteOne,
   executeDetailAction,
+  executeCollectionAction,
   getMovimientoAuditoria,
+  getAllCorteItems,
 }

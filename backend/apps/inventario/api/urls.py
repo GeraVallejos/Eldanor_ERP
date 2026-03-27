@@ -3,6 +3,7 @@ from rest_framework.routers import DefaultRouter
 from .views import (
     AjusteInventarioMasivoViewSet,
     BodegaViewSet,
+    CorteInventarioViewSet,
     InventorySnapshotViewSet,
     MovimientoInventarioViewSet,
     StockLoteViewSet,
@@ -16,6 +17,7 @@ router.register(r"lotes", StockLoteViewSet, basename="stock-lote")
 router.register(r"stocks", StockProductoViewSet, basename="stock-producto")
 router.register(r"movimientos-inventario", MovimientoInventarioViewSet, basename="movimiento-inventario")
 router.register(r"inventario-snapshots", InventorySnapshotViewSet, basename="inventario-snapshot")
+router.register(r"cortes-inventario", CorteInventarioViewSet, basename="corte-inventario")
 router.register(r"ajustes-masivos", AjusteInventarioMasivoViewSet, basename="ajuste-inventario-masivo")
 router.register(r"traslados-masivos", TrasladoInventarioMasivoViewSet, basename="traslado-inventario-masivo")
 

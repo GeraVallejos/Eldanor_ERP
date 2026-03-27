@@ -4,6 +4,8 @@ from apps.inventario.models import (
     AjusteInventarioMasivo,
     AjusteInventarioMasivoItem,
     Bodega,
+    CorteInventario,
+    CorteInventarioItem,
     EstadoDocumentoInventario,
     InventorySnapshot,
     MovimientoInventario,
@@ -145,6 +147,62 @@ class InventorySnapshotSerializer(serializers.ModelSerializer):
             "stock",
             "valor_stock",
             "costo_promedio",
+        )
+        read_only_fields = fields
+
+
+class CorteInventarioCreateSerializer(serializers.Serializer):
+    fecha_corte = serializers.DateField()
+    observaciones = serializers.CharField(required=False, allow_blank=True)
+
+
+class CorteInventarioCierreMensualSerializer(serializers.Serializer):
+    periodo = serializers.RegexField(regex=r"^\d{4}-\d{2}$")
+    observaciones = serializers.CharField(required=False, allow_blank=True)
+
+
+class CorteInventarioItemSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CorteInventarioItem
+        fields = (
+            "id",
+            "producto",
+            "bodega",
+            "producto_nombre",
+            "producto_sku",
+            "producto_categoria_nombre",
+            "bodega_nombre",
+            "stock",
+            "reservado",
+            "disponible",
+            "costo_promedio",
+            "valor_stock",
+            "lotes_activos",
+            "proximo_vencimiento",
+            "series_disponibles",
+            "series_muestra",
+        )
+        read_only_fields = fields
+
+
+class CorteInventarioSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CorteInventario
+        fields = (
+            "id",
+            "numero",
+            "estado",
+            "tipo_corte",
+            "periodo_referencia",
+            "fecha_corte",
+            "observaciones",
+            "subtotal",
+            "total",
+            "reservado_total",
+            "disponible_total",
+            "items_count",
+            "creado_en",
+            "actualizado_en",
         )
         read_only_fields = fields
 

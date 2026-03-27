@@ -59,6 +59,33 @@ function formatDateOnlyCell(value) {
   return formatDateChile(value).replaceAll('-', '/')
 }
 
+function getChileDateInputValue() {
+  return new Intl.DateTimeFormat('sv-SE', {
+    timeZone: 'America/Santiago',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date())
+}
+
+function getChileMonthInputValue() {
+  const date = new Date()
+  return new Intl.DateTimeFormat('sv-SE', {
+    timeZone: 'America/Santiago',
+    year: 'numeric',
+    month: '2-digit',
+  }).format(date).slice(0, 7)
+}
+
+function getPreviousMonthInputValue() {
+  const now = new Date()
+  const chileDate = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  chileDate.setMonth(chileDate.getMonth() - 1)
+  const year = chileDate.getFullYear()
+  const month = String(chileDate.getMonth() + 1).padStart(2, '0')
+  return `${year}-${month}`
+}
+
 async function fetchAnalyticsSnapshot(params) {
   const { data } = await api.get('/stocks/analytics/', {
     params,
@@ -109,6 +136,19 @@ function InventarioReportesPage() {
   const [selectedLoteId, setSelectedLoteId] = useState('')
   const [nuevoCodigoLote, setNuevoCodigoLote] = useState('')
   const [motivoLote, setMotivoLote] = useState('')
+  const [cortes, setCortes] = useState([])
+  const [cortesLoading, setCortesLoading] = useState(false)
+  const [corteItemsLoading, setCorteItemsLoading] = useState(false)
+  const [corteCreating, setCorteCreating] = useState(false)
+  const [selectedCorteId, setSelectedCorteId] = useState('')
+  const [corteItems, setCorteItems] = useState([])
+  const [corteItemsPagination, setCorteItemsPagination] = useState({ count: 0, next: null, previous: null })
+  const [corteItemsPage, setCorteItemsPage] = useState(1)
+  const [corteFecha, setCorteFecha] = useState(getChileDateInputValue)
+  const [corteObservaciones, setCorteObservaciones] = useState('')
+  const [cierreMensualPeriodo, setCierreMensualPeriodo] = useState(getPreviousMonthInputValue)
+  const [cierreMensualCreating, setCierreMensualCreating] = useState(false)
+  const [showCortesSection, setShowCortesSection] = useState(false)
 
   const loadCatalogs = useCallback(async () => {
     try {
@@ -168,6 +208,59 @@ function InventarioReportesPage() {
     }
   }, [])
 
+  const loadCorteItems = useCallback(async (corteId, page = 1) => {
+    if (!corteId) {
+      setCorteItems([])
+      setCorteItemsPagination({ count: 0, next: null, previous: null })
+      return
+    }
+    setCorteItemsLoading(true)
+    try {
+      const data = await inventarioApi.executeDetailAction(
+        inventarioApi.endpoints.cortesInventario,
+        corteId,
+        'items',
+        { method: 'get', payload: { page, page_size: 10 } },
+      )
+      setCorteItems(data.results || [])
+      setCorteItemsPagination({
+        count: Number(data.count || 0),
+        next: data.next || null,
+        previous: data.previous || null,
+      })
+      setCorteItemsPage(page)
+    } catch (error) {
+      toast.error(normalizeApiError(error, { fallback: 'No se pudo cargar el detalle del corte de inventario.' }))
+    } finally {
+      setCorteItemsLoading(false)
+    }
+  }, [])
+
+  const loadCortes = useCallback(async ({ selectId } = {}) => {
+    setCortesLoading(true)
+    try {
+      const data = await inventarioApi.getPaginated(inventarioApi.endpoints.cortesInventario, {
+        page: 1,
+        page_size: 5,
+      })
+      const rows = data.results || []
+      setCortes(rows)
+      const nextSelectedId = selectId || selectedCorteId || rows[0]?.id || ''
+      if (nextSelectedId) {
+        setSelectedCorteId(String(nextSelectedId))
+        void loadCorteItems(String(nextSelectedId), 1)
+      } else {
+        setSelectedCorteId('')
+        setCorteItems([])
+        setCorteItemsPagination({ count: 0, next: null, previous: null })
+      }
+    } catch (error) {
+      toast.error(normalizeApiError(error, { fallback: 'No se pudieron cargar los cortes de inventario.' }))
+    } finally {
+      setCortesLoading(false)
+    }
+  }, [loadCorteItems, selectedCorteId])
+
   useEffect(() => {
     const timeoutId = setTimeout(() => {
       void loadCatalogs()
@@ -176,10 +269,11 @@ function InventarioReportesPage() {
         producto_id: initialFilters.producto_id,
         bodega_id: initialFilters.bodega_id,
       }, 1)
+      void loadCortes()
     }, 0)
 
     return () => clearTimeout(timeoutId)
-  }, [initialFilters, initialOnlyWithStock, loadAnalytics, loadCatalogs, loadReconciliation])
+  }, [initialFilters, initialOnlyWithStock, loadAnalytics, loadCatalogs, loadReconciliation, loadCortes])
 
   const updateFilter = (key, value) => {
     setFilters((prev) => ({ ...prev, [key]: value }))
@@ -429,6 +523,53 @@ function InventarioReportesPage() {
     () => lotes.find((item) => String(item.id) === String(selectedLoteId)) || null,
     [lotes, selectedLoteId],
   )
+  const selectedCorte = useMemo(
+    () => cortes.find((item) => String(item.id) === String(selectedCorteId)) || null,
+    [cortes, selectedCorteId],
+  )
+
+  const handleGenerarCorte = async (event) => {
+    event.preventDefault()
+    setCorteCreating(true)
+    try {
+      const data = await inventarioApi.postOne(inventarioApi.endpoints.cortesInventario, {
+        fecha_corte: corteFecha,
+        observaciones: corteObservaciones,
+      })
+      toast.success('Corte global de inventario generado correctamente.')
+      setCorteObservaciones('')
+      setShowCortesSection(true)
+      await loadCortes({ selectId: data.id })
+    } catch (error) {
+      toast.error(normalizeApiError(error, { fallback: 'No se pudo generar el corte global de inventario.' }))
+    } finally {
+      setCorteCreating(false)
+    }
+  }
+
+  const handleGenerarCierreMensual = async (event) => {
+    event.preventDefault()
+    setCierreMensualCreating(true)
+    try {
+      const data = await inventarioApi.executeCollectionAction(
+        inventarioApi.endpoints.cortesInventario,
+        'cierre_mensual',
+        {
+          payload: {
+            periodo: cierreMensualPeriodo,
+            observaciones: `Cierre contable de inventario ${cierreMensualPeriodo}`,
+          },
+        },
+      )
+      toast.success('Cierre mensual de inventario generado correctamente.')
+      setShowCortesSection(true)
+      await loadCortes({ selectId: data.id })
+    } catch (error) {
+      toast.error(normalizeApiError(error, { fallback: 'No se pudo generar el cierre mensual de inventario.' }))
+    } finally {
+      setCierreMensualCreating(false)
+    }
+  }
 
   const handleCorregirLote = async () => {
     if (!selectedLoteId || !String(nuevoCodigoLote || '').trim() || !String(motivoLote || '').trim()) {
@@ -496,6 +637,82 @@ function InventarioReportesPage() {
     bodega: filters.bodega_id ? bodegaById.get(String(filters.bodega_id))?.nombre : '',
     onlyWithStock,
   })
+
+  const exportSelectedCorteExcel = async () => {
+    if (!selectedCorteId || !selectedCorte) {
+      return
+    }
+    const rows = await inventarioApi.getAllCorteItems(selectedCorteId, {}, { pageSize: 100, maxPages: 100 })
+    if (rows.length === 0) {
+      toast.error('El corte seleccionado no tiene lineas para exportar.')
+      return
+    }
+
+    await downloadExcelFile({
+      sheetName: 'CorteInventario',
+      fileName: `${selectedCorte.tipo_corte === 'CIERRE_MENSUAL' ? 'cierre_mensual' : 'corte_inventario'}_${selectedCorte.periodo_referencia || selectedCorte.fecha_corte}.xlsx`,
+      columns: [
+        { header: 'Producto', key: 'producto_nombre', width: 30 },
+        { header: 'SKU', key: 'producto_sku', width: 18 },
+        { header: 'Categoria', key: 'producto_categoria_nombre', width: 22 },
+        { header: 'Bodega', key: 'bodega_nombre', width: 20 },
+        { header: 'Lotes activos', key: 'lotes_activos', width: 24 },
+        { header: 'Proximo vencimiento', key: 'proximo_vencimiento', width: 20 },
+        { header: 'Series disponibles', key: 'series_disponibles', width: 18 },
+        { header: 'Muestra series', key: 'series_muestra', width: 24 },
+        { header: 'Stock', key: 'stock', width: 14 },
+        { header: 'Reservado', key: 'reservado', width: 14 },
+        { header: 'Disponible', key: 'disponible', width: 14 },
+        { header: 'Costo promedio', key: 'costo_promedio', width: 16 },
+        { header: 'Valor', key: 'valor_stock', width: 16 },
+      ],
+      rows: rows.map((row) => ({
+        producto_nombre: row.producto_nombre || '-',
+        producto_sku: row.producto_sku || '-',
+        producto_categoria_nombre: row.producto_categoria_nombre || '-',
+        bodega_nombre: row.bodega_nombre || '-',
+        lotes_activos: row.lotes_activos || '-',
+        proximo_vencimiento: formatDateOnlyCell(row.proximo_vencimiento),
+        series_disponibles: Number(row.series_disponibles || 0),
+        series_muestra: row.series_muestra || '-',
+        stock: Number(row.stock || 0),
+        reservado: Number(row.reservado || 0),
+        disponible: Number(row.disponible || 0),
+        costo_promedio: Number(row.costo_promedio || 0),
+        valor_stock: Number(row.valor_stock || 0),
+      })),
+    })
+  }
+
+  const exportSelectedCortePdf = async () => {
+    if (!selectedCorteId || !selectedCorte) {
+      return
+    }
+    const rows = await inventarioApi.getAllCorteItems(selectedCorteId, {}, { pageSize: 100, maxPages: 100 })
+    if (rows.length === 0) {
+      toast.error('El corte seleccionado no tiene lineas para exportar.')
+      return
+    }
+
+    await downloadSimpleTablePdf({
+      title: selectedCorte.tipo_corte === 'CIERRE_MENSUAL'
+        ? `Cierre mensual de inventario ${selectedCorte.periodo_referencia || ''}`.trim()
+        : `Corte de inventario ${formatDateOnlyCell(selectedCorte.fecha_corte)}`,
+      fileName: `${selectedCorte.tipo_corte === 'CIERRE_MENSUAL' ? 'cierre_mensual' : 'corte_inventario'}_${selectedCorte.periodo_referencia || selectedCorte.fecha_corte}.pdf`,
+      headers: ['Producto', 'Bodega', 'Lotes', 'Vencimiento', 'Series', 'Stock', 'Reservado', 'Disponible', 'Valor'],
+      rows: rows.map((row) => [
+        row.producto_nombre || '-',
+        row.bodega_nombre || '-',
+        row.lotes_activos || '-',
+        formatDateOnlyCell(row.proximo_vencimiento),
+        Number(row.series_disponibles || 0) > 0 ? `${formatNumber(row.series_disponibles)} | ${row.series_muestra || '-'}` : '-',
+        formatNumber(row.stock),
+        formatNumber(row.reservado),
+        formatNumber(row.disponible),
+        formatCurrency(row.valor_stock),
+      ]),
+    })
+  }
 
   return (
     <section className="space-y-4">
@@ -858,6 +1075,245 @@ function InventarioReportesPage() {
           </div>
         </div>
       </div>
+
+      <div className="rounded-md border border-border bg-card p-4">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div>
+            <p className="text-sm text-muted-foreground">Cortes y cierres</p>
+            <h3 className="text-lg font-semibold">Snapshots historicos del inventario</h3>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Genera fotos puntuales o cierres mensuales sin sobrecargar el flujo diario de reportes.
+            </p>
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setShowCortesSection((prev) => !prev)}
+          >
+            {showCortesSection ? 'Ocultar cortes' : 'Ver cortes y cierres'}
+          </Button>
+        </div>
+      </div>
+
+      {showCortesSection ? (
+        <div className="grid gap-4 xl:grid-cols-[320px_minmax(0,1fr)]">
+          <div className="space-y-4">
+            <div className="rounded-md border border-border bg-card p-4">
+              <p className="text-sm text-muted-foreground">Corte global</p>
+              <h3 className="text-lg font-semibold">Snapshot completo del inventario</h3>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Congela el stock actual de toda la empresa para una fecha de cierre y luego permite revisarlo completo.
+              </p>
+              <form className="mt-4 space-y-3" onSubmit={handleGenerarCorte}>
+                <label className="block text-sm">
+                  Fecha del corte
+                  <input
+                    type="date"
+                    className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
+                    value={corteFecha}
+                    onChange={(event) => setCorteFecha(event.target.value)}
+                    disabled={corteCreating}
+                  />
+                </label>
+                <label className="block text-sm">
+                  Observaciones
+                  <textarea
+                    rows={3}
+                    className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
+                    placeholder="Ej. Cierre diario de inventario"
+                    value={corteObservaciones}
+                    onChange={(event) => setCorteObservaciones(event.target.value)}
+                    disabled={corteCreating}
+                  />
+                </label>
+                <Button type="submit" className="w-full" disabled={corteCreating || !corteFecha}>
+                  {corteCreating ? 'Generando corte...' : 'Generar corte global'}
+                </Button>
+              </form>
+            </div>
+
+            <div className="rounded-md border border-border bg-card p-4">
+              <p className="text-sm text-muted-foreground">Cierre contable</p>
+              <h3 className="text-lg font-semibold">Cierre mensual de inventario</h3>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Genera la foto oficial del inventario para el cierre del mes y evita duplicados del mismo periodo contable.
+              </p>
+              <form className="mt-4 space-y-3" onSubmit={handleGenerarCierreMensual}>
+                <label className="block text-sm">
+                  Periodo contable
+                  <input
+                    type="month"
+                    className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2"
+                    value={cierreMensualPeriodo}
+                    onChange={(event) => setCierreMensualPeriodo(event.target.value)}
+                    disabled={cierreMensualCreating}
+                  />
+                </label>
+                <Button type="submit" className="w-full" disabled={cierreMensualCreating || !cierreMensualPeriodo}>
+                  {cierreMensualCreating ? 'Generando cierre...' : 'Generar cierre mensual'}
+                </Button>
+              </form>
+            </div>
+
+            <div className="rounded-md border border-border bg-card p-4">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-sm text-muted-foreground">Historial de cortes</p>
+                <h3 className="text-lg font-semibold">Ultimos cortes generados</h3>
+              </div>
+              <Button type="button" variant="outline" size="sm" onClick={() => void loadCortes()} disabled={cortesLoading}>
+                Actualizar
+              </Button>
+            </div>
+            <div className="mt-3 max-h-80 space-y-2 overflow-y-auto pr-1">
+              {cortes.length > 0 ? (
+                cortes.map((corte) => (
+                  <button
+                    key={corte.id}
+                    type="button"
+                    onClick={() => {
+                      setSelectedCorteId(String(corte.id))
+                      void loadCorteItems(String(corte.id), 1)
+                    }}
+                    className={cn(
+                      'w-full rounded-md border px-3 py-3 text-left transition',
+                      String(selectedCorteId) === String(corte.id)
+                        ? 'border-primary bg-primary/5'
+                        : 'border-border bg-background hover:bg-muted/30',
+                    )}
+                  >
+                    <p className="font-medium">{corte.numero}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {corte.tipo_corte === 'CIERRE_MENSUAL'
+                        ? `Cierre ${corte.periodo_referencia || '-'}`
+                        : 'Corte manual'} | Fecha corte: {formatDateOnlyCell(corte.fecha_corte)} | Generado: {formatDateCell(corte.creado_en)}
+                    </p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Stock: {formatNumber(corte.subtotal || 0)} | Reservado: {formatNumber(corte.reservado_total || 0)} | Valor: {formatCurrency(corte.total || 0)}
+                    </p>
+                  </button>
+                ))
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  {cortesLoading ? 'Cargando cortes...' : 'Aun no hay cortes globales generados.'}
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+          <div className="rounded-md border border-border bg-card">
+            <div className="border-b border-border px-4 py-3">
+              <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                <div>
+                  <p className="text-sm text-muted-foreground">Detalle del corte seleccionado</p>
+                  <h3 className="text-lg font-semibold">
+                    {selectedCorte ? `${selectedCorte.numero} | ${formatDateOnlyCell(selectedCorte.fecha_corte)}` : 'Selecciona un corte'}
+                  </h3>
+                  {selectedCorte ? (
+                    <div className="mt-2 grid gap-2 text-sm text-muted-foreground md:grid-cols-5">
+                      <p>Tipo: <span className="font-medium text-foreground">{selectedCorte.tipo_corte === 'CIERRE_MENSUAL' ? `CIERRE ${selectedCorte.periodo_referencia || ''}` : 'MANUAL'}</span></p>
+                      <p>Lineas: <span className="font-medium text-foreground">{formatNumber(selectedCorte.items_count || 0)}</span></p>
+                      <p>Stock: <span className="font-medium text-foreground">{formatNumber(selectedCorte.subtotal || 0)}</span></p>
+                      <p>Reservado: <span className="font-medium text-foreground">{formatNumber(selectedCorte.reservado_total || 0)}</span></p>
+                      <p>Valor: <span className="font-medium text-foreground">{formatCurrency(selectedCorte.total || 0)}</span></p>
+                    </div>
+                  ) : null}
+                </div>
+                {selectedCorte ? (
+                  <MenuButton
+                    label="Exportar corte"
+                    items={[
+                      { label: 'Exportar Excel', onClick: () => void exportSelectedCorteExcel() },
+                      { label: 'Exportar PDF', onClick: () => void exportSelectedCortePdf() },
+                    ]}
+                  />
+                ) : null}
+              </div>
+            </div>
+            <div className="max-h-[34rem] overflow-auto">
+              <table className="min-w-full text-sm">
+                <thead className="bg-muted/40">
+                  <tr>
+                    <th className="px-3 py-2 text-left font-medium">Producto</th>
+                    <th className="px-3 py-2 text-left font-medium">Bodega</th>
+                    <th className="px-3 py-2 text-left font-medium">Lotes activos</th>
+                    <th className="px-3 py-2 text-left font-medium">Proximo vencimiento</th>
+                    <th className="px-3 py-2 text-left font-medium">Series</th>
+                    <th className="px-3 py-2 text-left font-medium">Stock</th>
+                    <th className="px-3 py-2 text-left font-medium">Reservado</th>
+                    <th className="px-3 py-2 text-left font-medium">Disponible</th>
+                    <th className="px-3 py-2 text-left font-medium">Valor</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {corteItems.length > 0 ? (
+                    corteItems.map((item) => (
+                      <tr key={item.id} className="border-t border-border">
+                        <td className="px-3 py-2">
+                          <p>{item.producto_nombre}</p>
+                          <p className="text-xs text-muted-foreground">{item.producto_sku || '-'} | {item.producto_categoria_nombre || '-'}</p>
+                        </td>
+                        <td className="px-3 py-2">{item.bodega_nombre}</td>
+                        <td className="px-3 py-2">{item.lotes_activos || '-'}</td>
+                        <td className="px-3 py-2">{formatDateOnlyCell(item.proximo_vencimiento)}</td>
+                        <td className="px-3 py-2">
+                          {Number(item.series_disponibles || 0) > 0
+                            ? `${formatNumber(item.series_disponibles)} | ${item.series_muestra || '-'}`
+                            : '-'}
+                        </td>
+                        <td className="px-3 py-2">{formatNumber(item.stock)}</td>
+                        <td className="px-3 py-2">{formatNumber(item.reservado)}</td>
+                        <td className="px-3 py-2">{formatNumber(item.disponible)}</td>
+                        <td className="px-3 py-2">{formatCurrency(item.valor_stock)}</td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td className="px-3 py-3 text-muted-foreground" colSpan={9}>
+                        {selectedCorte
+                          ? corteItemsLoading
+                            ? 'Cargando detalle del corte...'
+                            : 'Este corte no tiene lineas para mostrar.'
+                          : 'Genera o selecciona un corte para revisar el inventario completo de esa fecha.'}
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+            <div className="flex items-center justify-between border-t border-border px-4 py-3">
+              <p className="text-xs text-muted-foreground">Total lineas: {corteItemsPagination.count}</p>
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={!corteItemsPagination.previous || corteItemsPage <= 1 || !selectedCorteId}
+                  onClick={() => {
+                    const nextPage = Math.max(corteItemsPage - 1, 1)
+                    void loadCorteItems(String(selectedCorteId), nextPage)
+                  }}
+                >
+                  Anterior
+                </Button>
+                <span className="self-center text-xs text-muted-foreground">Pagina {corteItemsPage}</span>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={!corteItemsPagination.next || !selectedCorteId}
+                  onClick={() => {
+                    const nextPage = corteItemsPage + 1
+                    void loadCorteItems(String(selectedCorteId), nextPage)
+                  }}
+                >
+                  Siguiente
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {loteDialogOpen ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/40 p-4">

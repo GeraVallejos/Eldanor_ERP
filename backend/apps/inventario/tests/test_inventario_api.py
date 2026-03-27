@@ -16,6 +16,7 @@ from apps.documentos.models import TipoDocumentoReferencia
 from apps.inventario.models import (
     AjusteInventarioMasivo,
     Bodega,
+    CorteInventario,
     InventorySnapshot,
     MovimientoInventario,
     ReservaStock,
@@ -2062,6 +2063,164 @@ class TestInventarioApi:
         assert len(resp.data["results"]) == 1
         assert resp.data["results"][0]["producto_nombre"] == "PRODUCTO RECONCILIATION DATASET"
         assert Decimal(str(resp.data["results"][0]["stock_snapshot"])) == Decimal("3.00")
+
+    def test_corte_inventario_api_genera_foto_global_y_lista_items(self, api_client, owner_usuario, empresa):
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
+
+        categoria = Categoria.objects.create(
+            empresa=empresa,
+            nombre="Ferreteria",
+            descripcion="Categoria corte",
+            activa=True,
+        )
+        producto = Producto.objects.create(
+            empresa=empresa,
+            nombre="Producto Corte Global",
+            sku="PCG-001",
+            categoria=categoria,
+            stock_actual=Decimal("0.00"),
+            maneja_inventario=True,
+            usa_lotes=True,
+            usa_vencimiento=True,
+            precio_referencia=Decimal("2500"),
+        )
+        bodega = Bodega.all_objects.create(empresa=empresa, creado_por=owner_usuario, nombre="Bodega Corte Global")
+
+        InventarioService.registrar_movimiento(
+            producto_id=producto.id,
+            bodega_id=bodega.id,
+            tipo="ENTRADA",
+            cantidad=Decimal("6.00"),
+            costo_unitario=Decimal("1000.00"),
+            referencia="CORTE-GLOBAL-ENTRADA",
+            empresa=empresa,
+            usuario=owner_usuario,
+            lote_codigo="CG-001",
+            fecha_vencimiento=date(2027, 11, 30),
+        )
+        InventarioService.reservar_stock(
+            producto_id=producto.id,
+            bodega_id=bodega.id,
+            cantidad=Decimal("2.00"),
+            documento_tipo=TipoDocumentoReferencia.PEDIDO_VENTA,
+            documento_id=uuid4(),
+            empresa=empresa,
+            usuario=owner_usuario,
+        )
+
+        create_response = api_client.post(
+            reverse("corte-inventario-list"),
+            {
+                "fecha_corte": "2026-03-27",
+                "observaciones": "Cierre diario de inventario",
+            },
+            format="json",
+        )
+
+        assert create_response.status_code == status.HTTP_201_CREATED, create_response.data
+        assert create_response.data["estado"] == "GENERADO"
+        assert create_response.data["fecha_corte"] == "2026-03-27"
+        assert create_response.data["items_count"] == 1
+        assert Decimal(str(create_response.data["subtotal"])) == Decimal("6.00")
+        assert Decimal(str(create_response.data["reservado_total"])) == Decimal("2.00")
+        assert Decimal(str(create_response.data["disponible_total"])) == Decimal("4.00")
+        assert Decimal(str(create_response.data["total"])) == Decimal("6000.00")
+
+        corte = CorteInventario.all_objects.get(id=create_response.data["id"], empresa=empresa)
+        items_response = api_client.get(reverse("corte-inventario-items", args=[corte.id]))
+
+        assert items_response.status_code == status.HTTP_200_OK, items_response.data
+        assert items_response.data["count"] == 1
+        item = items_response.data["results"][0]
+        assert item["producto_nombre"] == "PRODUCTO CORTE GLOBAL"
+        assert item["bodega_nombre"] == "BODEGA CORTE GLOBAL"
+        assert Decimal(str(item["stock"])) == Decimal("6.00")
+        assert Decimal(str(item["reservado"])) == Decimal("2.00")
+        assert Decimal(str(item["disponible"])) == Decimal("4.00")
+        assert item["lotes_activos"] == "CG-001"
+        assert item["proximo_vencimiento"] == "2027-11-30"
+
+    def test_corte_inventario_api_filtra_por_fecha_corte(self, api_client, owner_usuario, empresa):
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
+
+        producto = Producto.objects.create(
+            empresa=empresa,
+            nombre="Producto Corte Filtro",
+            sku="PCF-001",
+            stock_actual=Decimal("0.00"),
+            maneja_inventario=True,
+            precio_referencia=Decimal("2500"),
+        )
+        bodega = Bodega.all_objects.create(empresa=empresa, creado_por=owner_usuario, nombre="Bodega Corte Filtro")
+        InventarioService.registrar_movimiento(
+            producto_id=producto.id,
+            bodega_id=bodega.id,
+            tipo="ENTRADA",
+            cantidad=Decimal("2.00"),
+            referencia="CORTE-FILTRO",
+            empresa=empresa,
+            usuario=owner_usuario,
+        )
+
+        api_client.post(
+            reverse("corte-inventario-list"),
+            {"fecha_corte": "2026-03-26", "observaciones": "Corte uno"},
+            format="json",
+        )
+        api_client.post(
+            reverse("corte-inventario-list"),
+            {"fecha_corte": "2026-03-27", "observaciones": "Corte dos"},
+            format="json",
+        )
+
+        response = api_client.get(reverse("corte-inventario-list"), {"fecha_corte": "2026-03-27"})
+
+        assert response.status_code == status.HTTP_200_OK, response.data
+        rows = response.data["results"] if isinstance(response.data, dict) and "results" in response.data else response.data
+        assert len(rows) == 1
+        assert rows[0]["fecha_corte"] == "2026-03-27"
+
+    def test_corte_inventario_api_genera_cierre_mensual_y_bloquea_duplicado(self, api_client, owner_usuario, empresa):
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
+
+        producto = Producto.objects.create(
+            empresa=empresa,
+            nombre="Producto Cierre Mensual",
+            sku="PCM-001",
+            stock_actual=Decimal("0.00"),
+            maneja_inventario=True,
+            precio_referencia=Decimal("2500"),
+        )
+        bodega = Bodega.all_objects.create(empresa=empresa, creado_por=owner_usuario, nombre="Bodega Cierre Mensual")
+        InventarioService.registrar_movimiento(
+            producto_id=producto.id,
+            bodega_id=bodega.id,
+            tipo="ENTRADA",
+            cantidad=Decimal("3.00"),
+            referencia="CIERRE-MENSUAL",
+            empresa=empresa,
+            usuario=owner_usuario,
+        )
+
+        create_response = api_client.post(
+            reverse("corte-inventario-cierre-mensual"),
+            {"periodo": "2026-12", "observaciones": "Cierre para contabilidad"},
+            format="json",
+        )
+
+        assert create_response.status_code == status.HTTP_201_CREATED, create_response.data
+        assert create_response.data["tipo_corte"] == "CIERRE_MENSUAL"
+        assert create_response.data["periodo_referencia"] == "2026-12"
+        assert create_response.data["fecha_corte"] == "2026-12-31"
+
+        duplicate_response = api_client.post(
+            reverse("corte-inventario-cierre-mensual"),
+            {"periodo": "2026-12"},
+            format="json",
+        )
+
+        assert duplicate_response.status_code == status.HTTP_409_CONFLICT, duplicate_response.data
+        assert duplicate_response.data["error_code"] == "CONFLICT"
 
     def test_resumen_operativo_movimientos_retorna_metricas(self, api_client, owner_usuario, empresa):
         api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")

@@ -30,6 +30,18 @@ describe('inventario/InventarioKardexPage', () => {
         ]),
       ),
       http.get('*/bodegas/', async () => HttpResponse.json([{ id: 'bod-1', nombre: 'Principal' }])),
+      http.get('*/movimientos-inventario/snapshot/', async () =>
+        HttpResponse.json({
+          id: 'snap-1',
+          producto: 'prod-1',
+          bodega: 'bod-1',
+          movimiento: 'mov-1',
+          stock: '15.50',
+          costo_promedio: '12000.0000',
+          valor_stock: '186000.00',
+          creado_en: '2026-03-10T12:00:00Z',
+        }),
+      ),
       http.get('*/movimientos-inventario/kardex/', async ({ request }) => {
         kardexParams = Object.fromEntries(new URL(request.url).searchParams.entries())
         return HttpResponse.json({
@@ -113,10 +125,12 @@ describe('inventario/InventarioKardexPage', () => {
     expect(screen.getByText('OC-001')).toBeInTheDocument()
     expect(screen.getByText('5')).toBeInTheDocument()
     expect(screen.getByText('10')).toBeInTheDocument()
-    expect(screen.getByText('15,5')).toBeInTheDocument()
+    expect(screen.getAllByText('15,5').length).toBeGreaterThan(0)
     expect(screen.queryByText('5.00')).not.toBeInTheDocument()
     expect(screen.queryByText('10.00')).not.toBeInTheDocument()
     expect(screen.queryByText('15.50')).not.toBeInTheDocument()
+    expect(await screen.findByText('Snapshot operativo')).toBeInTheDocument()
+    expect(await screen.findByText('$ 186.000')).toBeInTheDocument()
     expect(await screen.findByText('Auditoria del movimiento')).toBeInTheDocument()
     expect(await screen.findByText(/Movimiento ENTRADA registrado/)).toBeInTheDocument()
     expect(await screen.findByText('10.00 -> 15.50')).toBeInTheDocument()

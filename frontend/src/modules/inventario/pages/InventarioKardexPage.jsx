@@ -99,6 +99,8 @@ function InventarioKardexPage() {
   const [movimientos, setMovimientos] = useState([])
   const [pagination, setPagination] = useState({ count: 0, next: null, previous: null })
   const [selectedMovimientoId, setSelectedMovimientoId] = useState(null)
+  const [snapshot, setSnapshot] = useState(null)
+  const [snapshotStatus, setSnapshotStatus] = useState('idle')
   const [filters, setFilters] = useState({
     producto_id: searchParams.get('producto_id') || '',
     bodega_id: searchParams.get('bodega_id') || '',
@@ -169,6 +171,33 @@ function InventarioKardexPage() {
     }
   }, [])
 
+  const fetchSnapshot = useCallback(async (customFilters) => {
+    if (!customFilters?.producto_id || !customFilters?.bodega_id) {
+      setSnapshot(null)
+      setSnapshotStatus('idle')
+      return
+    }
+
+    setSnapshotStatus('loading')
+    try {
+      const data = await inventarioApi.getData(inventarioApi.endpoints.movimientosSnapshot, {
+        producto_id: customFilters.producto_id,
+        bodega_id: customFilters.bodega_id,
+      })
+      setSnapshot(data)
+      setSnapshotStatus('succeeded')
+    } catch (error) {
+      if (error?.response?.status === 204 || error?.response?.status === 404) {
+        setSnapshot(null)
+        setSnapshotStatus('idle')
+        return
+      }
+      setSnapshot(null)
+      setSnapshotStatus('failed')
+      toast.error(normalizeApiError(error, { fallback: 'No se pudo cargar el snapshot del inventario.' }))
+    }
+  }, [])
+
   useEffect(() => {
     const timeoutId = setTimeout(() => {
       void loadCatalogs()
@@ -184,10 +213,11 @@ function InventarioKardexPage() {
 
     const timeoutId = setTimeout(() => {
       void fetchKardex(submittedFilters)
+      void fetchSnapshot(submittedFilters)
     }, 0)
 
     return () => clearTimeout(timeoutId)
-  }, [submittedFilters, fetchKardex])
+  }, [submittedFilters, fetchKardex, fetchSnapshot])
 
   useEffect(() => {
     if (!searchParams.get('producto_id')) {
@@ -515,6 +545,50 @@ function InventarioKardexPage() {
       {selectedProducto ? (
         <p className="text-sm text-muted-foreground">Producto seleccionado: {selectedProducto.nombre}</p>
       ) : null}
+
+      <div className="rounded-md border border-border bg-card p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h3 className="text-lg font-semibold">Snapshot operativo</h3>
+            <p className="text-sm text-muted-foreground">
+              Ultimo snapshot historico disponible para el producto y bodega seleccionados.
+            </p>
+          </div>
+        </div>
+
+        {!submittedFilters?.producto_id || !submittedFilters?.bodega_id ? (
+          <p className="mt-4 text-sm text-muted-foreground">Selecciona producto y bodega para consultar el snapshot.</p>
+        ) : null}
+
+        {submittedFilters?.producto_id && submittedFilters?.bodega_id && snapshotStatus === 'loading' ? (
+          <p className="mt-4 text-sm text-muted-foreground">Cargando snapshot operativo...</p>
+        ) : null}
+
+        {submittedFilters?.producto_id && submittedFilters?.bodega_id && snapshotStatus !== 'loading' && snapshot ? (
+          <div className="mt-4 grid gap-3 md:grid-cols-4">
+            <div className="rounded-md border border-border bg-muted/20 p-3">
+              <p className="text-xs uppercase tracking-wide text-muted-foreground">Stock</p>
+              <p className="mt-1 text-lg font-semibold">{formatQuantity(snapshot.stock)}</p>
+            </div>
+            <div className="rounded-md border border-border bg-muted/20 p-3">
+              <p className="text-xs uppercase tracking-wide text-muted-foreground">Costo promedio</p>
+              <p className="mt-1 text-lg font-semibold">{formatCurrencyCLP(snapshot.costo_promedio)}</p>
+            </div>
+            <div className="rounded-md border border-border bg-muted/20 p-3">
+              <p className="text-xs uppercase tracking-wide text-muted-foreground">Valor stock</p>
+              <p className="mt-1 text-lg font-semibold">{formatCurrencyCLP(snapshot.valor_stock)}</p>
+            </div>
+            <div className="rounded-md border border-border bg-muted/20 p-3">
+              <p className="text-xs uppercase tracking-wide text-muted-foreground">Fecha snapshot</p>
+              <p className="mt-1 text-sm font-medium">{formatDateTimeChile(snapshot.creado_en)}</p>
+            </div>
+          </div>
+        ) : null}
+
+        {submittedFilters?.producto_id && submittedFilters?.bodega_id && snapshotStatus !== 'loading' && !snapshot ? (
+          <p className="mt-4 text-sm text-muted-foreground">No hay snapshot disponible para esta combinacion.</p>
+        ) : null}
+      </div>
 
       <div className="overflow-x-auto rounded-md border border-border bg-card">
         <table className="min-w-full text-sm">

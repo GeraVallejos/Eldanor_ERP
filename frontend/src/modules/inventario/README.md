@@ -46,7 +46,7 @@ src/modules/inventario/
 - `Kardex`
   Trazabilidad transaccional por producto y bodega, con auditoria del movimiento.
 - `Reportes`
-  Resumen valorizado, conciliacion, remediacion y correccion de lotes.
+  Resumen valorizado, conciliacion, remediacion, correccion de lotes, cortes globales y cierres mensuales de inventario.
 - `Auditoria`
   Ruta avanzada para usuario especialista; no compite con la navegacion operativa comun.
 
@@ -70,6 +70,7 @@ src/modules/inventario/
 - La auditoria avanzada no esta en cada formulario para no sobrecargar al usuario comun.
 - Los errores de negocio se muestran inline con mensaje util, sin exponer codigos tecnicos.
 - `Reportes` concentra la lectura avanzada y la remediacion.
+- `Reportes` tambien concentra los cortes globales y cierres mensuales del inventario para consulta historica por fecha de cierre.
 - `Kardex` puede derivar a `Reportes` para corregir lotes de un movimiento con contexto precargado.
 
 ## Contratos operativos
@@ -78,6 +79,8 @@ src/modules/inventario/
 - `Ajustes masivos` soporta lote y vencimiento por linea.
 - `Reportes` exporta el dataset completo filtrado.
 - `Reportes` muestra lotes activos, proximo vencimiento y series disponibles.
+- `Reportes` permite generar cortes globales y revisar su detalle completo por producto y bodega.
+- `Reportes` permite generar cierres mensuales contables sin duplicar el mismo periodo.
 - La correccion de lotes se hace desde `Reportes`, no desde formularios operativos simples.
 
 ## Estado actual del modulo
