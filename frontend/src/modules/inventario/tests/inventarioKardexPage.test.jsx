@@ -39,6 +39,8 @@ describe('inventario/InventarioKardexPage', () => {
           results: [
             {
               id: 'mov-1',
+              producto: 'prod-1',
+              bodega: 'bod-1',
               creado_en: '2026-03-10T12:00:00Z',
               tipo: 'ENTRADA',
               cantidad: '5.00',
@@ -48,6 +50,7 @@ describe('inventario/InventarioKardexPage', () => {
               valor_total: '60000.00',
               documento_tipo: 'COMPRA_RECEPCION',
               referencia: 'OC-001',
+              lote_codigo: 'LT-001',
             },
           ],
         })
@@ -74,7 +77,23 @@ describe('inventario/InventarioKardexPage', () => {
       }),
     )
 
-    renderWithProviders(<InventarioKardexPage />)
+    renderWithProviders(<InventarioKardexPage />, {
+      preloadedState: {
+        auth: {
+          user: {
+            permissions: ['INVENTARIO.VER', 'INVENTARIO.EDITAR'],
+          },
+          isAuthenticated: true,
+          status: 'succeeded',
+          bootstrapStatus: 'succeeded',
+          error: null,
+          empresas: [],
+          empresasStatus: 'idle',
+          empresasError: null,
+          changingEmpresaId: null,
+        },
+      },
+    })
 
     const productoInput = await screen.findByLabelText('Producto')
     await userEvent.type(productoInput, 'Tijera')
@@ -101,6 +120,10 @@ describe('inventario/InventarioKardexPage', () => {
     expect(await screen.findByText('Auditoria del movimiento')).toBeInTheDocument()
     expect(await screen.findByText(/Movimiento ENTRADA registrado/)).toBeInTheDocument()
     expect(await screen.findByText('10.00 -> 15.50')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Corregir lotes' })).toHaveAttribute(
+      'href',
+      '/inventario/reportes?group_by=producto&producto_id=prod-1&bodega_id=bod-1&only_with_stock=true',
+    )
     expect(auditoriaHits).toBeGreaterThan(0)
 
     await waitFor(() => {

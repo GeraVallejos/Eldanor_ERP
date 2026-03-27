@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Link, createSearchParams } from 'react-router-dom'
+import { Link, createSearchParams, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { api } from '@/api/client'
 import { normalizeApiError } from '@/api/errors'
@@ -80,17 +80,23 @@ function buildRemediationHref(path, params) {
 }
 
 function InventarioReportesPage() {
+  const [searchParams] = useSearchParams()
+  const initialFilters = useMemo(() => ({
+    group_by: searchParams.get('group_by') || 'producto',
+    producto_id: searchParams.get('producto_id') || '',
+    bodega_id: searchParams.get('bodega_id') || '',
+  }), [searchParams])
+  const initialOnlyWithStock = useMemo(
+    () => !['0', 'false', 'no'].includes(String(searchParams.get('only_with_stock') || 'true').toLowerCase()),
+    [searchParams],
+  )
   const permissions = usePermissions(['INVENTARIO.EDITAR'])
   const canEditInventario = permissions['INVENTARIO.EDITAR']
   const [productos, setProductos] = useState([])
   const [bodegas, setBodegas] = useState([])
   const [analytics, setAnalytics] = useState(null)
-  const [filters, setFilters] = useState({
-    group_by: 'producto',
-    producto_id: '',
-    bodega_id: '',
-  })
-  const [onlyWithStock, setOnlyWithStock] = useState(true)
+  const [filters, setFilters] = useState(initialFilters)
+  const [onlyWithStock, setOnlyWithStock] = useState(initialOnlyWithStock)
   const [loadingProductos, setLoadingProductos] = useState(false)
   const [reconciliationRows, setReconciliationRows] = useState([])
   const [reconciliationPagination, setReconciliationPagination] = useState({ count: 0, next: null, previous: null })
@@ -165,19 +171,15 @@ function InventarioReportesPage() {
   useEffect(() => {
     const timeoutId = setTimeout(() => {
       void loadCatalogs()
-      void loadAnalytics({
-        group_by: 'producto',
-        producto_id: '',
-        bodega_id: '',
-      }, true)
+      void loadAnalytics(initialFilters, initialOnlyWithStock)
       void loadReconciliation({
-        producto_id: '',
-        bodega_id: '',
+        producto_id: initialFilters.producto_id,
+        bodega_id: initialFilters.bodega_id,
       }, 1)
     }, 0)
 
     return () => clearTimeout(timeoutId)
-  }, [loadAnalytics, loadCatalogs, loadReconciliation])
+  }, [initialFilters, initialOnlyWithStock, loadAnalytics, loadCatalogs, loadReconciliation])
 
   const updateFilter = (key, value) => {
     setFilters((prev) => ({ ...prev, [key]: value }))
