@@ -106,15 +106,47 @@ class StockLoteSerializer(serializers.ModelSerializer):
 class MovimientoInventarioSerializer(serializers.ModelSerializer):
     class Meta:
         model = MovimientoInventario
-        fields = "__all__"
-        read_only_fields = ("id", "empresa", "creado_por", "creado_en", "actualizado_en")
+        fields = (
+            "id",
+            "empresa",
+            "creado_por",
+            "creado_en",
+            "actualizado_en",
+            "producto",
+            "bodega",
+            "tipo",
+            "cantidad",
+            "stock_anterior",
+            "stock_nuevo",
+            "costo_unitario",
+            "valor_total",
+            "lote_codigo",
+            "fecha_vencimiento",
+            "series_codigos",
+            "documento_tipo",
+            "documento_id",
+            "referencia",
+        )
+        read_only_fields = fields
 
 
 class InventorySnapshotSerializer(serializers.ModelSerializer):
     class Meta:
         model = InventorySnapshot
-        fields = "__all__"
-        read_only_fields = ("id", "empresa", "creado_por", "creado_en", "actualizado_en")
+        fields = (
+            "id",
+            "empresa",
+            "creado_por",
+            "creado_en",
+            "actualizado_en",
+            "producto",
+            "bodega",
+            "movimiento",
+            "stock",
+            "valor_stock",
+            "costo_promedio",
+        )
+        read_only_fields = fields
 
 
 class RegularizacionInventarioSerializer(serializers.Serializer):

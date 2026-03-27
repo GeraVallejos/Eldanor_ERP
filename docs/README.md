@@ -12,6 +12,15 @@
 - [Importacion Masiva](bulk_import.md) - Endpoints de carga CSV/XLSX.
 - [CI/CD con GitHub Actions](ci_cd.md) - Pipeline de integracion continua, artifacts y deploy opcional por webhook.
 
+## Documentacion por modulo
+
+- `backend/apps/productos/README.md` - Contrato backend del maestro de productos.
+- `frontend/src/modules/productos/README.md` - Estructura y decisiones UI del maestro de productos.
+- `backend/apps/inventario/README.md` - Contrato backend de stock, trazabilidad y documentos operativos.
+- `frontend/src/modules/inventario/README.md` - Flujos UI de inventario, reportes y correcciones avanzadas.
+- `backend/apps/contactos/README.md` - Contrato backend del maestro de terceros, clientes y proveedores.
+- `frontend/src/modules/contactos/README.md` - Estructura frontend del maestro de contactos y terceros.
+
 ## Uso recomendado
 
 ### Para nuevo desarrollador

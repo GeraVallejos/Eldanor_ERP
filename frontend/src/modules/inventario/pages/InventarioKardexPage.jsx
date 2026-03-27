@@ -1,16 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { Link, createSearchParams, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { normalizeApiError } from '@/api/errors'
 import Button from '@/components/ui/Button'
 import SearchableSelect from '@/components/ui/SearchableSelect'
+import { buttonVariants } from '@/components/ui/buttonVariants'
 import { formatDateTimeChile, getChileDateSuffix } from '@/lib/dateTimeFormat'
 import { formatCurrencyCLP, formatSmartNumber } from '@/lib/numberFormat'
+import { cn } from '@/lib/utils'
 import { inventarioApi, useMovimientoAuditoria } from '@/modules/inventario/store'
 import { mergeProductosCatalog, searchProductosCatalog } from '@/modules/productos/services/productosCatalogCache'
 import { downloadExcelFile } from '@/modules/shared/exports/downloadExcelFile'
 import { downloadSimpleTablePdf } from '@/modules/shared/exports/downloadSimpleTablePdf'
-import { usePermission } from '@/modules/shared/auth/usePermission'
+import { usePermissions } from '@/modules/shared/auth/usePermission'
 
 const DOCUMENTO_TIPO_OPTIONS = [
   { value: 'GUIA_RECEPCION', label: 'Guia de recepcion' },
@@ -60,6 +62,18 @@ function formatDocumentoTipo(value) {
   return normalized.toLowerCase().replace(/_/g, ' ')
 }
 
+function buildRemediationHref(path, params) {
+  const search = createSearchParams(
+    Object.entries(params).reduce((acc, [key, value]) => {
+      if (value !== null && value !== undefined && value !== '') {
+        acc[key] = String(value)
+      }
+      return acc
+    }, {}),
+  ).toString()
+  return search ? `${path}?${search}` : path
+}
+
 function normalizeFiltersForQuery(filters) {
   return {
     producto_id: filters.producto_id,
@@ -76,7 +90,9 @@ function normalizeFiltersForQuery(filters) {
 
 function InventarioKardexPage() {
   const [searchParams] = useSearchParams()
-  const canViewInventario = usePermission('INVENTARIO.VER')
+  const permissions = usePermissions(['INVENTARIO.VER', 'INVENTARIO.EDITAR'])
+  const canViewInventario = permissions['INVENTARIO.VER']
+  const canEditInventario = permissions['INVENTARIO.EDITAR']
   const exportMenuRef = useRef(null)
   const [productos, setProductos] = useState([])
   const [bodegas, setBodegas] = useState([])
@@ -565,9 +581,24 @@ function InventarioKardexPage() {
             </p>
           </div>
           {selectedAuditMovimiento ? (
-            <span className="rounded-full bg-muted px-3 py-1 text-xs font-medium">
-              {formatDocumentoTipo(selectedAuditMovimiento.documento_tipo)}
-            </span>
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <span className="rounded-full bg-muted px-3 py-1 text-xs font-medium">
+                {formatDocumentoTipo(selectedAuditMovimiento.documento_tipo)}
+              </span>
+              {canEditInventario && selectedAuditMovimiento.lote_codigo ? (
+                <Link
+                  to={buildRemediationHref('/inventario/reportes', {
+                    group_by: 'producto',
+                    producto_id: selectedAuditMovimiento.producto,
+                    bodega_id: selectedAuditMovimiento.bodega,
+                    only_with_stock: 'true',
+                  })}
+                  className={cn(buttonVariants({ variant: 'outline', size: 'sm' }))}
+                >
+                  Corregir lotes
+                </Link>
+              ) : null}
+            </div>
           ) : null}
         </div>
 
