@@ -46,7 +46,7 @@ src/modules/inventario/
 - `Kardex`
   Trazabilidad transaccional por producto y bodega, con auditoria del movimiento.
 - `Reportes`
-  Resumen valorizado, conciliacion, remediacion, correccion de lotes, cortes globales y cierres mensuales de inventario.
+  Resumen valorizado, conciliacion, remediacion, correccion de lotes, cortes globales, cierres mensuales y exportacion de snapshots historicos.
 - `Auditoria`
   Ruta avanzada para usuario especialista; no compite con la navegacion operativa comun.
 
@@ -71,16 +71,18 @@ src/modules/inventario/
 - Los errores de negocio se muestran inline con mensaje util, sin exponer codigos tecnicos.
 - `Reportes` concentra la lectura avanzada y la remediacion.
 - `Reportes` tambien concentra los cortes globales y cierres mensuales del inventario para consulta historica por fecha de cierre.
+- La seccion de cortes en `Reportes` es desplegable para no saturar la pantalla principal.
 - `Kardex` puede derivar a `Reportes` para corregir lotes de un movimiento con contexto precargado.
 
 ## Contratos operativos
 
 - `Ajustes` soporta lote y vencimiento cuando el producto lo requiere.
-- `Ajustes masivos` soporta lote y vencimiento por linea.
+- `Ajustes masivos` soportan lote y vencimiento por linea.
 - `Reportes` exporta el dataset completo filtrado.
 - `Reportes` muestra lotes activos, proximo vencimiento y series disponibles.
 - `Reportes` permite generar cortes globales y revisar su detalle completo por producto y bodega.
 - `Reportes` permite generar cierres mensuales contables sin duplicar el mismo periodo.
+- `Reportes` permite exportar el corte o cierre seleccionado en Excel y PDF.
 - La correccion de lotes se hace desde `Reportes`, no desde formularios operativos simples.
 
 ## Estado actual del modulo
@@ -90,6 +92,7 @@ El frontend ya se considera en estado enterprise razonable:
 - operacion comun separada de flujos avanzados
 - documentos masivos con borrador e importacion
 - reportes valorizados y conciliacion
+- cortes y cierres historicos exportables desde `Reportes`
 - trazabilidad contextual en `Kardex`
 - correccion administrativa de lotes accesible sin crear una pagina aparte
 
