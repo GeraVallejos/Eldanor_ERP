@@ -379,6 +379,7 @@ function InventarioTrasladosMasivosPage() {
             templateEndpoint={bulkTemplateEndpoint}
             previewBeforeImport
             previewTitle="Confirmar importacion de traslados masivos"
+            summaryMode="rows"
             onCompleted={(data) => { void handleBulkImportCompleted(data) }}
           />
           <Link to={draftId ? `/inventario/traslados-masivos/${draftId}` : '/inventario/traslados'} className={cn(buttonVariants({ variant: 'outline', size: 'md' }))}>

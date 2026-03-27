@@ -1,4 +1,5 @@
 from decimal import Decimal
+from datetime import date
 
 import pytest
 
@@ -246,6 +247,80 @@ class TestInventarioService:
 
         lote = StockLote.all_objects.get(empresa=empresa, producto=producto, lote_codigo="L-2026-01")
         assert Decimal(lote.stock) == Decimal("5")
+
+    def test_trazabilidad_lote_rechaza_vencimiento_distinto_si_lote_ya_existe(self, empresa, usuario):
+        set_current_empresa(empresa)
+        producto = Producto.objects.create(
+            empresa=empresa,
+            creado_por=usuario,
+            nombre="Producto Lote Vencimiento",
+            sku="LOT-VTO-001",
+            maneja_inventario=True,
+            usa_lotes=True,
+            usa_vencimiento=True,
+            precio_referencia=Decimal("1000"),
+        )
+
+        InventarioService.registrar_movimiento(
+            producto_id=producto.id,
+            tipo=TipoMovimiento.ENTRADA,
+            cantidad=Decimal("5"),
+            referencia="ENTRADA-LOTE-V1",
+            empresa=empresa,
+            usuario=usuario,
+            lote_codigo="L-2026-02",
+            fecha_vencimiento=date(2027, 12, 31),
+        )
+
+        with pytest.raises(BusinessRuleError) as excinfo:
+            InventarioService.registrar_movimiento(
+                producto_id=producto.id,
+                tipo=TipoMovimiento.ENTRADA,
+                cantidad=Decimal("2"),
+                referencia="ENTRADA-LOTE-V2",
+                empresa=empresa,
+                usuario=usuario,
+                lote_codigo="L-2026-02",
+                fecha_vencimiento=date(2028, 1, 31),
+            )
+
+        assert "ya existe con vencimiento 31/12/2027" in str(excinfo.value)
+
+    def test_trazabilidad_lote_rechaza_codigo_similar_a_otro_existente(self, empresa, usuario):
+        set_current_empresa(empresa)
+        producto = Producto.objects.create(
+            empresa=empresa,
+            creado_por=usuario,
+            nombre="Producto Lote Similar",
+            sku="LOT-SIM-001",
+            maneja_inventario=True,
+            usa_lotes=True,
+            precio_referencia=Decimal("1000"),
+        )
+
+        InventarioService.registrar_movimiento(
+            producto_id=producto.id,
+            tipo=TipoMovimiento.ENTRADA,
+            cantidad=Decimal("5"),
+            referencia="ENTRADA-LOTE-CANONICO",
+            empresa=empresa,
+            usuario=usuario,
+            lote_codigo="001",
+        )
+
+        with pytest.raises(BusinessRuleError) as excinfo:
+            InventarioService.registrar_movimiento(
+                producto_id=producto.id,
+                tipo=TipoMovimiento.ENTRADA,
+                cantidad=Decimal("2"),
+                referencia="ENTRADA-LOTE-SIMILAR",
+                empresa=empresa,
+                usuario=usuario,
+                lote_codigo="1",
+            )
+
+        assert "muy similar a un lote existente" in str(excinfo.value)
+        assert "001" in str(excinfo.value)
 
     def test_trazabilidad_series_requiere_series_completas(self, empresa, usuario):
         set_current_empresa(empresa)

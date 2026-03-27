@@ -1,3 +1,4 @@
+from datetime import date
 from decimal import Decimal
 import io
 from uuid import uuid4
@@ -12,7 +13,16 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from apps.auditoria.models import AuditEvent
 from apps.core.models import UserEmpresa
 from apps.documentos.models import TipoDocumentoReferencia
-from apps.inventario.models import Bodega, InventorySnapshot, MovimientoInventario, ReservaStock, StockProducto
+from apps.inventario.models import (
+    AjusteInventarioMasivo,
+    Bodega,
+    InventorySnapshot,
+    MovimientoInventario,
+    ReservaStock,
+    StockLote,
+    StockProducto,
+    TrasladoInventarioMasivo,
+)
 from apps.inventario.services.inventario_service import InventarioService
 from apps.productos.models import Categoria, Producto
 
@@ -160,6 +170,92 @@ class TestInventarioApi:
         historial_por_id = {str(item["id"]): item["tiene_uso_historico"] for item in rows}
         assert historial_por_id[str(bodega_historica.id)] is True
         assert historial_por_id[str(bodega_limpia.id)] is False
+
+    def test_lotes_api_corrige_codigo_de_lote_existente(self, api_client, owner_usuario, empresa):
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
+        producto = Producto.objects.create(
+            empresa=empresa,
+            nombre="Producto Corrige Lote",
+            sku="PCL-001",
+            stock_actual=Decimal("0.00"),
+            maneja_inventario=True,
+            usa_lotes=True,
+            precio_referencia=Decimal("1800"),
+        )
+        bodega = Bodega.all_objects.create(empresa=empresa, creado_por=owner_usuario, nombre="Bodega Lote")
+
+        InventarioService.registrar_movimiento(
+            producto_id=producto.id,
+            bodega_id=bodega.id,
+            tipo="ENTRADA",
+            cantidad=Decimal("4.00"),
+            referencia="LOTE-MAL",
+            empresa=empresa,
+            usuario=owner_usuario,
+            lote_codigo="1",
+        )
+        lote = StockLote.all_objects.get(empresa=empresa, producto=producto, bodega=bodega, lote_codigo="1")
+
+        response = api_client.post(
+            reverse("stock-lote-corregir-codigo", args=[lote.id]),
+            {"nuevo_codigo": "001", "motivo": "Correccion de digitacion"},
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_200_OK, response.data
+        assert response.data["lote_codigo"] == "001"
+        assert StockLote.all_objects.filter(empresa=empresa, producto=producto, bodega=bodega, lote_codigo="001").exists()
+        assert not StockLote.all_objects.filter(empresa=empresa, producto=producto, bodega=bodega, lote_codigo="1").exists()
+        assert MovimientoInventario.all_objects.filter(
+            empresa=empresa,
+            producto=producto,
+            bodega=bodega,
+            lote_codigo="001",
+        ).exists()
+
+    def test_lotes_api_anula_lote_sin_stock(self, api_client, owner_usuario, empresa):
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
+        producto = Producto.objects.create(
+            empresa=empresa,
+            nombre="Producto Anula Lote",
+            sku="PAL-API-001",
+            stock_actual=Decimal("0.00"),
+            maneja_inventario=True,
+            usa_lotes=True,
+            precio_referencia=Decimal("1800"),
+        )
+        bodega = Bodega.all_objects.create(empresa=empresa, creado_por=owner_usuario, nombre="Bodega Lote Anula")
+
+        InventarioService.registrar_movimiento(
+            producto_id=producto.id,
+            bodega_id=bodega.id,
+            tipo="ENTRADA",
+            cantidad=Decimal("3.00"),
+            referencia="LOTE-A-ANULAR-ENTRADA",
+            empresa=empresa,
+            usuario=owner_usuario,
+            lote_codigo="ERR-001",
+        )
+        InventarioService.registrar_movimiento(
+            producto_id=producto.id,
+            bodega_id=bodega.id,
+            tipo="SALIDA",
+            cantidad=Decimal("3.00"),
+            referencia="LOTE-A-ANULAR-SALIDA",
+            empresa=empresa,
+            usuario=owner_usuario,
+            lote_codigo="ERR-001",
+        )
+        lote = StockLote.all_objects.get(empresa=empresa, producto=producto, bodega=bodega, lote_codigo="ERR-001")
+
+        response = api_client.post(
+            reverse("stock-lote-anular", args=[lote.id]),
+            {"motivo": "Anulacion por digitacion erronea"},
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_204_NO_CONTENT
+        assert not StockLote.all_objects.filter(id=lote.id, empresa=empresa).exists()
 
     def test_ajuste_masivo_api_confirma_documento_con_varias_lineas(self, api_client, owner_usuario, empresa):
         api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
@@ -403,6 +499,15 @@ class TestInventarioApi:
             precio_referencia=Decimal("1800"),
         )
         bodega = Bodega.all_objects.create(empresa=empresa, creado_por=owner_usuario, nombre="Borrador Ajuste")
+        InventarioService.registrar_movimiento(
+            producto_id=producto.id,
+            bodega_id=bodega.id,
+            tipo="ENTRADA",
+            cantidad=Decimal("2.00"),
+            referencia="BASE-BORRADOR-AJUSTE",
+            empresa=empresa,
+            usuario=owner_usuario,
+        )
 
         response = api_client.post(
             reverse("ajuste-inventario-masivo-list"),
@@ -418,6 +523,8 @@ class TestInventarioApi:
 
         assert response.status_code == status.HTTP_201_CREATED, response.data
         assert response.data["estado"] == "BORRADOR"
+        assert response.data["items"][0]["stock_actual"] == "2.00"
+        assert response.data["items"][0]["diferencia"] == "2.00"
         assert MovimientoInventario.all_objects.filter(
             empresa=empresa,
             documento_id=response.data["id"],
@@ -439,6 +546,8 @@ class TestInventarioApi:
             sku="PEAB-001",
             stock_actual=Decimal("0.00"),
             maneja_inventario=True,
+            usa_lotes=True,
+            usa_vencimiento=True,
             precio_referencia=Decimal("1800"),
         )
         bodega = Bodega.all_objects.create(empresa=empresa, creado_por=owner_usuario, nombre="Editar Ajuste")
@@ -461,7 +570,13 @@ class TestInventarioApi:
             {
                 "referencia": "BORRADOR EDITADO",
                 "motivo": "CONTEO FINAL",
-                "items": [{"producto_id": str(producto_b.id), "bodega_id": str(bodega.id), "stock_objetivo": "9.00"}],
+                "items": [{
+                    "producto_id": str(producto_b.id),
+                    "bodega_id": str(bodega.id),
+                    "stock_objetivo": "9.00",
+                    "lote_codigo": "LT-EDIT-01",
+                    "fecha_vencimiento": "2027-12-31",
+                }],
             },
             format="json",
         )
@@ -472,6 +587,85 @@ class TestInventarioApi:
         assert update_response.data["motivo"] == "CONTEO FINAL"
         assert len(update_response.data["items"]) == 1
         assert str(update_response.data["items"][0]["producto"]) == str(producto_b.id)
+        assert update_response.data["items"][0]["lote_codigo"] == "LT-EDIT-01"
+        assert update_response.data["items"][0]["fecha_vencimiento"] == "2027-12-31"
+
+    def test_ajuste_masivo_api_permite_eliminar_borrador(self, api_client, owner_usuario, empresa):
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
+        producto = Producto.objects.create(
+            empresa=empresa,
+            nombre="Producto Delete Ajuste",
+            sku="PDA-001",
+            stock_actual=Decimal("0.00"),
+            maneja_inventario=True,
+            precio_referencia=Decimal("1800"),
+        )
+        bodega = Bodega.all_objects.create(empresa=empresa, creado_por=owner_usuario, nombre="Delete Ajuste")
+
+        create_response = api_client.post(
+            reverse("ajuste-inventario-masivo-list"),
+            {
+                "estado": "BORRADOR",
+                "referencia": "BORRADOR ELIMINABLE",
+                "motivo": "PRUEBA",
+                "observaciones": "",
+                "items": [{"producto_id": str(producto.id), "bodega_id": str(bodega.id), "stock_objetivo": "4.00"}],
+            },
+            format="json",
+        )
+        assert create_response.status_code == status.HTTP_201_CREATED, create_response.data
+
+        delete_response = api_client.delete(
+            reverse("ajuste-inventario-masivo-detail", args=[create_response.data["id"]]),
+        )
+
+        assert delete_response.status_code == status.HTTP_204_NO_CONTENT
+        assert not AjusteInventarioMasivo.all_objects.filter(id=create_response.data["id"], empresa=empresa).exists()
+
+    def test_ajuste_masivo_api_confirma_producto_con_lote_y_vencimiento(self, api_client, owner_usuario, empresa):
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
+        producto = Producto.objects.create(
+            empresa=empresa,
+            nombre="Producto Ajuste Lote",
+            sku="PAL-001",
+            stock_actual=Decimal("0.00"),
+            maneja_inventario=True,
+            usa_lotes=True,
+            usa_vencimiento=True,
+            precio_referencia=Decimal("1800"),
+        )
+        bodega = Bodega.all_objects.create(empresa=empresa, creado_por=owner_usuario, nombre="Bodega Lote Ajuste")
+
+        response = api_client.post(
+            reverse("ajuste-inventario-masivo-list"),
+            {
+                "referencia": "CONTEO LOTE",
+                "motivo": "CONTEO POR LOTE",
+                "observaciones": "Revision de vencimiento",
+                "items": [
+                    {
+                        "producto_id": str(producto.id),
+                        "bodega_id": str(bodega.id),
+                        "stock_objetivo": "5.00",
+                        "lote_codigo": "LT-2027-01",
+                        "fecha_vencimiento": "2027-12-31",
+                    }
+                ],
+            },
+            format="json",
+        )
+
+        assert response.status_code == status.HTTP_201_CREATED, response.data
+        assert response.data["estado"] == "CONFIRMADO"
+        assert response.data["items"][0]["lote_codigo"] == "LT-2027-01"
+        assert response.data["items"][0]["fecha_vencimiento"] == "2027-12-31"
+        movimiento = MovimientoInventario.all_objects.get(
+            empresa=empresa,
+            documento_tipo=TipoDocumentoReferencia.AJUSTE,
+            documento_id=response.data["id"],
+        )
+        assert movimiento.lote_codigo == "LT-2027-01"
+        assert str(movimiento.fecha_vencimiento) == "2027-12-31"
 
     def test_ajuste_masivo_bulk_import_desde_xlsx_crea_borrador(self, api_client, owner_usuario, empresa):
         api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
@@ -481,14 +675,16 @@ class TestInventarioApi:
             sku="PXA-001",
             stock_actual=Decimal("0.00"),
             maneja_inventario=True,
+            usa_lotes=True,
+            usa_vencimiento=True,
             precio_referencia=Decimal("1800"),
         )
         bodega = Bodega.all_objects.create(empresa=empresa, creado_por=owner_usuario, nombre="Casa Matriz")
 
         workbook = Workbook()
         sheet = workbook.active
-        sheet.append(["motivo", "referencia_operativa", "observaciones", "producto_sku", "bodega", "stock_objetivo"])
-        sheet.append(["Conteo ciclico", "Pasillo norte", "Revision semanal", producto.sku, bodega.nombre, 7])
+        sheet.append(["motivo", "referencia_operativa", "observaciones", "producto_sku", "bodega", "stock_objetivo", "lote_codigo", "fecha_vencimiento"])
+        sheet.append(["Conteo ciclico", "Pasillo norte", "Revision semanal", producto.sku, bodega.nombre, 7, "LT-XLSX-01", "2027-11-30"])
 
         buffer = io.BytesIO()
         workbook.save(buffer)
@@ -509,6 +705,10 @@ class TestInventarioApi:
         assert response.data["errors"] == []
         assert response.data["documento"]["estado"] == "BORRADOR"
         assert response.data["documento"]["motivo"] == "CONTEO CICLICO"
+        assert response.data["documento"]["items"][0]["stock_actual"] == "0.00"
+        assert response.data["documento"]["items"][0]["diferencia"] == "7.00"
+        assert response.data["documento"]["items"][0]["lote_codigo"] == "LT-XLSX-01"
+        assert response.data["documento"]["items"][0]["fecha_vencimiento"] == "2027-11-30"
         assert MovimientoInventario.all_objects.filter(
             empresa=empresa,
             documento_id=response.data["documento"]["id"],
@@ -528,8 +728,8 @@ class TestInventarioApi:
 
         workbook = Workbook()
         sheet = workbook.active
-        sheet.append(["motivo", "referencia_operativa", "observaciones", "producto_sku", "bodega", "stock_objetivo"])
-        sheet.append(["Conteo preview", "Preview", "Sin persistencia", producto.sku, bodega.nombre, 4])
+        sheet.append(["motivo", "referencia_operativa", "observaciones", "producto_sku", "bodega", "stock_objetivo", "lote_codigo", "fecha_vencimiento"])
+        sheet.append(["Conteo preview", "Preview", "Sin persistencia", producto.sku, bodega.nombre, 4, "", ""])
 
         buffer = io.BytesIO()
         workbook.save(buffer)
@@ -553,6 +753,92 @@ class TestInventarioApi:
             empresa=empresa,
             summary__icontains="Borrador de ajuste masivo",
         ).exists()
+
+    def test_ajuste_masivo_bulk_import_acepta_fecha_vencimiento_formato_chileno(self, api_client, owner_usuario, empresa):
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
+        producto = Producto.objects.create(
+            empresa=empresa,
+            nombre="Producto XLSX Fecha Chile",
+            sku="PXFC-001",
+            stock_actual=Decimal("0.00"),
+            maneja_inventario=True,
+            usa_lotes=True,
+            usa_vencimiento=True,
+            precio_referencia=Decimal("1800"),
+        )
+        bodega = Bodega.all_objects.create(empresa=empresa, creado_por=owner_usuario, nombre="Fecha Chile")
+
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.append(["motivo", "referencia_operativa", "observaciones", "producto_sku", "bodega", "stock_objetivo", "lote_codigo", "fecha_vencimiento"])
+        sheet.append(["Conteo ciclico", "Pasillo sur", "Revision manual", producto.sku, bodega.nombre, 6, "LT-CL-01", "30/11/2027"])
+
+        buffer = io.BytesIO()
+        workbook.save(buffer)
+        upload = SimpleUploadedFile(
+            "ajustes_fecha_chile.xlsx",
+            buffer.getvalue(),
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
+        response = api_client.post(
+            reverse("ajuste-inventario-masivo-bulk-import"),
+            {"file": upload},
+            format="multipart",
+        )
+
+        assert response.status_code == status.HTTP_200_OK, response.data
+        assert response.data["errors"] == []
+        assert response.data["documento"]["items"][0]["fecha_vencimiento"] == "2027-11-30"
+
+    def test_ajuste_masivo_bulk_import_rechaza_lote_similar_a_otro_existente(self, api_client, owner_usuario, empresa):
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
+        producto = Producto.objects.create(
+            empresa=empresa,
+            nombre="Producto XLSX Lote Similar",
+            sku="PXLS-001",
+            stock_actual=Decimal("0.00"),
+            maneja_inventario=True,
+            usa_lotes=True,
+            precio_referencia=Decimal("1800"),
+        )
+        bodega = Bodega.all_objects.create(empresa=empresa, creado_por=owner_usuario, nombre="Bodega Similar")
+
+        InventarioService.registrar_movimiento(
+            producto_id=producto.id,
+            bodega_id=bodega.id,
+            tipo="ENTRADA",
+            cantidad=Decimal("5.00"),
+            referencia="LOTE-BASE",
+            empresa=empresa,
+            usuario=owner_usuario,
+            lote_codigo="001",
+        )
+
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.append(["motivo", "referencia_operativa", "observaciones", "producto_sku", "bodega", "stock_objetivo", "lote_codigo", "fecha_vencimiento"])
+        sheet.append(["Conteo ciclico", "Pasillo uno", "Revision lote", producto.sku, bodega.nombre, 6, "1", ""])
+
+        buffer = io.BytesIO()
+        workbook.save(buffer)
+        upload = SimpleUploadedFile(
+            "ajustes_lote_similar.xlsx",
+            buffer.getvalue(),
+            content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
+        response = api_client.post(
+            reverse("ajuste-inventario-masivo-bulk-import"),
+            {"file": upload},
+            format="multipart",
+        )
+
+        assert response.status_code == status.HTTP_200_OK, response.data
+        assert response.data["created"] == 0
+        assert len(response.data["errors"]) == 1
+        assert "muy similar a un lote existente" in response.data["errors"][0]["detail"]
+        assert "001" in response.data["errors"][0]["detail"]
 
     def test_ajuste_masivo_bulk_template_descarga_plantilla(self, api_client, owner_usuario):
         api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
@@ -659,6 +945,41 @@ class TestInventarioApi:
         assert str(update_response.data["bodega_destino"]) == str(bodega_destino_2.id)
         assert len(update_response.data["items"]) == 1
         assert str(update_response.data["items"][0]["producto"]) == str(producto_b.id)
+
+    def test_traslado_masivo_api_permite_eliminar_borrador(self, api_client, owner_usuario, empresa):
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
+        producto = Producto.objects.create(
+            empresa=empresa,
+            nombre="Producto Delete Traslado",
+            sku="PDT-001",
+            stock_actual=Decimal("0.00"),
+            maneja_inventario=True,
+            precio_referencia=Decimal("1800"),
+        )
+        bodega_origen = Bodega.all_objects.create(empresa=empresa, creado_por=owner_usuario, nombre="Origen Delete")
+        bodega_destino = Bodega.all_objects.create(empresa=empresa, creado_por=owner_usuario, nombre="Destino Delete")
+
+        create_response = api_client.post(
+            reverse("traslado-inventario-masivo-list"),
+            {
+                "estado": "BORRADOR",
+                "referencia": "TRASLADO ELIMINABLE",
+                "motivo": "PRUEBA",
+                "observaciones": "",
+                "bodega_origen_id": str(bodega_origen.id),
+                "bodega_destino_id": str(bodega_destino.id),
+                "items": [{"producto_id": str(producto.id), "cantidad": "2.00"}],
+            },
+            format="json",
+        )
+        assert create_response.status_code == status.HTTP_201_CREATED, create_response.data
+
+        delete_response = api_client.delete(
+            reverse("traslado-inventario-masivo-detail", args=[create_response.data["id"]]),
+        )
+
+        assert delete_response.status_code == status.HTTP_204_NO_CONTENT
+        assert not TrasladoInventarioMasivo.all_objects.filter(id=create_response.data["id"], empresa=empresa).exists()
 
     def test_traslado_masivo_bulk_template_descarga_plantilla(self, api_client, owner_usuario):
         api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
@@ -1629,6 +1950,70 @@ class TestInventarioApi:
         assert resp.data["reconciliation"]["count"] == 1
         assert resp.data["reconciliation"]["detail"][0]["producto_nombre"] == "PRODUCTO CONCILIACION"
         assert Decimal(str(resp.data["reconciliation"]["detail"][0]["stock_actual"])) == Decimal("7.00")
+
+    def test_analytics_inventario_expone_lotes_vencimiento_y_series_en_detalle_producto(self, api_client, owner_usuario, empresa):
+        api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")
+
+        producto_lote = Producto.objects.create(
+            empresa=empresa,
+            nombre="Producto Lote Reporte",
+            sku="PLR-001",
+            stock_actual=Decimal("0.00"),
+            maneja_inventario=True,
+            usa_lotes=True,
+            usa_vencimiento=True,
+            precio_referencia=Decimal("2500"),
+        )
+        producto_serie = Producto.objects.create(
+            empresa=empresa,
+            nombre="Producto Serie Reporte",
+            sku="PSR-001",
+            stock_actual=Decimal("0.00"),
+            maneja_inventario=True,
+            usa_series=True,
+            precio_referencia=Decimal("2500"),
+        )
+        bodega = Bodega.all_objects.create(empresa=empresa, creado_por=owner_usuario, nombre="Bodega Reporte Traza")
+
+        InventarioService.registrar_movimiento(
+            producto_id=producto_lote.id,
+            bodega_id=bodega.id,
+            tipo="ENTRADA",
+            cantidad=Decimal("5.00"),
+            referencia="REPORTE-LOTE",
+            empresa=empresa,
+            usuario=owner_usuario,
+            lote_codigo="LT-001",
+            fecha_vencimiento=date(2027, 10, 31),
+        )
+        InventarioService.registrar_movimiento(
+            producto_id=producto_serie.id,
+            bodega_id=bodega.id,
+            tipo="ENTRADA",
+            cantidad=Decimal("2.00"),
+            referencia="REPORTE-SERIE",
+            empresa=empresa,
+            usuario=owner_usuario,
+            lote_codigo="LS-001",
+            series=["SR-001", "SR-002"],
+        )
+
+        resp = api_client.get(
+            reverse("stock-producto-analytics"),
+            {"group_by": "producto", "only_with_stock": "true"},
+        )
+
+        assert resp.status_code == status.HTTP_200_OK, resp.data
+        detalle_por_producto = {str(item["producto_id"]): item for item in resp.data["detalle"]}
+        lote_row = detalle_por_producto[str(producto_lote.id)]
+        serie_row = detalle_por_producto[str(producto_serie.id)]
+        assert lote_row["lotes_activos"] == "LT-001"
+        assert lote_row["proximo_vencimiento"] == "2027-10-31"
+        assert lote_row["series_disponibles"] == 0
+        assert serie_row["lotes_activos"] == "LS-001"
+        assert serie_row["proximo_vencimiento"] is None
+        assert serie_row["series_disponibles"] == 2
+        assert serie_row["series_muestra"] == "SR-001, SR-002"
 
     def test_reconciliation_endpoint_devuelve_dataset_paginado(self, api_client, owner_usuario, empresa):
         api_client.credentials(HTTP_AUTHORIZATION=f"Bearer {_token(owner_usuario)}")

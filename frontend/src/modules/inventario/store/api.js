@@ -23,6 +23,7 @@ function normalizePaginatedResponse(data) {
 
 export const INVENTARIO_ENDPOINTS = {
   bodegas: '/bodegas/',
+  lotes: '/lotes/',
   stocks: '/stocks/',
   stockResumen: '/stocks/resumen/',
   stockCriticos: '/stocks/criticos/',
@@ -83,6 +84,10 @@ async function patchOne(endpoint, id, payload) {
   return data
 }
 
+async function deleteOne(endpoint, id) {
+  await api.delete(`${endpoint}${id}/`, { suppressGlobalErrorToast: true })
+}
+
 async function executeDetailAction(endpoint, id, action, { method = 'post', payload } = {}) {
   const target = `${endpoint}${id}/${action}/`
   if (method === 'post') {
@@ -111,6 +116,7 @@ export const inventarioApi = {
   getOne,
   postOne,
   patchOne,
+  deleteOne,
   executeDetailAction,
   getMovimientoAuditoria,
 }

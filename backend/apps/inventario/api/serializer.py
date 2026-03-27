@@ -7,6 +7,8 @@ from apps.inventario.models import (
     EstadoDocumentoInventario,
     InventorySnapshot,
     MovimientoInventario,
+    StockLote,
+    StockSerie,
     StockProducto,
     TrasladoInventarioMasivo,
     TrasladoInventarioMasivoItem,
@@ -71,6 +73,36 @@ class StockProductoSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
+class StockLoteSerializer(serializers.ModelSerializer):
+    producto_nombre = serializers.CharField(source="producto.nombre", read_only=True)
+    bodega_nombre = serializers.CharField(source="bodega.nombre", read_only=True)
+    series_disponibles = serializers.SerializerMethodField()
+
+    def get_series_disponibles(self, obj):
+        return StockSerie.all_objects.filter(
+            empresa=obj.empresa,
+            producto=obj.producto,
+            bodega=obj.bodega,
+            lote_codigo=obj.lote_codigo,
+            estado="DISPONIBLE",
+        ).count()
+
+    class Meta:
+        model = StockLote
+        fields = (
+            "id",
+            "producto",
+            "producto_nombre",
+            "bodega",
+            "bodega_nombre",
+            "lote_codigo",
+            "fecha_vencimiento",
+            "stock",
+            "series_disponibles",
+        )
+        read_only_fields = fields
+
+
 class MovimientoInventarioSerializer(serializers.ModelSerializer):
     class Meta:
         model = MovimientoInventario
@@ -120,10 +152,21 @@ class TrasladoInventarioSerializer(serializers.Serializer):
     lote_codigo = serializers.CharField(max_length=80, required=False, allow_blank=True)
 
 
+class CorregirLoteSerializer(serializers.Serializer):
+    nuevo_codigo = serializers.CharField(max_length=80)
+    motivo = serializers.CharField(max_length=300)
+
+
+class AnularLoteSerializer(serializers.Serializer):
+    motivo = serializers.CharField(max_length=300)
+
+
 class AjusteInventarioMasivoItemCreateSerializer(serializers.Serializer):
     producto_id = serializers.UUIDField()
     bodega_id = serializers.UUIDField(required=False, allow_null=True)
     stock_objetivo = serializers.DecimalField(max_digits=12, decimal_places=2)
+    lote_codigo = serializers.CharField(max_length=80, required=False, allow_blank=True)
+    fecha_vencimiento = serializers.DateField(required=False, allow_null=True)
 
 
 class AjusteInventarioMasivoCreateSerializer(serializers.Serializer):
@@ -169,6 +212,8 @@ class AjusteInventarioMasivoItemSerializer(serializers.ModelSerializer):
             "bodega_nombre",
             "stock_actual",
             "stock_objetivo",
+            "lote_codigo",
+            "fecha_vencimiento",
             "diferencia",
             "movimiento",
         )

@@ -1,6 +1,7 @@
 from decimal import Decimal
 import hashlib
 import json
+import re
 from uuid import uuid4
 from django.db import transaction
 from apps.core.exceptions import BusinessRuleError, ResourceNotFoundError
@@ -22,6 +23,45 @@ from apps.core.permisos.constantes_permisos import Modulos, Acciones
 
 
 class InventarioService:
+    @staticmethod
+    def _canonicalizar_lote_para_similitud(lote_codigo):
+        """Reduce diferencias cosmeticas en codigos de lote para detectar errores de digitacion comunes."""
+        codigo = str(lote_codigo or "").strip().upper()
+        if not codigo:
+            return ""
+
+        return re.sub(r"\d+", lambda match: str(int(match.group(0) or "0")), codigo)
+
+    @staticmethod
+    def _validar_lote_similar_existente(*, empresa, producto, bodega_id, lote_codigo):
+        """Bloquea la creacion de lotes casi equivalentes a otros existentes para evitar duplicados humanos."""
+        if not lote_codigo or not bodega_id:
+            return
+
+        canonico = InventarioService._canonicalizar_lote_para_similitud(lote_codigo)
+        if not canonico:
+            return
+
+        candidatos = list(
+            StockLote.all_objects.filter(
+                empresa=empresa,
+                producto=producto,
+                bodega_id=bodega_id,
+            ).exclude(lote_codigo=lote_codigo).values_list("lote_codigo", flat=True)
+        )
+        similares = sorted(
+            {
+                codigo
+                for codigo in candidatos
+                if InventarioService._canonicalizar_lote_para_similitud(codigo) == canonico
+            }
+        )
+        if similares:
+            sugerencias = ", ".join(similares[:3])
+            raise BusinessRuleError(
+                f"El lote {lote_codigo} es muy similar a un lote existente para {producto.nombre}: {sugerencias}. Revise si corresponde usar el lote ya registrado."
+            )
+
     @staticmethod
     def _record_reserva_side_effects(*, empresa, usuario, event_name, summary, aggregate_id, entity_id, payload, changes):
         """Registra trazabilidad enterprise para reservas y liberaciones de stock."""
@@ -130,6 +170,11 @@ class InventarioService:
                 f"El producto {producto.nombre} requiere lote para registrar movimientos."
             )
 
+        if lote_codigo and not producto.usa_lotes:
+            raise BusinessRuleError(
+                f"El producto {producto.nombre} no utiliza control por lotes."
+            )
+
         if fecha_vencimiento and not producto.usa_vencimiento:
             raise BusinessRuleError(
                 f"El producto {producto.nombre} no tiene control de vencimiento habilitado."
@@ -167,7 +212,14 @@ class InventarioService:
         if not lote_codigo:
             return
 
-        lote_stock, _ = StockLote.all_objects.select_for_update().get_or_create(
+        InventarioService._validar_lote_similar_existente(
+            empresa=empresa,
+            producto=producto,
+            bodega_id=bodega_id,
+            lote_codigo=lote_codigo,
+        )
+
+        lote_stock, creado = StockLote.all_objects.select_for_update().get_or_create(
             empresa=empresa,
             producto=producto,
             bodega_id=bodega_id,
@@ -177,6 +229,17 @@ class InventarioService:
                 "stock": Decimal("0"),
             },
         )
+
+        # Un lote existente no debe cambiar su vencimiento historico porque rompe trazabilidad.
+        if (
+            not creado
+            and fecha_vencimiento
+            and lote_stock.fecha_vencimiento
+            and lote_stock.fecha_vencimiento != fecha_vencimiento
+        ):
+            raise BusinessRuleError(
+                f"El lote {lote_codigo} de {producto.nombre} ya existe con vencimiento {lote_stock.fecha_vencimiento:%d/%m/%Y}."
+            )
 
         if fecha_vencimiento and lote_stock.fecha_vencimiento is None:
             lote_stock.fecha_vencimiento = fecha_vencimiento

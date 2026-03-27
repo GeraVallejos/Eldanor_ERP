@@ -5,6 +5,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import InventarioReportesPage from '@/modules/inventario/pages/InventarioReportesPage'
 import { server } from '@/test/msw/server'
 import { renderWithProviders } from '@/test/utils/renderWithProviders'
+import { downloadExcelFile } from '@/modules/shared/exports/downloadExcelFile'
+import { invalidateProductosCatalogCache } from '@/modules/productos/services/productosCatalogCache'
 
 vi.mock('sonner', () => ({
   toast: {
@@ -13,9 +15,14 @@ vi.mock('sonner', () => ({
   },
 }))
 
+vi.mock('@/modules/shared/exports/downloadExcelFile', () => ({
+  downloadExcelFile: vi.fn(),
+}))
+
 describe('inventario/InventarioReportesPage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    invalidateProductosCatalogCache()
   })
 
   it('carga reporte valorizado y permite agrupar por bodega', async () => {
@@ -24,8 +31,8 @@ describe('inventario/InventarioReportesPage', () => {
     server.use(
       http.get('*/productos/', async () =>
         HttpResponse.json([
-          { id: 'prod-1', nombre: 'Tijera poda' },
-          { id: 'prod-2', nombre: 'Motosierra' },
+          { id: 'prod-1', nombre: 'Tijera poda', sku: 'TIJ-001', tipo: 'PRODUCTO', usa_lotes: false, usa_vencimiento: false, usa_series: false },
+          { id: 'prod-2', nombre: 'Motosierra', sku: 'MOT-001', tipo: 'PRODUCTO', usa_lotes: true, usa_vencimiento: true, usa_series: false },
         ]),
       ),
       http.get('*/bodegas/', async () => HttpResponse.json([{ id: 'bod-1', nombre: 'Principal' }])),
@@ -75,8 +82,8 @@ describe('inventario/InventarioReportesPage', () => {
         return HttpResponse.json({
           metrics: { registros: 2, stock_total: 15, valor_total: 180000 },
           totales: { stock_total: 15, valor_total: 180000 },
-          top_valorizados: [{ producto__nombre: 'Motosierra', stock_total: 5, valor_total: 60000 }],
-          criticos: [{ producto_id: 'prod-2', producto__nombre: 'Motosierra', faltante: 2 }],
+          top_valorizados: [{ producto_id: 'prod-2', producto__nombre: 'Motosierra', stock_total: 5, valor_total: 60000, lotes_activos: 'LT-001', proximo_vencimiento: '2027-10-31', series_disponibles: 0 }],
+          criticos: [{ producto_id: 'prod-2', producto__nombre: 'Motosierra', faltante: 2, lotes_activos: 'LT-001', proximo_vencimiento: '2027-10-31', series_disponibles: 0 }],
           health: {
             productos_criticos: 1,
             reservas_activas: 2,
@@ -87,8 +94,8 @@ describe('inventario/InventarioReportesPage', () => {
           },
           reconciliation: { count: 1, detail: [] },
           detalle: [
-            { producto__nombre: 'Tijera poda', stock_total: 10, valor_total: 120000 },
-            { producto__nombre: 'Motosierra', stock_total: 5, valor_total: 60000 },
+            { producto_id: 'prod-1', producto__nombre: 'Tijera poda', stock_total: 10, valor_total: 120000, lotes_activos: '-', proximo_vencimiento: null, series_disponibles: 0, series_muestra: '-' },
+            { producto_id: 'prod-2', producto__nombre: 'Motosierra', stock_total: 5, valor_total: 60000, lotes_activos: 'LT-001', proximo_vencimiento: '2027-10-31', series_disponibles: 0, series_muestra: '-' },
           ],
         })
       }),
@@ -98,6 +105,8 @@ describe('inventario/InventarioReportesPage', () => {
 
     expect(await screen.findByRole('heading', { name: 'Reportes de inventario' })).toBeInTheDocument()
     expect((await screen.findAllByText('Motosierra')).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/Lotes: LT-001/).length).toBeGreaterThan(0)
+    expect(screen.getByText('31/10/2027')).toBeInTheDocument()
     expect(screen.getByText('Top valorizados')).toBeInTheDocument()
     expect(screen.getByText('Criticos por minimo')).toBeInTheDocument()
     expect(screen.getByText('Salud operativa')).toBeInTheDocument()
@@ -115,5 +124,76 @@ describe('inventario/InventarioReportesPage', () => {
       expect(analyticsParams).toMatchObject({ group_by: 'bodega' })
     })
     expect(screen.getByText('Reservas activas:')).toBeInTheDocument()
+  })
+
+  it('exporta excel por producto sin columnas tecnicas y con trazabilidad', async () => {
+    server.use(
+      http.get('*/productos/', async () =>
+        HttpResponse.json([
+          { id: 'prod-2', nombre: 'Motosierra', sku: 'MOT-001', tipo: 'PRODUCTO', usa_lotes: true, usa_vencimiento: true, usa_series: true },
+        ]),
+      ),
+      http.get('*/bodegas/', async () => HttpResponse.json([{ id: 'bod-1', nombre: 'Principal' }])),
+      http.get('*/stocks/reconciliation/', async () =>
+        HttpResponse.json({ count: 0, next: null, previous: null, results: [] }),
+      ),
+      http.get('*/stocks/analytics/', async () =>
+        HttpResponse.json({
+          metrics: { registros: 1, stock_total: 5, valor_total: 60000 },
+          totales: { stock_total: 5, valor_total: 60000 },
+          top_valorizados: [{ producto__nombre: 'Motosierra', stock_total: 5, valor_total: 60000 }],
+          criticos: [],
+          health: {
+            productos_criticos: 0,
+            reservas_activas: 0,
+            unidades_reservadas: 0,
+            bodegas_con_stock: 1,
+            sin_snapshot: 0,
+            descuadrados_snapshot: 0,
+          },
+          reconciliation: { count: 0, detail: [] },
+          detalle: [
+            {
+              producto_id: 'prod-2',
+              producto__nombre: 'Motosierra',
+              producto__categoria__nombre: 'Herramientas',
+              lotes_activos: 'LT-001, LT-002',
+              proximo_vencimiento: '2027-10-31',
+              series_disponibles: 3,
+              series_muestra: 'SR-001, SR-002, SR-003',
+              stock_total: 5,
+              reservado_total: 1,
+              disponible_total: 4,
+              valor_total: 60000,
+            },
+          ],
+        }),
+      ),
+    )
+
+    renderWithProviders(<InventarioReportesPage />)
+
+    expect(await screen.findByRole('heading', { name: 'Reportes de inventario' })).toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: 'Exportar' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Exportar Excel' }))
+
+    await waitFor(() => {
+      expect(downloadExcelFile).toHaveBeenCalled()
+    })
+
+    const payload = vi.mocked(downloadExcelFile).mock.calls[0][0]
+    expect(payload.columns.map((column) => column.header)).toEqual(
+      expect.arrayContaining(['Lotes activos', 'Proximo vencimiento', 'Series disponibles', 'Muestra series']),
+    )
+    expect(payload.columns.map((column) => column.header)).not.toEqual(
+      expect.arrayContaining(['Agrupacion', 'Filtro producto', 'Filtro bodega', 'Solo con stock', 'Usa lotes', 'Usa vencimiento', 'Usa series']),
+    )
+    expect(payload.rows).toHaveLength(1)
+    expect(payload.rows[0].grupo).toBe('Motosierra')
+    expect(payload.rows[0].sku).toBe('MOT-001')
+    expect(payload.rows[0].lotes_activos).toBe('LT-001, LT-002')
+    expect(payload.rows[0].proximo_vencimiento).toBe('31/10/2027')
+    expect(payload.rows[0].series_disponibles).toBe(3)
+    expect(payload.rows[0].series_muestra).toBe('SR-001, SR-002, SR-003')
   })
 })

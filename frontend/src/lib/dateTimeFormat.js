@@ -1,4 +1,5 @@
 const CHILE_TIME_ZONE = 'America/Santiago'
+const DATE_ONLY_REGEX = /^\d{4}-\d{2}-\d{2}$/
 
 function toValidDate(value) {
   if (value instanceof Date) {
@@ -32,6 +33,11 @@ export function formatDateTimeChile(value) {
 }
 
 export function formatDateChile(value) {
+  if (typeof value === 'string' && DATE_ONLY_REGEX.test(value)) {
+    const [year, month, day] = value.split('-')
+    return `${day}-${month}-${year}`
+  }
+
   const date = toValidDate(value)
   if (!date) {
     return '-'

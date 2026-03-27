@@ -36,6 +36,7 @@ function BulkImportButton({
   disabled = false,
   previewBeforeImport = false,
   previewTitle = 'Confirmar importacion',
+  summaryMode = 'mutations',
 }) {
   const inputRef = useRef(null)
   const menuRef = useRef(null)
@@ -126,9 +127,15 @@ function BulkImportButton({
       const successfulRows = Number(data?.successful_rows ?? created + updated)
 
       if (successfulRows > 0) {
-        toast.success(
-          `Carga finalizada: ${created} creados, ${updated} actualizados${errorCount ? `, ${errorCount} con error` : ''}${warningCount ? `, ${warningCount} con advertencia` : ''}.`,
-        )
+        if (summaryMode === 'rows') {
+          toast.success(
+            `Carga finalizada: ${successfulRows} filas procesadas${errorCount ? `, ${errorCount} con error` : ''}${warningCount ? `, ${warningCount} con advertencia` : ''}.`,
+          )
+        } else {
+          toast.success(
+            `Carga finalizada: ${created} creados, ${updated} actualizados${errorCount ? `, ${errorCount} con error` : ''}${warningCount ? `, ${warningCount} con advertencia` : ''}.`,
+          )
+        }
       } else if (errorCount > 0) {
         toast.error(`No se pudo importar ninguna fila. Se detectaron ${errorCount} errores.`)
       } else {
@@ -213,7 +220,11 @@ function BulkImportButton({
       {canConfirmPreview ? (
         <>
           <p>Se detectaron {previewSuccessfulRows} filas validas para procesar.</p>
-          <p>Se crearan {previewData.created || 0} registros y se actualizaran {previewData.updated || 0}.</p>
+          {summaryMode === 'rows' ? (
+            <p>Estas filas se compararan contra el stock actual al confirmar el documento.</p>
+          ) : (
+            <p>Se crearan {previewData.created || 0} registros y se actualizaran {previewData.updated || 0}.</p>
+          )}
         </>
       ) : (
         <p>

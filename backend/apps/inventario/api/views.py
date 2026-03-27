@@ -21,11 +21,14 @@ from apps.inventario.api.serializer import (
     AjusteInventarioMasivoCreateSerializer,
     AjusteInventarioMasivoSerializer,
     AjusteInventarioMasivoUpdateSerializer,
+    AnularLoteSerializer,
     BodegaSerializer,
+    CorregirLoteSerializer,
     InventorySnapshotSerializer,
     MovimientoInventarioSerializer,
     PrevisualizacionRegularizacionSerializer,
     RegularizacionInventarioSerializer,
+    StockLoteSerializer,
     StockProductoSerializer,
     TrasladoInventarioMasivoCreateSerializer,
     TrasladoInventarioMasivoSerializer,
@@ -53,6 +56,7 @@ from apps.inventario.services.bulk_import_service import (
 from apps.inventario.services.documento_inventario_service import DocumentoInventarioService
 from apps.inventario.services.bodega_service import BodegaService
 from apps.inventario.services.inventario_service import InventarioService
+from apps.inventario.services.lote_service import LoteService
 from apps.productos.models import Producto
 
 
@@ -264,6 +268,51 @@ class StockProductoViewSet(TenantViewSetMixin, ReadOnlyModelViewSet):
                 }
                 for item in detalle
             ]
+            producto_ids = [item["producto_id"] for item in detalle]
+            lotes_qs = StockLote.all_objects.filter(
+                empresa=empresa,
+                producto_id__in=producto_ids,
+                stock__gt=0,
+            )
+            if bodega_id:
+                lotes_qs = lotes_qs.filter(bodega_id=bodega_id)
+
+            series_qs = StockSerie.all_objects.filter(
+                empresa=empresa,
+                producto_id__in=producto_ids,
+                estado="DISPONIBLE",
+            )
+            if bodega_id:
+                series_qs = series_qs.filter(bodega_id=bodega_id)
+
+            lotes_por_producto = {}
+            for lote in lotes_qs.values("producto_id", "lote_codigo", "fecha_vencimiento").order_by("lote_codigo"):
+                bucket = lotes_por_producto.setdefault(str(lote["producto_id"]), {"codes": [], "next_expiry": None})
+                codigo = lote["lote_codigo"] or ""
+                if codigo and codigo not in bucket["codes"]:
+                    bucket["codes"].append(codigo)
+                vencimiento = lote.get("fecha_vencimiento")
+                if vencimiento is not None and (bucket["next_expiry"] is None or vencimiento < bucket["next_expiry"]):
+                    bucket["next_expiry"] = vencimiento
+
+            series_por_producto = {}
+            for serie in series_qs.values("producto_id", "serie_codigo").order_by("serie_codigo"):
+                bucket = series_por_producto.setdefault(str(serie["producto_id"]), {"count": 0, "sample": []})
+                bucket["count"] += 1
+                if serie["serie_codigo"] and len(bucket["sample"]) < 3:
+                    bucket["sample"].append(serie["serie_codigo"])
+
+            for item in detalle:
+                lotes_info = lotes_por_producto.get(str(item["producto_id"]), {})
+                series_info = series_por_producto.get(str(item["producto_id"]), {})
+                item["lotes_activos"] = ", ".join(lotes_info.get("codes", [])) or "-"
+                item["proximo_vencimiento"] = (
+                    lotes_info.get("next_expiry").isoformat()
+                    if lotes_info.get("next_expiry") is not None
+                    else None
+                )
+                item["series_disponibles"] = series_info.get("count", 0)
+                item["series_muestra"] = ", ".join(series_info.get("sample", [])) or "-"
         elif group_by == "bodega":
             reservas_por_bodega = {
                 str(item["bodega_id"]): item["reservado_total"]
@@ -504,6 +553,53 @@ class StockProductoViewSet(TenantViewSetMixin, ReadOnlyModelViewSet):
             },
             status=status.HTTP_200_OK,
         )
+
+
+class StockLoteViewSet(TenantViewSetMixin, ReadOnlyModelViewSet):
+    model = StockLote
+    serializer_class = StockLoteSerializer
+    permission_classes = [IsAuthenticated, TieneRelacionActiva, TienePermisoModuloAccion]
+    permission_modulo = Modulos.INVENTARIO
+    permission_action_map = {
+        "list": Acciones.VER,
+        "retrieve": Acciones.VER,
+        "corregir_codigo": Acciones.EDITAR,
+        "anular": Acciones.BORRAR,
+    }
+    http_method_names = ["get", "post", "head", "options", "delete"]
+
+    def get_queryset(self):
+        return LoteService.listar_lotes(
+            empresa=self.get_empresa(),
+            producto_id=self.request.query_params.get("producto_id"),
+            bodega_id=self.request.query_params.get("bodega_id"),
+        )
+
+    @action(detail=True, methods=["post"])
+    def corregir_codigo(self, request, pk=None):
+        serializer = CorregirLoteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        lote = LoteService.corregir_codigo(
+            lote_id=pk,
+            empresa=self.get_empresa(),
+            usuario=request.user,
+            nuevo_codigo=serializer.validated_data["nuevo_codigo"],
+            motivo=serializer.validated_data["motivo"],
+        )
+        output = self.get_serializer(lote)
+        return Response(output.data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"])
+    def anular(self, request, pk=None):
+        serializer = AnularLoteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        LoteService.anular_lote(
+            lote_id=pk,
+            empresa=self.get_empresa(),
+            usuario=request.user,
+            motivo=serializer.validated_data["motivo"],
+        )
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class KardexPagination(PageNumberPagination):
@@ -869,12 +965,13 @@ class AjusteInventarioMasivoViewSet(TenantViewSetMixin, ModelViewSet):
         "create": Acciones.EDITAR,
         "update": Acciones.EDITAR,
         "partial_update": Acciones.EDITAR,
+        "destroy": Acciones.BORRAR,
         "duplicar": Acciones.EDITAR,
         "confirmar": Acciones.EDITAR,
         "bulk_import": Acciones.EDITAR,
         "bulk_template": Acciones.VER,
     }
-    http_method_names = ["get", "post", "put", "patch", "head", "options"]
+    http_method_names = ["get", "post", "put", "patch", "delete", "head", "options"]
 
     @staticmethod
     def _is_truthy(value):
@@ -934,6 +1031,14 @@ class AjusteInventarioMasivoViewSet(TenantViewSetMixin, ModelViewSet):
         kwargs["partial"] = True
         return self.update(request, *args, **kwargs)
 
+    def destroy(self, request, *args, **kwargs):
+        DocumentoInventarioService.eliminar_borrador_ajuste_masivo(
+            documento_id=self.get_object().id,
+            empresa=self.get_empresa(),
+            usuario=request.user,
+        )
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
     @action(detail=True, methods=["post"])
     def duplicar(self, request, pk=None):
         documento = DocumentoInventarioService.duplicar_ajuste_masivo(
@@ -988,12 +1093,13 @@ class TrasladoInventarioMasivoViewSet(TenantViewSetMixin, ModelViewSet):
         "create": Acciones.EDITAR,
         "update": Acciones.EDITAR,
         "partial_update": Acciones.EDITAR,
+        "destroy": Acciones.BORRAR,
         "duplicar": Acciones.EDITAR,
         "confirmar": Acciones.EDITAR,
         "bulk_import": Acciones.EDITAR,
         "bulk_template": Acciones.VER,
     }
-    http_method_names = ["get", "post", "put", "patch", "head", "options"]
+    http_method_names = ["get", "post", "put", "patch", "delete", "head", "options"]
 
     @staticmethod
     def _is_truthy(value):
@@ -1057,6 +1163,14 @@ class TrasladoInventarioMasivoViewSet(TenantViewSetMixin, ModelViewSet):
     def partial_update(self, request, *args, **kwargs):
         kwargs["partial"] = True
         return self.update(request, *args, **kwargs)
+
+    def destroy(self, request, *args, **kwargs):
+        DocumentoInventarioService.eliminar_borrador_traslado_masivo(
+            documento_id=self.get_object().id,
+            empresa=self.get_empresa(),
+            usuario=request.user,
+        )
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(detail=True, methods=["post"])
     def duplicar(self, request, pk=None):

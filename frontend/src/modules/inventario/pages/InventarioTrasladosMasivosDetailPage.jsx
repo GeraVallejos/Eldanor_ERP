@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { normalizeApiError } from '@/api/errors'
 import Button from '@/components/ui/Button'
+import ConfirmDialog from '@/components/ui/ConfirmDialog'
 import MenuButton from '@/components/ui/MenuButton'
 import { buttonVariants } from '@/components/ui/buttonVariants'
 import { formatDateTimeChile, getChileDateSuffix } from '@/lib/dateTimeFormat'
@@ -25,6 +26,8 @@ function InventarioTrasladosMasivosDetailPage() {
   const [status, setStatus] = useState('idle')
   const [duplicating, setDuplicating] = useState(false)
   const [confirming, setConfirming] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false)
   const [documento, setDocumento] = useState(null)
 
   useEffect(() => {
@@ -99,6 +102,20 @@ function InventarioTrasladosMasivosDetailPage() {
     }
   }
 
+  const handleDelete = async () => {
+    setDeleting(true)
+    try {
+      await inventarioApi.deleteOne(inventarioApi.endpoints.trasladosMasivos, id)
+      toast.success(`Borrador ${documento?.numero || id} eliminado correctamente.`)
+      setConfirmDeleteOpen(false)
+      navigate('/inventario/traslados-masivos', { replace: true })
+    } catch (error) {
+      toast.error(normalizeApiError(error, { fallback: 'No se pudo eliminar el borrador de traslado masivo.' }))
+    } finally {
+      setDeleting(false)
+    }
+  }
+
   if (status === 'loading') {
     return <p className="text-sm text-muted-foreground">Cargando traslado masivo...</p>
   }
@@ -121,6 +138,9 @@ function InventarioTrasladosMasivosDetailPage() {
             <>
               <Button type="button" variant="outline" onClick={() => navigate(`/inventario/traslados-masivos?draft=${documento.id}`)}>
                 Editar borrador
+              </Button>
+              <Button type="button" variant="outline" onClick={() => setConfirmDeleteOpen(true)} disabled={deleting}>
+                {deleting ? 'Eliminando...' : 'Eliminar borrador'}
               </Button>
               <Button type="button" onClick={handleConfirm} disabled={confirming}>
                 {confirming ? 'Confirmando...' : 'Confirmar borrador'}
@@ -182,6 +202,20 @@ function InventarioTrasladosMasivosDetailPage() {
           </tbody>
         </table>
       </div>
+
+      <ConfirmDialog
+        open={confirmDeleteOpen}
+        title="Eliminar borrador"
+        description={`Se eliminara el borrador ${documento.numero}. Esta accion no mueve stock porque el documento aun no esta confirmado.`}
+        confirmLabel="Eliminar borrador"
+        loading={deleting}
+        onCancel={() => {
+          if (!deleting) {
+            setConfirmDeleteOpen(false)
+          }
+        }}
+        onConfirm={handleDelete}
+      />
     </section>
   )
 }

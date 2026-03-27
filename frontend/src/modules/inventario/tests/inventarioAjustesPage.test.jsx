@@ -99,6 +99,137 @@ describe('inventario/InventarioAjustesPage', () => {
 
   })
 
+  it('envia lote y vencimiento cuando el producto usa trazabilidad por lote', async () => {
+    let regularizacionPayload = null
+
+    server.use(
+      http.get('*/productos/', async () =>
+        HttpResponse.json([
+          { id: 'prod-lote', nombre: 'Pintura industrial', usa_lotes: true, usa_vencimiento: true },
+        ]),
+      ),
+      http.get('*/bodegas/', async () => HttpResponse.json([{ id: 'bod-1', nombre: 'Principal' }])),
+      http.post('*/movimientos-inventario/previsualizar_regularizacion/', async () =>
+        HttpResponse.json({
+          producto_id: 'prod-lote',
+          producto_nombre: 'Pintura industrial',
+          bodega_id: 'bod-1',
+          stock_actual: 5,
+          stock_objetivo: 7,
+          diferencia: 2,
+          reservado_total: 0,
+          disponible_actual: 5,
+          tipo_movimiento: 'ENTRADA',
+          ajustable: true,
+          warnings: [],
+        }),
+      ),
+      http.post('*/movimientos-inventario/regularizar/', async ({ request }) => {
+        regularizacionPayload = await request.json()
+        return HttpResponse.json({ id: 'mov-lote' }, { status: 201 })
+      }),
+    )
+
+    renderWithProviders(<InventarioAjustesPage />, {
+      preloadedState: {
+        auth: {
+          user: {
+            id: 'user-1',
+            email: 'inventario@eldanor.cl',
+            permissions: ['INVENTARIO.VER', 'INVENTARIO.EDITAR'],
+          },
+          empresas: [],
+          empresasStatus: 'idle',
+          empresasError: null,
+          changingEmpresaId: null,
+          isAuthenticated: true,
+          status: 'idle',
+          bootstrapStatus: 'idle',
+          error: null,
+        },
+      },
+    })
+
+    await screen.findByRole('heading', { name: 'Ajustes de inventario' })
+    await userEvent.click(screen.getByLabelText('Producto ajuste'))
+    await userEvent.type(screen.getByLabelText('Producto ajuste'), 'Pint{enter}')
+    await userEvent.click(screen.getByLabelText('Bodega ajuste'))
+    await userEvent.type(screen.getByLabelText('Bodega ajuste'), 'Prin{enter}')
+    await userEvent.type(screen.getByLabelText('Stock contado'), '7')
+    await userEvent.click(screen.getByRole('button', { name: 'Previsualizar' }))
+    await userEvent.type(screen.getByLabelText('Motivo operativo'), 'Conteo por lote')
+    await userEvent.type(screen.getByLabelText('Lote'), 'lt-2026-01')
+    await userEvent.type(screen.getByLabelText('Fecha de vencimiento'), '2026-12-31')
+    await userEvent.click(screen.getByRole('button', { name: 'Aplicar ajuste' }))
+
+    await waitFor(() => {
+      expect(regularizacionPayload).toMatchObject({
+        producto_id: 'prod-lote',
+        lote_codigo: 'LT-2026-01',
+        fecha_vencimiento: '2026-12-31',
+      })
+    })
+  })
+
+  it('bloquea el ajuste si el producto requiere lote y no se informa', async () => {
+    server.use(
+      http.get('*/productos/', async () =>
+        HttpResponse.json([
+          { id: 'prod-lote', nombre: 'Pintura industrial', usa_lotes: true, usa_vencimiento: false },
+        ]),
+      ),
+      http.get('*/bodegas/', async () => HttpResponse.json([{ id: 'bod-1', nombre: 'Principal' }])),
+      http.post('*/movimientos-inventario/previsualizar_regularizacion/', async () =>
+        HttpResponse.json({
+          producto_id: 'prod-lote',
+          producto_nombre: 'Pintura industrial',
+          bodega_id: 'bod-1',
+          stock_actual: 5,
+          stock_objetivo: 7,
+          diferencia: 2,
+          reservado_total: 0,
+          disponible_actual: 5,
+          tipo_movimiento: 'ENTRADA',
+          ajustable: true,
+          warnings: [],
+        }),
+      ),
+    )
+
+    renderWithProviders(<InventarioAjustesPage />, {
+      preloadedState: {
+        auth: {
+          user: {
+            id: 'user-1',
+            email: 'inventario@eldanor.cl',
+            permissions: ['INVENTARIO.VER', 'INVENTARIO.EDITAR'],
+          },
+          empresas: [],
+          empresasStatus: 'idle',
+          empresasError: null,
+          changingEmpresaId: null,
+          isAuthenticated: true,
+          status: 'idle',
+          bootstrapStatus: 'idle',
+          error: null,
+        },
+      },
+    })
+
+    await screen.findByRole('heading', { name: 'Ajustes de inventario' })
+    await userEvent.click(screen.getByLabelText('Producto ajuste'))
+    await userEvent.type(screen.getByLabelText('Producto ajuste'), 'Pint{enter}')
+    await userEvent.click(screen.getByLabelText('Bodega ajuste'))
+    await userEvent.type(screen.getByLabelText('Bodega ajuste'), 'Prin{enter}')
+    await userEvent.type(screen.getByLabelText('Stock contado'), '7')
+    await userEvent.click(screen.getByRole('button', { name: 'Previsualizar' }))
+    await userEvent.type(screen.getByLabelText('Motivo operativo'), 'Conteo por lote')
+    await userEvent.click(screen.getByRole('button', { name: 'Aplicar ajuste' }))
+
+    expect(await screen.findByText('Error al aplicar ajuste')).toBeInTheDocument()
+    expect(await screen.findByText('Debe indicar el lote para ajustar este producto.')).toBeInTheDocument()
+  })
+
   it('muestra error del contrato API al aplicar un ajuste', async () => {
     server.use(
       http.get('*/productos/', async () => HttpResponse.json([{ id: 'prod-2', nombre: 'Motosierra' }])),
@@ -161,6 +292,6 @@ describe('inventario/InventarioAjustesPage', () => {
 
     expect(await screen.findByText('Error al aplicar ajuste')).toBeInTheDocument()
     expect(await screen.findByText('No se puede regularizar por debajo del stock reservado en la bodega.')).toBeInTheDocument()
-    expect(await screen.findByText(/BUSINESS_RULE_ERROR/)).toBeInTheDocument()
+    expect(screen.queryByText(/BUSINESS_RULE_ERROR/)).not.toBeInTheDocument()
   })
 })

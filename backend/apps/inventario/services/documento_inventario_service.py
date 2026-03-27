@@ -41,6 +41,20 @@ class DocumentoInventarioService:
         return f"{base_reference} | {producto_label}".strip()
 
     @staticmethod
+    def _prepare_ajuste_item_values(*, empresa, item):
+        """Calcula stock actual y diferencia estimada para una linea de ajuste en borrador."""
+        preview = InventarioService.previsualizar_regularizacion_stock(
+            producto_id=item["producto_id"],
+            bodega_id=item.get("bodega_id"),
+            stock_objetivo=item["stock_objetivo"],
+            empresa=empresa,
+        )
+        return {
+            "stock_actual": Decimal(preview["stock_actual"]),
+            "diferencia": Decimal(preview["diferencia"]),
+        }
+
+    @staticmethod
     def _record_side_effects(*, empresa, usuario, aggregate_type, aggregate_id, event_name, summary, payload):
         """Registra eventos de dominio, outbox y auditoria para documentos masivos."""
         DomainEventService.record_event(
@@ -120,6 +134,7 @@ class DocumentoInventarioService:
                 raise BusinessRuleError("Debe informar al menos una linea para el ajuste masivo.")
             documento.items.all().delete()
             for item in items:
+                computed = cls._prepare_ajuste_item_values(empresa=empresa, item=item)
                 AjusteInventarioMasivoItem.all_objects.create(
                     empresa=empresa,
                     creado_por=usuario,
@@ -127,8 +142,10 @@ class DocumentoInventarioService:
                     producto_id=item["producto_id"],
                     bodega_id=item.get("bodega_id"),
                     stock_objetivo=item["stock_objetivo"],
-                    stock_actual=Decimal("0"),
-                    diferencia=Decimal("0"),
+                    lote_codigo=item.get("lote_codigo", ""),
+                    fecha_vencimiento=item.get("fecha_vencimiento"),
+                    stock_actual=computed["stock_actual"],
+                    diferencia=computed["diferencia"],
                 )
 
         if update_fields:
@@ -171,6 +188,7 @@ class DocumentoInventarioService:
             confirmado_en=None,
         )
         for item in items:
+            computed = cls._prepare_ajuste_item_values(empresa=empresa, item=item)
             AjusteInventarioMasivoItem.all_objects.create(
                 empresa=empresa,
                 creado_por=usuario,
@@ -178,8 +196,10 @@ class DocumentoInventarioService:
                 producto_id=item["producto_id"],
                 bodega_id=item.get("bodega_id"),
                 stock_objetivo=item["stock_objetivo"],
-                stock_actual=Decimal("0"),
-                diferencia=Decimal("0"),
+                lote_codigo=item.get("lote_codigo", ""),
+                fecha_vencimiento=item.get("fecha_vencimiento"),
+                stock_actual=computed["stock_actual"],
+                diferencia=computed["diferencia"],
             )
 
         cls._record_side_effects(
@@ -244,6 +264,8 @@ class DocumentoInventarioService:
                 empresa=empresa,
                 usuario=usuario,
                 documento_id=documento.id,
+                lote_codigo=item.lote_codigo,
+                fecha_vencimiento=item.fecha_vencimiento,
             )
             item.stock_actual = preview["stock_actual"]
             item.diferencia = preview["diferencia"]
@@ -256,6 +278,8 @@ class DocumentoInventarioService:
                     "bodega_id": str(item.bodega_id) if item.bodega_id else None,
                     "stock_actual": cls._serialize_decimal(preview["stock_actual"]),
                     "stock_objetivo": cls._serialize_decimal(item.stock_objetivo),
+                    "lote_codigo": item.lote_codigo,
+                    "fecha_vencimiento": item.fecha_vencimiento.isoformat() if item.fecha_vencimiento else None,
                     "diferencia": cls._serialize_decimal(preview["diferencia"]),
                     "movimiento_id": str(movimiento.id),
                 }
@@ -289,6 +313,33 @@ class DocumentoInventarioService:
 
     @classmethod
     @transaction.atomic
+    def eliminar_borrador_ajuste_masivo(cls, *, documento_id, empresa, usuario):
+        """Elimina un ajuste masivo en borrador sin afectar stock confirmado."""
+        documento = cls._get_ajuste_documento(documento_id=documento_id, empresa=empresa)
+        if documento.estado != EstadoDocumentoInventario.BORRADOR:
+            raise ConflictError("Solo se pueden eliminar ajustes masivos en borrador.")
+
+        numero = documento.numero
+        items_count = documento.items.count()
+        documento.delete()
+
+        cls._record_side_effects(
+            empresa=empresa,
+            usuario=usuario,
+            aggregate_type="AjusteInventarioMasivo",
+            aggregate_id=documento_id,
+            event_name="inventario.ajuste_masivo.borrador_eliminado",
+            summary=f"Borrador de ajuste masivo {numero} eliminado.",
+            payload={
+                "documento_id": str(documento_id),
+                "numero": numero,
+                "estado": EstadoDocumentoInventario.BORRADOR,
+                "items_count": items_count,
+            },
+        )
+
+    @classmethod
+    @transaction.atomic
     def duplicar_ajuste_masivo(cls, *, documento_id, empresa, usuario):
         """Duplica un ajuste masivo repitiendo el impacto original de cada linea."""
         documento = (
@@ -314,6 +365,8 @@ class DocumentoInventarioService:
                     "producto_id": item.producto_id,
                     "bodega_id": item.bodega_id,
                     "stock_objetivo": stock_objetivo,
+                    "lote_codigo": item.lote_codigo,
+                    "fecha_vencimiento": item.fecha_vencimiento,
                 }
             )
         return cls.guardar_borrador_ajuste_masivo(
@@ -535,6 +588,33 @@ class DocumentoInventarioService:
             payload=payload,
         )
         return documento
+
+    @classmethod
+    @transaction.atomic
+    def eliminar_borrador_traslado_masivo(cls, *, documento_id, empresa, usuario):
+        """Elimina un traslado masivo en borrador sin mover stock entre bodegas."""
+        documento = cls._get_traslado_documento(documento_id=documento_id, empresa=empresa)
+        if documento.estado != EstadoDocumentoInventario.BORRADOR:
+            raise ConflictError("Solo se pueden eliminar traslados masivos en borrador.")
+
+        numero = documento.numero
+        items_count = documento.items.count()
+        documento.delete()
+
+        cls._record_side_effects(
+            empresa=empresa,
+            usuario=usuario,
+            aggregate_type="TrasladoInventarioMasivo",
+            aggregate_id=documento_id,
+            event_name="inventario.traslado_masivo.borrador_eliminado",
+            summary=f"Borrador de traslado masivo {numero} eliminado.",
+            payload={
+                "documento_id": str(documento_id),
+                "numero": numero,
+                "estado": EstadoDocumentoInventario.BORRADOR,
+                "items_count": items_count,
+            },
+        )
 
     @classmethod
     @transaction.atomic

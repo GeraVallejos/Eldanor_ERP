@@ -7,11 +7,12 @@ import Button from '@/components/ui/Button'
 import MenuButton from '@/components/ui/MenuButton'
 import SearchableSelect from '@/components/ui/SearchableSelect'
 import { buttonVariants } from '@/components/ui/buttonVariants'
-import { formatDateTimeChile, getChileDateSuffix } from '@/lib/dateTimeFormat'
+import { formatDateChile, formatDateTimeChile, getChileDateSuffix } from '@/lib/dateTimeFormat'
 import { formatCurrencyCLP, formatSmartNumber } from '@/lib/numberFormat'
 import { cn } from '@/lib/utils'
 import { inventarioApi } from '@/modules/inventario/store'
 import { mergeProductosCatalog, searchProductosCatalog } from '@/modules/productos/services/productosCatalogCache'
+import { usePermissions } from '@/modules/shared/auth/usePermission'
 import { downloadExcelFile } from '@/modules/shared/exports/downloadExcelFile'
 import { downloadSimpleTablePdf } from '@/modules/shared/exports/downloadSimpleTablePdf'
 
@@ -51,6 +52,21 @@ function formatDateCell(value) {
   return formatDateTimeChile(value)
 }
 
+function formatDateOnlyCell(value) {
+  if (!value) {
+    return '-'
+  }
+  return formatDateChile(value).replaceAll('-', '/')
+}
+
+async function fetchAnalyticsSnapshot(params) {
+  const { data } = await api.get('/stocks/analytics/', {
+    params,
+    suppressGlobalErrorToast: true,
+  })
+  return data
+}
+
 function buildRemediationHref(path, params) {
   const search = createSearchParams(
     Object.entries(params).reduce((acc, [key, value]) => {
@@ -64,6 +80,8 @@ function buildRemediationHref(path, params) {
 }
 
 function InventarioReportesPage() {
+  const permissions = usePermissions(['INVENTARIO.EDITAR'])
+  const canEditInventario = permissions['INVENTARIO.EDITAR']
   const [productos, setProductos] = useState([])
   const [bodegas, setBodegas] = useState([])
   const [analytics, setAnalytics] = useState(null)
@@ -77,6 +95,14 @@ function InventarioReportesPage() {
   const [reconciliationRows, setReconciliationRows] = useState([])
   const [reconciliationPagination, setReconciliationPagination] = useState({ count: 0, next: null, previous: null })
   const [reconciliationPage, setReconciliationPage] = useState(1)
+  const [loteDialogOpen, setLoteDialogOpen] = useState(false)
+  const [lotesLoading, setLotesLoading] = useState(false)
+  const [loteActionLoading, setLoteActionLoading] = useState(false)
+  const [lotes, setLotes] = useState([])
+  const [loteContext, setLoteContext] = useState(null)
+  const [selectedLoteId, setSelectedLoteId] = useState('')
+  const [nuevoCodigoLote, setNuevoCodigoLote] = useState('')
+  const [motivoLote, setMotivoLote] = useState('')
 
   const loadCatalogs = useCallback(async () => {
     try {
@@ -202,6 +228,45 @@ function InventarioReportesPage() {
     }, 1)
   }
 
+  const loadLotesForRow = useCallback(async (row) => {
+    if (!row?.producto_id) {
+      return
+    }
+    setLotesLoading(true)
+    try {
+      const data = await inventarioApi.getList(inventarioApi.endpoints.lotes, {
+        producto_id: row.producto_id,
+        bodega_id: filters.bodega_id || '',
+      })
+      setLotes(data)
+      setSelectedLoteId(data[0]?.id ? String(data[0].id) : '')
+    } catch (error) {
+      toast.error(normalizeApiError(error, { fallback: 'No se pudieron cargar los lotes del producto.' }))
+    } finally {
+      setLotesLoading(false)
+    }
+  }, [filters.bodega_id])
+
+  const openLoteDialog = async (row) => {
+    setLoteContext(row)
+    setNuevoCodigoLote('')
+    setMotivoLote('')
+    setLoteDialogOpen(true)
+    await loadLotesForRow(row)
+  }
+
+  const closeLoteDialog = () => {
+    if (loteActionLoading) {
+      return
+    }
+    setLoteDialogOpen(false)
+    setLotes([])
+    setLoteContext(null)
+    setSelectedLoteId('')
+    setNuevoCodigoLote('')
+    setMotivoLote('')
+  }
+
   const getTodaySuffix = () => getChileDateSuffix()
 
   const detalleRows = useMemo(() => {
@@ -221,10 +286,15 @@ function InventarioReportesPage() {
       const productoId = String(row.producto_id || '')
       const producto = productoById.get(productoId)
       return {
+        producto_id: productoId,
         groupLabel: row.producto__nombre || producto?.nombre || '-',
         categoria: row.producto__categoria__nombre || '-',
         sku: producto?.sku || '-',
         tipo: producto?.tipo || '-',
+        lotesActivos: row.lotes_activos || '-',
+        proximoVencimiento: row.proximo_vencimiento || '-',
+        seriesDisponibles: Number(row.series_disponibles || 0),
+        seriesMuestra: row.series_muestra || '-',
         stockTotal: Number(row.stock_total || 0),
         reservadoTotal: Number(row.reservado_total || 0),
         disponibleTotal: Number(row.disponible_total || 0),
@@ -236,19 +306,17 @@ function InventarioReportesPage() {
   const visibleRows = detalleRows
 
   const handleExportExcel = async () => {
-    const rows = visibleRows
+    const data = await fetchAnalyticsSnapshot({
+      ...filters,
+      only_with_stock: onlyWithStock,
+    })
+    const rows = Array.isArray(data?.detalle) ? data.detalle : []
     if (rows.length === 0) {
+      toast.error('No hay productos para exportar con los filtros seleccionados.')
       return
     }
 
-    const filtroProductoLabel = filters.producto_id
-      ? productoById.get(String(filters.producto_id))?.nombre || String(filters.producto_id)
-      : 'Todos'
-    const filtroBodegaLabel = filters.bodega_id
-      ? bodegaById.get(String(filters.bodega_id))?.nombre || String(filters.bodega_id)
-      : 'Todas'
-    const valorTotalGeneral = Number(analytics?.totales?.valor_total || 0)
-    const now = new Date()
+    const valorTotalGeneral = Number(data?.totales?.valor_total || 0)
 
     await downloadExcelFile({
       sheetName: 'ResumenInventario',
@@ -263,53 +331,61 @@ function InventarioReportesPage() {
               { header: 'Valor total', key: 'valor_total', width: 16 },
               { header: 'Costo promedio', key: 'costo_promedio', width: 16 },
               { header: '% valor inventario', key: 'participacion_valor_pct', width: 18 },
-              { header: 'Agrupacion', key: 'ctx_group_by', width: 14 },
-              { header: 'Filtro producto', key: 'ctx_producto', width: 24 },
-              { header: 'Filtro bodega', key: 'ctx_bodega', width: 24 },
-              { header: 'Solo con stock', key: 'ctx_only_with_stock', width: 16 },
-              { header: 'Exportado en', key: 'ctx_exportado_en', width: 22 },
             ]
           : [
               { header: 'Producto', key: 'grupo', width: 30 },
               { header: 'Categoria', key: 'categoria', width: 22 },
               { header: 'SKU', key: 'sku', width: 18 },
               { header: 'Tipo', key: 'tipo', width: 16 },
+              { header: 'Lotes activos', key: 'lotes_activos', width: 24 },
+              { header: 'Proximo vencimiento', key: 'proximo_vencimiento', width: 20 },
+              { header: 'Series disponibles', key: 'series_disponibles', width: 18 },
+              { header: 'Muestra series', key: 'series_muestra', width: 24 },
               { header: 'Stock total', key: 'stock_total', width: 14 },
               { header: 'Stock reservado', key: 'reservado_total', width: 16 },
               { header: 'Stock disponible', key: 'disponible_total', width: 16 },
               { header: 'Valor total', key: 'valor_total', width: 16 },
               { header: 'Costo promedio', key: 'costo_promedio', width: 16 },
               { header: '% valor inventario', key: 'participacion_valor_pct', width: 18 },
-              { header: 'Agrupacion', key: 'ctx_group_by', width: 14 },
-              { header: 'Filtro producto', key: 'ctx_producto', width: 24 },
-              { header: 'Filtro bodega', key: 'ctx_bodega', width: 24 },
-              { header: 'Solo con stock', key: 'ctx_only_with_stock', width: 16 },
-              { header: 'Exportado en', key: 'ctx_exportado_en', width: 22 },
             ],
-      rows: rows.map((row) => ({
-        grupo: row.groupLabel,
-        categoria: row.categoria,
-        sku: row.sku,
-        tipo: row.tipo,
-        stock_total: row.stockTotal,
-        reservado_total: row.reservadoTotal,
-        disponible_total: row.disponibleTotal,
-        valor_total: row.valorTotal,
-        costo_promedio: Number(row.stockTotal || 0) > 0 ? row.valorTotal / row.stockTotal : 0,
-        participacion_valor_pct:
-          valorTotalGeneral > 0 ? Number(((row.valorTotal / valorTotalGeneral) * 100).toFixed(2)) : 0,
-        ctx_group_by: filters.group_by,
-        ctx_producto: filtroProductoLabel,
-        ctx_bodega: filtroBodegaLabel,
-        ctx_only_with_stock: onlyWithStock ? 'Si' : 'No',
-        ctx_exportado_en: formatDateTimeChile(now),
-      })),
+      rows: rows.map((row) => {
+        const producto = productoById.get(String(row.producto_id || ''))
+        const stockTotal = Number(row.stock_total || 0)
+        const reservadoTotal = Number(row.reservado_total || 0)
+        const disponibleTotal = Number(row.disponible_total || 0)
+        const valorTotal = Number(row.valor_total || 0)
+        const grupo = filters.group_by === 'bodega'
+          ? row.bodega__nombre || '-'
+          : row.producto__nombre || producto?.nombre || '-'
+        return {
+          grupo,
+          categoria: row.producto__categoria__nombre || '-',
+          sku: producto?.sku || '-',
+          tipo: producto?.tipo || '-',
+          lotes_activos: row.lotes_activos || '-',
+          proximo_vencimiento: formatDateOnlyCell(row.proximo_vencimiento),
+          series_disponibles: Number(row.series_disponibles || 0),
+          series_muestra: row.series_muestra || '-',
+          stock_total: stockTotal,
+          reservado_total: reservadoTotal,
+          disponible_total: disponibleTotal,
+          valor_total: valorTotal,
+          costo_promedio: stockTotal > 0 ? valorTotal / stockTotal : 0,
+          participacion_valor_pct:
+            valorTotalGeneral > 0 ? Number(((valorTotal / valorTotalGeneral) * 100).toFixed(2)) : 0,
+        }
+      }),
     })
   }
 
   const handleExportPdf = async () => {
-    const rows = visibleRows
+    const data = await fetchAnalyticsSnapshot({
+      ...filters,
+      only_with_stock: onlyWithStock,
+    })
+    const rows = Array.isArray(data?.detalle) ? data.detalle : []
     if (rows.length === 0) {
+      toast.error('No hay productos para exportar con los filtros seleccionados.')
       return
     }
 
@@ -319,17 +395,25 @@ function InventarioReportesPage() {
       headers:
         filters.group_by === 'bodega'
           ? ['Bodega', 'Stock', 'Valor']
-          : ['Producto', 'Categoria', 'SKU', 'Tipo', 'Stock', 'Valor'],
+          : ['Producto', 'Categoria', 'SKU', 'Tipo', 'Lotes activos', 'Proximo vencimiento', 'Series disponibles', 'Muestra series', 'Stock', 'Valor'],
       rows:
         filters.group_by === 'bodega'
-          ? rows.map((row) => [row.groupLabel, formatNumber(row.stockTotal), formatCurrency(row.valorTotal)])
+          ? rows.map((row) => [
+              row.bodega__nombre || '-',
+              formatNumber(row.stock_total),
+              formatCurrency(row.valor_total),
+            ])
           : rows.map((row) => [
-              row.groupLabel,
-              row.categoria || '-',
-              row.sku || '-',
-              row.tipo || '-',
-              formatNumber(row.stockTotal),
-              formatCurrency(row.valorTotal),
+              row.producto__nombre || productoById.get(String(row.producto_id || ''))?.nombre || '-',
+              row.producto__categoria__nombre || '-',
+              productoById.get(String(row.producto_id || ''))?.sku || '-',
+              productoById.get(String(row.producto_id || ''))?.tipo || '-',
+              row.lotes_activos || '-',
+              formatDateOnlyCell(row.proximo_vencimiento),
+              formatNumber(row.series_disponibles || 0),
+              row.series_muestra || '-',
+              formatNumber(row.stock_total),
+              formatCurrency(row.valor_total),
             ]),
     })
   }
@@ -339,6 +423,71 @@ function InventarioReportesPage() {
   const criticos = analytics?.criticos || []
   const health = analytics?.health || {}
   const reconciliationSummary = analytics?.reconciliation || {}
+  const selectedLote = useMemo(
+    () => lotes.find((item) => String(item.id) === String(selectedLoteId)) || null,
+    [lotes, selectedLoteId],
+  )
+
+  const handleCorregirLote = async () => {
+    if (!selectedLoteId || !String(nuevoCodigoLote || '').trim() || !String(motivoLote || '').trim()) {
+      return
+    }
+    setLoteActionLoading(true)
+    try {
+      await inventarioApi.executeDetailAction(
+        inventarioApi.endpoints.lotes,
+        selectedLoteId,
+        'corregir_codigo',
+        {
+          payload: {
+            nuevo_codigo: String(nuevoCodigoLote || '').trim().toUpperCase(),
+            motivo: motivoLote.trim(),
+          },
+        },
+      )
+      toast.success('Lote corregido correctamente.')
+      await Promise.all([
+        loadAnalytics(filters, onlyWithStock),
+        loadReconciliation({ producto_id: filters.producto_id, bodega_id: filters.bodega_id }, reconciliationPage),
+        loteContext ? loadLotesForRow(loteContext) : Promise.resolve(),
+      ])
+      closeLoteDialog()
+    } catch (error) {
+      toast.error(normalizeApiError(error, { fallback: 'No se pudo corregir el lote.' }))
+    } finally {
+      setLoteActionLoading(false)
+    }
+  }
+
+  const handleAnularLote = async () => {
+    if (!selectedLoteId || !String(motivoLote || '').trim()) {
+      return
+    }
+    setLoteActionLoading(true)
+    try {
+      await inventarioApi.executeDetailAction(
+        inventarioApi.endpoints.lotes,
+        selectedLoteId,
+        'anular',
+        {
+          payload: {
+            motivo: motivoLote.trim(),
+          },
+        },
+      )
+      toast.success('Lote anulado correctamente.')
+      await Promise.all([
+        loadAnalytics(filters, onlyWithStock),
+        loadReconciliation({ producto_id: filters.producto_id, bodega_id: filters.bodega_id }, reconciliationPage),
+        loteContext ? loadLotesForRow(loteContext) : Promise.resolve(),
+      ])
+      closeLoteDialog()
+    } catch (error) {
+      toast.error(normalizeApiError(error, { fallback: 'No se pudo anular el lote.' }))
+    } finally {
+      setLoteActionLoading(false)
+    }
+  }
   const inventoryContext = formatInventoryContext({
     groupBy: filters.group_by,
     producto: filters.producto_id ? productoById.get(String(filters.producto_id))?.nombre : '',
@@ -415,7 +564,7 @@ function InventarioReportesPage() {
             variant="outline"
             onExportExcel={handleExportExcel}
             onExportPdf={handleExportPdf}
-            disabled={visibleRows.length === 0}
+            disabled={false}
           />
         </div>
       </form>
@@ -461,10 +610,17 @@ function InventarioReportesPage() {
           <div className="mt-2 space-y-1 text-sm">
             {topValorizados.length > 0 ? (
               topValorizados.map((row, index) => (
-                <p key={`${row.producto_id || row.bodega_id || index}-${index}`}>
-                  {row.producto__nombre || row.bodega__nombre || '-'}:{' '}
-                  <span className="font-medium">{formatCurrency(row.valor_total || 0)}</span>
-                </p>
+                <div key={`${row.producto_id || row.bodega_id || index}-${index}`}>
+                  <p>
+                    {row.producto__nombre || row.bodega__nombre || '-'}:{' '}
+                    <span className="font-medium">{formatCurrency(row.valor_total || 0)}</span>
+                  </p>
+                  {row.producto_id && (row.lotes_activos || row.proximo_vencimiento || row.series_disponibles) ? (
+                    <p className="text-xs text-muted-foreground">
+                      Lotes: {row.lotes_activos || '-'} | Vence: {formatDateOnlyCell(row.proximo_vencimiento)} | Series: {formatNumber(row.series_disponibles || 0)}
+                    </p>
+                  ) : null}
+                </div>
               ))
             ) : (
               <p className="text-muted-foreground">Sin datos valorizados para este filtro.</p>
@@ -477,9 +633,14 @@ function InventarioReportesPage() {
           <div className="mt-2 space-y-1 text-sm">
             {criticos.length > 0 ? (
               criticos.map((row) => (
-                <p key={row.producto_id}>
-                  {row.producto__nombre}: <span className="font-medium">{formatNumber(row.faltante || 0)}</span>
-                </p>
+                <div key={row.producto_id}>
+                  <p>
+                    {row.producto__nombre}: <span className="font-medium">{formatNumber(row.faltante || 0)}</span>
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Lotes: {row.lotes_activos || '-'} | Vence: {formatDateOnlyCell(row.proximo_vencimiento)} | Series: {formatNumber(row.series_disponibles || 0)}
+                  </p>
+                </div>
               ))
             ) : (
               <p className="text-muted-foreground">Sin productos criticos para este filtro.</p>
@@ -535,8 +696,20 @@ function InventarioReportesPage() {
               {filters.group_by === 'producto' ? (
                 <th className="px-3 py-2 text-left font-medium">Tipo</th>
               ) : null}
+              {filters.group_by === 'producto' ? (
+                <th className="px-3 py-2 text-left font-medium">Lotes activos</th>
+              ) : null}
+              {filters.group_by === 'producto' ? (
+                <th className="px-3 py-2 text-left font-medium">Proximo vencimiento</th>
+              ) : null}
+              {filters.group_by === 'producto' ? (
+                <th className="px-3 py-2 text-left font-medium">Series</th>
+              ) : null}
               <th className="px-3 py-2 text-left font-medium">Stock</th>
               <th className="px-3 py-2 text-left font-medium">Valor</th>
+              {filters.group_by === 'producto' && canEditInventario ? (
+                <th className="px-3 py-2 text-left font-medium">Acciones</th>
+              ) : null}
             </tr>
           </thead>
           <tbody>
@@ -547,13 +720,27 @@ function InventarioReportesPage() {
                   {filters.group_by === 'producto' ? <td className="px-3 py-2">{row.categoria || '-'}</td> : null}
                   {filters.group_by === 'producto' ? <td className="px-3 py-2">{row.sku || '-'}</td> : null}
                   {filters.group_by === 'producto' ? <td className="px-3 py-2">{row.tipo || '-'}</td> : null}
+                  {filters.group_by === 'producto' ? <td className="px-3 py-2">{row.lotesActivos || '-'}</td> : null}
+                  {filters.group_by === 'producto' ? <td className="px-3 py-2">{formatDateOnlyCell(row.proximoVencimiento)}</td> : null}
+                  {filters.group_by === 'producto' ? <td className="px-3 py-2">{row.seriesDisponibles > 0 ? `${formatNumber(row.seriesDisponibles)} | ${row.seriesMuestra || '-'}` : '-'}</td> : null}
                   <td className="px-3 py-2">{formatNumber(row.stockTotal)}</td>
                   <td className="px-3 py-2">{formatCurrency(row.valorTotal)}</td>
+                  {filters.group_by === 'producto' && canEditInventario ? (
+                    <td className="px-3 py-2">
+                      {row.producto_id && row.lotesActivos && row.lotesActivos !== '-' ? (
+                        <Button type="button" size="sm" variant="outline" onClick={() => void openLoteDialog(row)}>
+                          Corregir lotes
+                        </Button>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">Sin lotes activos</span>
+                      )}
+                    </td>
+                  ) : null}
                 </tr>
               ))
             ) : (
               <tr>
-                <td className="px-3 py-3 text-muted-foreground" colSpan={filters.group_by === 'producto' ? 6 : 3}>
+                <td className="px-3 py-3 text-muted-foreground" colSpan={filters.group_by === 'producto' ? (canEditInventario ? 10 : 9) : 3}>
                   Sin datos para mostrar.
                 </td>
               </tr>
@@ -669,6 +856,113 @@ function InventarioReportesPage() {
           </div>
         </div>
       </div>
+
+      {loteDialogOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-foreground/40 p-4">
+          <div className="w-full max-w-2xl rounded-xl border border-border bg-card p-4 shadow-xl">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h3 className="text-lg font-semibold">Corregir lotes</h3>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  {loteContext?.groupLabel || 'Producto'}{filters.bodega_id ? ` | ${bodegaById.get(String(filters.bodega_id))?.nombre || 'Bodega filtrada'}` : ''}
+                </p>
+              </div>
+              <Button type="button" variant="outline" size="sm" onClick={closeLoteDialog} disabled={loteActionLoading}>
+                Cerrar
+              </Button>
+            </div>
+
+            <div className="mt-4 space-y-4">
+              <label className="block text-sm">
+                Lote origen
+                <select
+                  value={selectedLoteId}
+                  onChange={(event) => setSelectedLoteId(event.target.value)}
+                  className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  disabled={lotesLoading || loteActionLoading}
+                >
+                  {lotes.map((lote) => (
+                    <option key={lote.id} value={lote.id}>
+                      {lote.lote_codigo} | Stock {formatNumber(lote.stock)} | Vence {formatDateOnlyCell(lote.fecha_vencimiento)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <div className="grid gap-3 md:grid-cols-3">
+                <div className="rounded-md border border-border bg-muted/20 p-3 text-sm">
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Stock</p>
+                  <p className="mt-1 font-medium">{formatNumber(selectedLote?.stock || 0)}</p>
+                </div>
+                <div className="rounded-md border border-border bg-muted/20 p-3 text-sm">
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Vencimiento</p>
+                  <p className="mt-1 font-medium">{formatDateOnlyCell(selectedLote?.fecha_vencimiento)}</p>
+                </div>
+                <div className="rounded-md border border-border bg-muted/20 p-3 text-sm">
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">Series disponibles</p>
+                  <p className="mt-1 font-medium">{formatNumber(selectedLote?.series_disponibles || 0)}</p>
+                </div>
+              </div>
+
+              <label className="block text-sm">
+                Nuevo codigo de lote
+                <input
+                  value={nuevoCodigoLote}
+                  onChange={(event) => setNuevoCodigoLote(event.target.value.toUpperCase())}
+                  placeholder="Ej. 001"
+                  className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  disabled={loteActionLoading}
+                />
+              </label>
+
+              <label className="block text-sm">
+                Motivo de la correccion
+                <textarea
+                  value={motivoLote}
+                  onChange={(event) => setMotivoLote(event.target.value)}
+                  rows={3}
+                  placeholder="Describe por que se corrige o anula este lote..."
+                  className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  disabled={loteActionLoading}
+                />
+              </label>
+
+              <div className="rounded-md border border-amber-300/60 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                La correccion actualiza la referencia operativa del lote y deja auditoria. La anulacion solo se permite si el lote ya no tiene stock ni series disponibles.
+              </div>
+
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handleAnularLote}
+                  disabled={
+                    loteActionLoading ||
+                    !selectedLoteId ||
+                    !String(motivoLote || '').trim() ||
+                    Number(selectedLote?.stock || 0) !== 0 ||
+                    Number(selectedLote?.series_disponibles || 0) > 0
+                  }
+                >
+                  {loteActionLoading ? 'Procesando...' : 'Anular lote vacio'}
+                </Button>
+                <Button
+                  type="button"
+                  onClick={handleCorregirLote}
+                  disabled={
+                    loteActionLoading ||
+                    !selectedLoteId ||
+                    !String(nuevoCodigoLote || '').trim() ||
+                    !String(motivoLote || '').trim()
+                  }
+                >
+                  {loteActionLoading ? 'Procesando...' : 'Corregir codigo'}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </section>
   )
 }
